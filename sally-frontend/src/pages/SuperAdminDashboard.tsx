@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import StatCard from '../components/StatCard'
+import { superAdminService, DashboardStats } from '../services/superAdminService'
 import {
   Users,
   Ticket,
@@ -12,26 +13,10 @@ import {
   Crown
 } from 'lucide-react'
 
-interface DashboardStats {
-  users: {
-    totaladmins: number
-    totalCustomers: number
-  }
-  tickets: {
-    open: number
-    awaitingReply: number
-    resolved: number
-  }
-  knowledgeBase: {
-    published: number
-    drafts: number
-  }
-}
-
 const SuperAdminDashboard: React.FC = () => {
   const { user } = useAuth()
   const [stats, setStats] = useState<DashboardStats>({
-    users: { totaladmins: 0, totalCustomers: 0 },
+    users: { totalAdmins: 0, totalCustomers: 0 },
     tickets: { open: 0, awaitingReply: 0, resolved: 0 },
     knowledgeBase: { published: 0, drafts: 0 }
   })
@@ -42,25 +27,13 @@ const SuperAdminDashboard: React.FC = () => {
     const fetchStats = async () => {
       try {
         setLoading(true)
-
-        // Note: API endpoints for stats don't exist yet
-        // Using mock data for now - will be replaced with real API calls later
-        console.log('SuperAdmin Dashboard: API endpoints not implemented yet, using mock data')
-
-        // Simulate API delay for better UX
-        await new Promise(resolve => setTimeout(resolve, 1000))
-
-        setStats({
-          users: { totaladmins: 5, totalCustomers: 152 },
-          tickets: { open: 12, awaitingReply: 4, resolved: 45 },
-          knowledgeBase: { published: 45, drafts: 8 }
-        })
-
+        const dashboardStats = await superAdminService.getDashboardStats()
+        setStats(dashboardStats)
       } catch (error) {
         console.error('Error fetching dashboard stats:', error)
-        // Fallback mock data
+        // Fallback data if API fails
         setStats({
-          users: { totaladmins: 0, totalCustomers: 0 },
+          users: { totalAdmins: 0, totalCustomers: 0 },
           tickets: { open: 0, awaitingReply: 0, resolved: 0 },
           knowledgeBase: { published: 0, drafts: 0 }
         })
@@ -78,7 +51,7 @@ const SuperAdminDashboard: React.FC = () => {
     {
       title: 'مدیریت کاربران',
       stats: [
-        { label: 'کل ادمین‌ها', value: stats.users.totaladmins },
+        { label: 'کل ادمین‌ها', value: stats.users.totalAdmins },
         { label: 'کل مشتریان', value: stats.users.totalCustomers }
       ],
       icon: Users,
