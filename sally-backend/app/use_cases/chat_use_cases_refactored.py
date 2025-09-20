@@ -53,7 +53,7 @@ class ChatUseCases:
             # For authenticated users, create conversation with appropriate user ID
             if user and user_type in ["Customer", "Admin"]:
                 conversation = Conversation(
-                    customer_id=user.id if user_type == "Customer" else None,
+                    customer_id=str(user.id) if user_type == "Customer" else None,
                     guest_session_id=None,
                     title=content[:50] + "..." if len(content) > 50 else content
                 )
@@ -88,7 +88,7 @@ class ChatUseCases:
         
         # Save user message
         user_message = Message(
-            conversation_id=conversation.id,
+            conversation_id=str(conversation.id),
             content=content,
             is_from_user=True
         )
@@ -119,7 +119,7 @@ class ChatUseCases:
             
             # Save AI response
             ai_message = Message(
-                conversation_id=conversation.id,
+                conversation_id=str(conversation.id),
                 content=ai_content,
                 is_from_user=False,
                 metadata={
@@ -137,7 +137,7 @@ class ChatUseCases:
             if confidence < 0.3:
                 unanswered = UnansweredQuestion(
                     question=content,
-                    customer_id=user.id if user and user_type == "Customer" else None,
+                    customer_id=str(user.id) if user and user_type == "Customer" else None,
                     guest_session_id=guest_session_id if not user else None,
                     context={"conversation_id": str(conversation.id), "confidence": confidence}
                 )
@@ -157,7 +157,7 @@ class ChatUseCases:
             fallback_content = "I apologize, but I'm having trouble processing your request right now. Please try again or contact our support team for assistance."
             
             ai_message = Message(
-                conversation_id=conversation.id,
+                conversation_id=str(conversation.id),
                 content=fallback_content,
                 is_from_user=False,
                 metadata={"error": str(e), "fallback": True}
@@ -205,7 +205,7 @@ class ChatUseCases:
         
         # Get messages for this conversation
         messages = await Message.find(
-            Message.conversation_id == conversation.id
+            Message.conversation_id == str(conversation.id)
         ).sort(Message.created_at).to_list()
         
         logger.info(f"Found {len(messages)} messages for conversation {conversation_id}")
@@ -230,7 +230,7 @@ class ChatUseCases:
     async def get_user_conversations(customer: Customer) -> List[Dict[str, Any]]:
         """Get customer's conversation list."""
         conversations = await Conversation.find(
-            Conversation.customer_id == customer.id
+            Conversation.customer_id == str(customer.id)
         ).sort(-Conversation.updated_at).to_list()
         
         return [

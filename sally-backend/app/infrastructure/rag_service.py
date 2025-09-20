@@ -1,8 +1,9 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 import openai
 from app.core.config import settings
 from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, User, UserRole
+from app.domain.entities_refactored import Customer, Admin
 
 
 class RAGService(ABC):
@@ -146,25 +147,12 @@ Please provide a clear, helpful response based on the context provided. If the c
                 max_tokens=500,
                 temperature=0.7
             )
-            print(f"DEBUG: API response received successfully")
+            print(f"DEBUG: Simple RAG OpenAI API call successful")
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"OpenAI API error with new API: {e}")
-            # Fallback to the old API format for compatibility
-            try:
-                response = openai.ChatCompletion.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=500,
-                    temperature=0.7
-                )
-                return response.choices[0].message.content.strip()
-            except Exception as e2:
-                print(f"OpenAI API error with old API: {e2}")
-                raise e2
+            print(f"OpenAI API error in simple RAG: {e}")
+            # Fallback response
+            raise Exception("OpenAI API unavailable")
     
     async def _generate_direct_openai_response(self, query: str, user_context: Dict[str, Any]) -> str:
         """Generate response using OpenAI API directly without RAG context."""
@@ -220,9 +208,20 @@ class AgenticRAGService(RAGService):
         # Get user-specific context if available
         user_info = ""
         if user_id:
-            user = await User.get(user_id)
-            if user:
-                user_info = f"Customer: {user.full_name} ({user.email})\nRole: {user.role.value}\n"
+            # Try to get user from Customer entity first
+            user = None
+
+            try:
+                user = await Customer.get(user_id)
+                if user:
+                    user_info = f"Customer: {user.full_name} ({user.email})\nRole: Customer\n"
+                else:
+                    user = await Admin.get(user_id)
+                    if user:
+                        user_info = f"Admin: {user.full_name} ({user.email})\nRole: Admin\n"
+            except Exception as e:
+                print(f"Error fetching user info: {e}")
+                user_info = "Customer information not available\n"
         
         if not relevant_docs:
             print("DEBUG: No relevant documents found, using OpenAI for direct response")
@@ -310,26 +309,43 @@ As an agentic assistant, you can:
 Provide a helpful, personalized response that goes beyond just answering the question - anticipate follow-up needs and offer proactive assistance."""
 
         model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
-        response = openai.ChatCompletion.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are Sally, an advanced AI customer support agent with agentic capabilities."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=800,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
+        try:
+            # Use the new OpenAI API (v1.0+)
+            response = openai.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are Sally, an advanced AI customer support agent with agentic capabilities."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=800,
+                temperature=0.7
+            )
+            print(f"DEBUG: Agentic OpenAI API call successful")
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"OpenAI API error in agentic response: {e}")
+            # Fallback to simple response
+            return f"متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم. اما می‌توانم به شما کمک کنم: {query}"
     
     async def _generate_direct_openai_response(self, query: str, user_context: Dict[str, Any]) -> str:
         """Generate response using OpenAI API directly without RAG context."""
         user_info = ""
         if user_context.get("user_id"):
             user_id = user_context.get("user_id")
-            user = await User.get(user_id)
-            if user:
-                user_info = f"You are {user.full_name} ({user.email}), a {user.role.value} customer.\n"
+            # Try to get user from Customer entity first
+            user = None
+
+            try:
+                user = await Customer.get(user_id)
+                if user:
+                    user_info = f"You are {user.full_name} ({user.email}), a Customer.\n"
+                else:
+                    user = await Admin.get(user_id)
+                    if user:
+                        user_info = f"You are {user.full_name} ({user.email}), an Admin.\n"
+            except Exception as e:
+                print(f"Error fetching user info: {e}")
+                user_info = "User information not available\n"
         
         prompt = f"""{user_info}You are Sally, a helpful customer support assistant. The user has asked: "{query}"
 
@@ -341,17 +357,23 @@ Please provide a helpful response to their question. Since I don't have specific
 Your response:"""
 
         model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
-        response = openai.ChatCompletion.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=500,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content.strip()
+        try:
+            # Use the new OpenAI API (v1.0+)
+            response = openai.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+            print(f"DEBUG: Direct OpenAI API call successful")
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"OpenAI API error in direct response: {e}")
+            # Fallback response
+            return "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید یا با تیم پشتیبانی تماس بگیرید."
     
     def _suggest_actions(self, query: str, relevant_docs: List[Dict[str, Any]]) -> List[str]:
         """Suggest relevant actions based on query and context."""
@@ -375,9 +397,10 @@ Your response:"""
 
 
 # Service factory
-def get_rag_service(user: Optional[User] = None) -> RAGService:
+def get_rag_service(user: Optional[Union['Customer', 'Admin', 'User']] = None) -> RAGService:
     """Get appropriate RAG service based on user type."""
-    if user and user.role in [UserRole.CUSTOMER, UserRole.Admin, UserRole.SuperAdmin]:
+    if user:
+        # Check if user is authenticated (has an id attribute)
         return AgenticRAGService()
     else:
         return SimpleRAGService()

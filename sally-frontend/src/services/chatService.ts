@@ -41,7 +41,7 @@ export const chatService = {
     }
     
     try {
-      const response = await api.post("/chat/message", requestData)
+      const response = await api.post("/api/message", requestData)
       return response.data
     } catch (error: any) {
       console.error("Chat request failed:", error)
@@ -51,22 +51,25 @@ export const chatService = {
   },
 
   async getConversations(): Promise<Conversation[]> {
-    const response = await api.get("/chat/conversations")
+    const response = await api.get("/api/conversations")
     return response.data.conversations
   },
 
   async updateConversationTitle(conversationId: string, title: string): Promise<void> {
-    await api.put(`/chat/conversations/${conversationId}/title`, { title })
+    await api.put(`/api/conversations/${conversationId}/title`, { title })
   },
 
   async getConversationMessages(conversationId: string, guestSessionId?: string): Promise<ChatMessage[]> {
-    const params = guestSessionId ? { guest_session_id: guestSessionId } : {}
-    const response = await api.get(`/chat/conversations/${conversationId}/messages`, { params })
+    const params: any = {}
+    if (guestSessionId) {
+      params.guest_session_id = guestSessionId
+    }
+    const response = await api.get(`/api/conversations/${conversationId}/messages`, { params })
     return response.data.messages
   },
 
   createWebSocketConnection(onMessage: (data: any) => void): WebSocket {
-    const ws = new WebSocket("ws://localhost:8000/chat/ws")
+    const ws = new WebSocket("ws://localhost:8000/api/ws")
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data)

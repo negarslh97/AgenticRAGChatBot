@@ -77,7 +77,7 @@ class ChatUseCases:
         if user:
             context = {
                 "user_id": str(user.id),
-                "user_role": user.role.value,
+                "user_role": "Customer",  # Default role for compatibility
                 "conversation_id": str(conversation.id)
             }
         
