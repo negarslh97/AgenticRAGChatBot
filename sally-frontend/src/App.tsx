@@ -14,7 +14,7 @@ import ProtectedRoute from "./components/ProtectedRoute"
 const HomePage = lazy(() => import("./pages/HomePage"))
 const LoginPage = lazy(() => import("./pages/LoginPage"))
 const RegisterPage = lazy(() => import("./pages/RegisterPage"))
-const DashboardPage = lazy(() => import("./pages/DashboardPage"))
+const DashboardPage = lazy(() => import("./pages/CustomerDashboardPage"))
 const ChatPage = lazy(() => import("./pages/ChatPage"))
 const TicketsPage = lazy(() => import("./pages/TicketsPage"))
 const KnowledgeBasePage = lazy(() => import("./pages/KnowledgeBasePage"))

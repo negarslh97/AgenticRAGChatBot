@@ -70,12 +70,12 @@ export const authService = {
 
   /**
    * ٤. تابع ثبت‌نام:
-   * - آدرس API به /api/auth/register اصلاح شد
+   * - آدرس API به /api/auth/register/customer اصلاح شد
    * - ارسال full_name به بک‌اند اضافه شد
    * - روش ارسال داده به JSON تغییر یافت (رایج‌تر برای FastAPI)
    */
   async register(email: string, password: string, fullName: string): Promise<User> {
-    const response = await api.post<User>("/api/auth/register", {
+    const response = await api.post<User>("/api/auth/register/customer", {
       email,
       password,
       full_name: fullName,

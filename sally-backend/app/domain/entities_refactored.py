@@ -77,7 +77,7 @@ class Admin(Document):
 class Customer(Document):
     """Customer user model."""
     email: Indexed(str, unique=True)
-    username: Optional[str] = None
+    username: Optional[str] = None  # Not indexed to avoid null duplicate issues
     hashed_password: str
     full_name: str
     is_active: bool = True

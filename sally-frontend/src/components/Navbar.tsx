@@ -3,8 +3,13 @@ import { Link } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { Button } from "./ui/button"
 import logo from "../assets/logo.png" // مسیر لوگو را به درستی تنظیم کنید
+import { Menu } from "lucide-react"
 
-const Navbar: React.FC = () => {
+interface NavbarProps {
+  onMobileMenuToggle?: () => void
+}
+
+const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
   const { user, logout, isAuthenticated, isAdmin } = useAuth()
 
   const handleLogout = () => {
@@ -13,11 +18,23 @@ const Navbar: React.FC = () => {
 
   return (
     // <nav className="bg-white border-b border-gray-200 px-4 py-3">
-    <nav className="bg-white px-4 py-3">
+    <nav className="fixed top-0 left-0 right-0 bg-white px-4 py-3 border-b border-gray-200 z-50">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
 
-        {/* Right side - Logo */}
+        {/* Left side - Logo and Mobile Menu */}
         <div className="flex items-center">
+          {/* Mobile Menu Button */}
+          {isAuthenticated && onMobileMenuToggle && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onMobileMenuToggle}
+              className="lg:hidden mr-3 p-2"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          )}
+
           <Link to={user ? "/dashboard" : "/"}>
             <img
                 src={logo}
@@ -49,8 +66,8 @@ const Navbar: React.FC = () => {
               >
                 خروج
               </Button>
-              <Link to="/profile">
-                <Button variant="ghost">پروفایل</Button>
+              <Link to="/dashboard">
+                <Button variant="ghost">داشبورد</Button>
               </Link>
             </>
           )}
