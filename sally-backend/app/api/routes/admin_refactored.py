@@ -73,6 +73,7 @@ class CustomerResponse(BaseModel):
     id: str
     email: EmailStr
     full_name: str
+    role: str  # اضافه کردن نقش برای نمایش در فرانت‌اند
     is_active: bool
 
 class CustomerUpdate(BaseModel):
@@ -94,8 +95,32 @@ class ArticleUpdate(BaseModel):
 # --- Endpoints مدیریت ادمین‌ها (فقط SuperAdmin) ---
 
 @router.get("/admins", response_model=List[adminUserResponse], dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_adminS))])
-async def get_all_admins():
-    admins = await admin.find_all().to_list()
+async def get_all_admins(
+    skip: int = 0,
+    limit: int = 10,
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    role_name: Optional[str] = None
+):
+    """Get all admins with pagination and filtering."""
+    query = {}
+
+    # Add search filter
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}}
+        ]
+
+    # Add active status filter
+    if is_active is not None:
+        query["is_active"] = is_active
+
+    # Add role filter
+    if role_name:
+        query["role_name"] = role_name
+
+    admins = await Admin.find(query).skip(skip).limit(limit).to_list()
     response = []
     for admin in admins:
         role = await admin.get_role()
@@ -107,6 +132,33 @@ async def get_all_admins():
             is_active=admin.is_active
         ))
     return response
+
+@router.get("/admins/count", dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_adminS))])
+async def get_admins_count(
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    role_name: Optional[str] = None
+):
+    """Get total count of admins with filtering."""
+    query = {}
+
+    # Add search filter
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}}
+        ]
+
+    # Add active status filter
+    if is_active is not None:
+        query["is_active"] = is_active
+
+    # Add role filter
+    if role_name:
+        query["role_name"] = role_name
+
+    count = await Admin.find(query).count()
+    return {"count": count}
 
 @router.post("/admins", response_model=adminUserResponse, status_code=status.HTTP_201_CREATED)
 async def create_admin_user(user_data: adminUserCreate, current_admin: Admin = Depends(get_current_admin_with_permission(Permission.CREATE_adminS))):
@@ -162,6 +214,133 @@ async def create_admin_user(user_data: adminUserCreate, current_admin: Admin = D
         is_active=new_admin.is_active,
         created_at=new_admin.created_at
     )
+
+# --- Endpoints مدیریت مشتریان ---
+
+@router.get("/customers", response_model=List[CustomerResponse], dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_CUSTOMERS))])
+async def get_all_customers(
+    skip: int = 0,
+    limit: int = 10,
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None
+):
+    """Get all customers with pagination and filtering."""
+    query = {}
+
+    # Add search filter
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}}
+        ]
+
+    # Add active status filter
+    if is_active is not None:
+        query["is_active"] = is_active
+
+    customers = await Customer.find(query).skip(skip).limit(limit).to_list()
+    response = []
+    for customer in customers:
+        # مشتریان معمولاً نقش ندارن، ولی برای نمایش در فرانت‌اند نقش پیش‌فرض می‌ذاریم
+        customer_role = getattr(customer, 'role', 'Customer') or 'Customer'
+        if not customer_role or customer_role == '':
+            customer_role = 'Customer'
+            
+        response.append(CustomerResponse(
+            id=str(customer.id),
+            email=customer.email,
+            full_name=customer.full_name,
+            role=customer_role,
+            is_active=customer.is_active
+        ))
+    return response
+
+@router.get("/customers/count", dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_CUSTOMERS))])
+async def get_customers_count(
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None
+):
+    """Get total count of customers with filtering."""
+    query = {}
+
+    # Add search filter
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}}
+        ]
+
+    # Add active status filter
+    if is_active is not None:
+        query["is_active"] = is_active
+
+    count = await Customer.find(query).count()
+    return {"count": count}
+
+@router.put("/customers/{customer_id}", response_model=CustomerResponse, dependencies=[Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))])
+async def update_customer(
+    customer_id: str,
+    customer_data: CustomerUpdate,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))
+):
+    """Update a customer."""
+    try:
+        customer = await Customer.get(ObjectId(customer_id))
+        if not customer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid customer ID")
+
+    update_data = customer_data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(customer, key, value)
+
+    customer.updated_at = datetime.utcnow()
+    await customer.save()
+
+    # Log activity
+    activity_log = ActivityLog(
+        admin_id=str(current_admin.id),
+        action="update_customer",
+        resource_type="Customer",
+        resource_id=str(customer.id),
+        details={"updated_fields": list(update_data.keys())}
+    )
+    await activity_log.insert()
+
+    return CustomerResponse(
+        id=str(customer.id),
+        email=customer.email,
+        full_name=customer.full_name,
+        is_active=customer.is_active
+    )
+
+@router.delete("/customers/{customer_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))])
+async def delete_customer(
+    customer_id: str,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))
+):
+    """Delete a customer."""
+    try:
+        customer = await Customer.get(ObjectId(customer_id))
+        if not customer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid customer ID")
+
+    await customer.delete()
+
+    # Log activity
+    activity_log = ActivityLog(
+        admin_id=str(current_admin.id),
+        action="delete_customer",
+        resource_type="Customer",
+        resource_id=customer_id,
+        details={"deleted_customer_email": customer.email}
+    )
+    await activity_log.insert()
+
+    return
 
 # --- Endpoints مدیریت مقالات دانش‌بنیان (تفکیک شده بر اساس دسترسی) ---
 
@@ -236,3 +415,73 @@ async def delete_article(article_id: str, current_admin: Admin = Depends(get_cur
 
     await article.delete()
     return
+
+
+# --- Endpoints مدیریت نقش‌ها (Roles) ---
+@router.get("/roles", response_model=List[RoleResponse], dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_adminS))])
+async def get_all_roles(
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_adminS))
+):
+    """Get all roles from database."""
+    roles = await Role.find_all().to_list()
+    response = []
+    for role in roles:
+        permissions = [PermissionDetailResponse(**perm.dict()) for perm in role.permissions]
+        response.append(RoleResponse(
+            id=str(role.id),
+            name=role.name,
+            description=role.description,
+            permissions=permissions,
+            is_active=role.is_active
+        ))
+    return response
+
+
+@router.get("/superadmin/stats", summary="Get dashboard statistics (SuperAdmin only)")
+async def get_superadmin_stats(current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_adminS))):
+    """
+    دریافت آمار داشبورد برای ادمین ارشد
+    """
+    try:
+        # Count total admins
+        total_admins = await Admin.find_all().count()
+
+        # Count total customers
+        total_customers = await Customer.find_all().count()
+
+        # Count tickets by status
+        from app.domain.entities_refactored import Ticket, TicketStatus
+        open_tickets = await Ticket.find(Ticket.status == TicketStatus.OPEN).count()
+        in_progress_tickets = await Ticket.find(Ticket.status == TicketStatus.IN_PROGRESS).count()
+        resolved_tickets = await Ticket.find(Ticket.status == TicketStatus.RESOLVED).count()
+
+        # Count knowledge base articles by status
+        from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus
+        published_articles = await KnowledgeBaseArticle.find(KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED).count()
+        draft_articles = await KnowledgeBaseArticle.find(KnowledgeBaseArticle.status == ArticleStatus.DRAFT).count()
+
+        # Count total activity logs
+        from app.domain.entities_refactored import ActivityLog
+        total_logs = await ActivityLog.find_all().count()
+
+        return {
+            "users": {
+                "totalAdmins": total_admins,
+                "totalCustomers": total_customers
+            },
+            "tickets": {
+                "open": open_tickets,
+                "awaitingReply": in_progress_tickets,  # Map IN_PROGRESS to awaitingReply
+                "resolved": resolved_tickets
+            },
+            "knowledgeBase": {
+                "published": published_articles,
+                "drafts": draft_articles
+            },
+            "activityLogs": {
+                "total": total_logs
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error fetching stats: {str(e)}")

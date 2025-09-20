@@ -377,7 +377,7 @@ Your response:"""
 # Service factory
 def get_rag_service(user: Optional[User] = None) -> RAGService:
     """Get appropriate RAG service based on user type."""
-    if user and user.role in [UserRole.CUSTOMER, UserRole.admin, UserRole.SuperAdmin]:
+    if user and user.role in [UserRole.CUSTOMER, UserRole.Admin, UserRole.SuperAdmin]:
         return AgenticRAGService()
     else:
         return SimpleRAGService()

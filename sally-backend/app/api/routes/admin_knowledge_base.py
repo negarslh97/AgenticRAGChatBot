@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile,
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
+from pathlib import Path
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, User, UserRole, ArticleVisibility
-from app.api.dependencies import get_current_admin, get_current_SuperAdmin
+from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus, Admin, ArticleVisibility, AdminRole
+from app.api.dependencies import get_current_admin
+from app.core.permissions import get_current_admin_with_permission, Permission
 
 router = APIRouter()
 
@@ -48,7 +50,7 @@ class ArticlePublishRequest(BaseModel):
 @router.post("/", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
 async def create_article(
     article_data: ArticleCreate,
-    current_user: User = Depends(get_current_admin)
+    current_user: Admin = Depends(get_current_admin)
 ):
     """
     Create a new knowledge base article as a draft.
@@ -65,12 +67,13 @@ async def create_article(
         visibility=None  # Visibility set only when published
     )
     await new_article.insert()
+    new_article.id = str(new_article.id)
     return new_article
 
 @router.post("/upload", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
 async def upload_kb_file(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_SuperAdmin)
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
 ):
     """
     Upload a file to create a new knowledge base article as a draft.
@@ -94,13 +97,14 @@ async def upload_kb_file(
         visibility=None
     )
     await new_article.insert()
+    new_article.id = str(new_article.id)
     return new_article
 
 @router.post("/{article_id}/publish", response_model=ArticleResponse)
 async def publish_article(
     article_id: str,
     publish_request: ArticlePublishRequest,
-    current_user: User = Depends(get_current_SuperAdmin)
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.PUBLISH_ARTICLES))
 ):
     """
     Publish a draft article with specified visibility.
@@ -122,12 +126,13 @@ async def publish_article(
     article.published_by = str(current_user.id)
     
     await article.save()
+    article.id = str(article.id)
     return article
 
 @router.get("/", response_model=List[ArticleResponse])
 async def list_articles(
     status_filter: Optional[ArticleStatus] = None,
-    current_user: User = Depends(get_current_admin)
+    current_user: Admin = Depends(get_current_admin)
 ):
     """
     List all knowledge base articles. admins can see all articles.
@@ -138,12 +143,15 @@ async def list_articles(
         query["status"] = status_filter
     
     articles = await KnowledgeBaseArticle.find(query).sort(-KnowledgeBaseArticle.updated_at).to_list()
+    # Convert ObjectId to string for response
+    for article in articles:
+        article.id = str(article.id)
     return articles
 
 @router.get("/{article_id}", response_model=ArticleResponse)
 async def get_article(
     article_id: str,
-    current_user: User = Depends(get_current_admin)
+    current_user: Admin = Depends(get_current_admin)
 ):
     """
     Get a single article by its ID.
@@ -151,13 +159,14 @@ async def get_article(
     article = await KnowledgeBaseArticle.get(article_id)
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    article.id = str(article.id)
     return article
 
 @router.put("/{article_id}", response_model=ArticleResponse)
 async def update_article(
     article_id: str,
     article_data: ArticleUpdate,
-    current_user: User = Depends(get_current_admin)
+    current_user: Admin = Depends(get_current_admin)
 ):
     """
     Update an article.
@@ -168,7 +177,7 @@ async def update_article(
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
-    if current_user.role != UserRole.SuperAdmin:
+    if current_user.role_name != "SuperAdmin":
         if article.author_id != str(current_user.id) or article.status != ArticleStatus.DRAFT:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -189,7 +198,7 @@ async def update_article(
 @router.delete("/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_article(
     article_id: str,
-    current_user: User = Depends(get_current_SuperAdmin)
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.DELETE_ARTICLES))
 ):
     """
     Delete an article.

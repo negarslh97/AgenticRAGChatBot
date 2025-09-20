@@ -1,7 +1,7 @@
 'use client'
 
-import React from 'react'
-import { NavLink } from 'react-router-dom'
+import React, { useState } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { Button } from '../ui/button'
 import { Avatar, AvatarFallback } from '../ui/avatar'
@@ -13,11 +13,27 @@ import {
   Activity,
   Settings,
   LogOut,
-  Crown
+  Crown,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react'
 
 const Sidebar: React.FC = () => {
   const { user, logout } = useAuth()
+  const location = useLocation()
+  const [expandedMenus, setExpandedMenus] = useState<string[]>([])
+
+  const toggleMenu = (menuName: string) => {
+    setExpandedMenus(prev =>
+      prev.includes(menuName)
+        ? prev.filter(name => name !== menuName)
+        : [...prev, menuName]
+    )
+  }
+
+  const isMenuExpanded = (menuName: string) => expandedMenus.includes(menuName)
+
+  const isSubItemActive = (href: string) => location.pathname === href
 
   const navigationItems = [
     {
@@ -27,8 +43,17 @@ const Sidebar: React.FC = () => {
     },
     {
       name: 'مدیریت کاربران',
-      href: '/super-admin/users',
-      icon: Users
+      icon: Users,
+      submenu: [
+        {
+          name: 'مدیریت ادمین‌ها',
+          href: '/super-admin/admin/users'
+        },
+        {
+          name: 'مدیریت مشتریان',
+          href: '/super-admin/customer/users'
+        }
+      ]
     },
     {
       name: 'مدیریت تیکت‌ها',
@@ -67,10 +92,59 @@ const Sidebar: React.FC = () => {
       <nav className="flex-1 px-4 py-8 space-y-2 overflow-y-auto">
         {navigationItems.map((item) => {
           const Icon = item.icon
+          const hasSubmenu = item.submenu && item.submenu.length > 0
+          const isExpanded = isMenuExpanded(item.name)
+          const isActive = item.href ? location.pathname === item.href : false
+          const hasActiveSubItem = hasSubmenu && item.submenu?.some(sub => isSubItemActive(sub.href))
+
+          if (hasSubmenu) {
+            return (
+              <div key={item.name}>
+                <button
+                  onClick={() => toggleMenu(item.name)}
+                  className={`flex items-center justify-between w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
+                    isActive || hasActiveSubItem
+                      ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <Icon className="ml-3 h-5 w-5" />
+                    {item.name}
+                  </div>
+                  {isExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="mr-4 mt-1 space-y-1">
+                    {item.submenu?.map((subItem) => (
+                      <NavLink
+                        key={subItem.name}
+                        to={subItem.href}
+                        className={({ isActive }) =>
+                          `flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors mr-2 ${
+                            isActive
+                              ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                          }`
+                        }
+                      >
+                        {subItem.name}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
           return (
             <NavLink
               key={item.name}
-              to={item.href}
+              to={item.href!}
               className={({ isActive }) =>
                 `flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
                   isActive

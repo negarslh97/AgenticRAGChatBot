@@ -57,11 +57,13 @@
 
 # مسیر: sally-backend/main.py
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from app.core.config import settings
 from app.infrastructure.database_refactored import init_db
 import logging
+import os
 
 # فایل‌های جدیدی که باید بسازید یا جایگزین کنید
 from app.api.routes.auth_refactored import router as auth_router
@@ -70,6 +72,7 @@ from app.api.routes.tickets_refactored import router as tickets_router
 from app.api.routes.admin_refactored import router as admin_router
 # روترهای موجود که نیازی به تغییر بزرگ ندارند
 from app.api.routes.knowledge_base import router as kb_router
+from app.api.routes.admin_knowledge_base import router as admin_kb_router
 from app.api.routes.upload import router as upload_router
 
 # تنظیمات لاگ‌گیری برای نمایش بهتر اطلاعات
@@ -93,18 +96,52 @@ app.include_router(chat_router, prefix="/api", tags=["Chat"])
 app.include_router(tickets_router, prefix="/api", tags=["Tickets"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(kb_router, prefix="/api/kb", tags=["Knowledge Base"])
+app.include_router(admin_kb_router, prefix="/admin/knowledge-base", tags=["Admin Knowledge Base"])
 app.include_router(upload_router, prefix="/api", tags=["Upload"])
+
+# Alias for /api/users/me to /api/auth/me
+@app.get("/api/users/me")
+async def get_current_user_alias(request: Request):
+    from app.api.routes.auth_refactored import _get_current_user_info
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = auth_header.split(" ")[1]
+    return await _get_current_user_info(token)
+
+# Serve frontend for SPA routes (development only)
+@app.get("/{path:path}")
+async def serve_spa(path: str):
+    # Skip API routes
+    if path.startswith("api/") or path.startswith("docs") or path.startswith("redoc") or path.startswith("openapi"):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # Serve index.html for all other routes
+    index_path = "sally-frontend/build/index.html"
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    else:
+        return {"message": "Frontend not built. Run 'npm run build' in sally-frontend directory."}
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database and create default roles/admin on startup."""
     logger.info("Starting up the application...")
     await init_db()
-    
-    # این تابع نقش‌ها را با حروف بزرگ (SuperAdmin, admin, ...) می‌سازد
+
+    # Log existing roles in database for debugging
+    from app.domain.entities_refactored import Role
+    existing_roles = await Role.find_all().to_list()
+    logger.info(f"DEBUG: Existing roles in database before create_default_roles: {[role.name for role in existing_roles]}")
+
+    # این تابع نقش‌ها را با حروف بزرگ (SuperAdmin, Admin, ...) می‌سازد
     from app.core.permissions import create_default_roles
     await create_default_roles()
-    
+
+    # Log roles after creation
+    roles_after = await Role.find_all().to_list()
+    logger.info(f"DEBUG: Roles in database after create_default_roles: {[role.name for role in roles_after]}")
+
     # ساخت ادمین پیش‌فرض در صورتی که هیچ ادمینی وجود نداشته باشد
     from app.domain.entities_refactored import Admin, Role
     from app.core.security import get_password_hash
@@ -112,12 +149,12 @@ async def startup_event():
     admin_count = await Admin.find_all().count()
     if admin_count == 0:
         logger.info("No admins found. Creating default super admin...")
-        
+
         # --- اصلاح اصلی و کلیدی اینجاست ---
         # حالا به دنبال نقشی با نام "SuperAdmin" (با حرف بزرگ) می‌گردیم
         SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
         # --- پایان اصلاح ---
-        
+
         if not SuperAdmin_role:
             # این پیام خطا حالا بسیار مهم است، چون نشان می‌دهد حتی نقش با حروف بزرگ هم ساخته نشده
             logger.error("SuperAdmin role not found! Cannot create default admin. Check DEFAULT_ROLES in permissions.py")

@@ -4,7 +4,7 @@ import type React from "react"
 import type { ReactNode } from "react"
 import { Navigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
-import { User } from "../types/user"
+import { useState, useEffect } from "react"
 
 interface ProtectedRouteProps {
   children: ReactNode
@@ -13,8 +13,34 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
   const { user, loading } = useAuth()
+  const [isReady, setIsReady] = useState(false)
+  
+  console.log("ProtectedRoute render:", {
+    loading,
+    user: user?.email,
+    userRole: user?.role,
+    requiredRole,
+    hasToken: !!localStorage.getItem('token'),
+    isReady
+  });
 
-  if (loading) {
+  // تأخیر کوچیک برای مطمئن شدن از اینکه همه چیز آماده شده
+  useEffect(() => {
+    if (!loading && user) {
+      console.log("✅ ProtectedRoute: Auth complete, waiting 100ms before rendering...");
+      const timer = setTimeout(() => {
+        console.log("✅ ProtectedRoute: Ready to render!");
+        setIsReady(true)
+      }, 100)
+      return () => clearTimeout(timer)
+    } else if (!loading && !user) {
+      console.log("❌ ProtectedRoute: Auth complete but no user");
+      setIsReady(false)
+    }
+  }, [loading, user])
+
+  if (loading || !isReady) {
+    console.log("⏳ ProtectedRoute: Waiting for auth or ready state...");
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
@@ -23,7 +49,20 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
   }
 
   if (!user) {
+    console.log("❌ ProtectedRoute: No user, redirecting to login");
     return <Navigate to="/login" replace />
+  }
+
+  // اگر توکن وجود داره ولی یوزر نال هست، یعنی هنوز احراز هویت کامل نشده
+  // در این حالت باید صبر کنیم تا احراز هویت کامل بشه
+  const token = localStorage.getItem("token")
+  if (token && !user) {
+    console.log("⏳ ProtectedRoute: Token exists but user is null, waiting...");
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
   }
 
   if (requiredRole) {

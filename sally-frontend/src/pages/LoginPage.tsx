@@ -31,7 +31,7 @@ const LoginPage: React.FC = () => {
       toast.success("ورود با موفقیت انجام شد")
 
       // تعیین داشبورد بر اساس نقش کاربر
-      const userRole = response.user.role
+      const userRole = response.user.role || "user"
       const dashboardPath = getDashboardByRole(userRole)
 
       navigate(dashboardPath)

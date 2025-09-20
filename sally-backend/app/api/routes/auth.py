@@ -149,7 +149,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     
     # Log login activity
-    if user.role in [UserRole.admin, UserRole.SuperAdmin]:
+    if user.role in [UserRole.Admin, UserRole.SuperAdmin]:
         activity_log = ActivityLog(
             user_id=str(user.id),
             action="login",
@@ -187,7 +187,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 async def logout(current_user: User = Depends(get_current_user)):
     """Logout user (client should remove token)."""
     # Log logout activity for admin users
-    if current_user.role in [UserRole.admin, UserRole.SuperAdmin]:
+    if current_user.role in [UserRole.Admin, UserRole.SuperAdmin]:
         activity_log = ActivityLog(
             user_id=str(current_user.id),
             action="logout",

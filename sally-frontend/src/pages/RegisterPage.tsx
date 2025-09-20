@@ -78,7 +78,7 @@ const RegisterPage: React.FC = () => {
       toast.success("ثبت‌نام با موفقیت انجام شد")
 
       // تعیین داشبورد بر اساس نقش کاربر
-      const userRole = response.user.role
+      const userRole = response.user.role || "user"
       const dashboardPath = getDashboardByRole(userRole)
 
       navigate(dashboardPath)

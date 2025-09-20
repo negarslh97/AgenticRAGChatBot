@@ -98,7 +98,7 @@ async def get_ticket(
         raise HTTPException(status_code=404, detail="Ticket not found")
     
     # Check if user owns the ticket or is admin
-    if ticket.customer_id != str(current_user.id) and current_user.role.value not in ["admin", "SuperAdmin"]:
+    if ticket.customer_id != str(current_user.id) and current_user.role.value not in ["Admin", "SuperAdmin"]:
         raise HTTPException(status_code=403, detail="Access denied")
     
     return TicketResponse(
@@ -125,7 +125,7 @@ async def add_ticket_reply(
         raise HTTPException(status_code=404, detail="Ticket not found")
     
     # Check access permissions
-    if ticket.customer_id != str(current_user.id) and current_user.role.value not in ["admin", "SuperAdmin"]:
+    if ticket.customer_id != str(current_user.id) and current_user.role.value not in ["Admin", "SuperAdmin"]:
         raise HTTPException(status_code=403, detail="Access denied")
     
     reply = TicketReply(
@@ -162,7 +162,7 @@ async def get_ticket_replies(
         raise HTTPException(status_code=404, detail="Ticket not found")
     
     # Check access permissions
-    if ticket.customer_id != str(current_user.id) and current_user.role.value not in ["admin", "SuperAdmin"]:
+    if ticket.customer_id != str(current_user.id) and current_user.role.value not in ["Admin", "SuperAdmin"]:
         raise HTTPException(status_code=403, detail="Access denied")
     
     replies = await TicketReply.find(
@@ -170,7 +170,7 @@ async def get_ticket_replies(
     ).sort(TicketReply.created_at).to_list()
     
     # Filter internal replies for customers
-    if current_user.role.value not in ["admin", "SuperAdmin"]:
+    if current_user.role.value not in ["Admin", "SuperAdmin"]:
         replies = [reply for reply in replies if not reply.is_internal]
     
     return [

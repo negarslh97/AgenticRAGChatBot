@@ -8,7 +8,7 @@ from enum import Enum
 class UserRole(str, Enum):
     GUEST = "guest"
     CUSTOMER = "customer"
-    admin = "admin"
+    Admin = "Admin"
     SuperAdmin = "SuperAdmin"
 
 

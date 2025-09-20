@@ -11,6 +11,24 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+
+  /* RTL Support */
+  [dir="rtl"] {
+    /* text-align: right; */
+  }
+
+  [dir="rtl"] .flex {
+    /* flex-direction: row-reverse; */
+  }
+
+  [dir="rtl"] .justify-between {
+    /* flex-direction: row-reverse; */
+  }
+
+  [dir="rtl"] .space-x-4 > * + * {
+    margin-left: 0;
+    margin-right: 1rem;
+  }
 }
 
 @layer components {

@@ -2,10 +2,11 @@
 
 import { useState, useRef } from "react"
 import { toast } from "react-hot-toast"
-import { upload } from "@vercel/blob/client"
+import api from "../services/authService"
+import { useAuth } from "../context/AuthContext"
 
 interface FileUploadProps {
-  onUploadSuccess?: (file: File) => void
+  onUploadSuccess?: (data: any) => void
   onClose?: () => void
   disabled?: boolean
 }
@@ -15,6 +16,7 @@ const AdminFileUpload: React.FC<FileUploadProps> = ({
   onClose,
   disabled = false
 }) => {
+  const { user, loading: authLoading, isAuthenticated } = useAuth()
   const [isUploading, setIsUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -61,11 +63,25 @@ const AdminFileUpload: React.FC<FileUploadProps> = ({
   }
 
   const handleFile = async (file: File) => {
+    console.log("AdminFileUpload: handleFile called", {
+      authLoading,
+      isAuthenticated,
+      user: user?.email,
+      hasToken: !!localStorage.getItem('token')
+    });
+    
+    // بررسی اینکه احراز هویت کامل شده یا نه
+    if (authLoading || !isAuthenticated || !user) {
+      console.log("❌ AdminFileUpload: Auth not ready, preventing upload");
+      toast.error("لطفاً صبر کنید تا سیستم کاملاً بارگذاری شود")
+      return
+    }
+
     // Check file type
     const fileTypeInfo = supportedTypes.find(ft =>
       file.type === ft.type || file.name.toLowerCase().endsWith(`.${ft.ext.toLowerCase()}`)
     )
-    
+
     if (!fileTypeInfo) {
       toast.error(`فایل پشتیبانی نشده! فقط فایل‌های PDF, Excel, CSV, Word, TXT مجاز هستند`)
       return
@@ -78,20 +94,55 @@ const AdminFileUpload: React.FC<FileUploadProps> = ({
     }
 
     setIsUploading(true)
-    
+
     try {
-      // Call success callback with file object
-      if (onUploadSuccess) {
-        onUploadSuccess(file)
+      // بررسی نهایی توکن قبل از ارسال درخواست
+      const token = localStorage.getItem('token')
+      if (!token) {
+        console.log("❌ AdminFileUpload: No token found before upload");
+        throw new Error('احراز هویت انجام نشده است')
       }
       
+      console.log("✅ AdminFileUpload: All checks passed, starting upload...");
+      
+      // Create FormData for file upload
+      const formData = new FormData()
+      formData.append("file", file)
+
+      // Upload to backend
+      console.log("AdminFileUpload: Sending request to /admin/kb/upload");
+      const response = await api.post("/admin/kb/upload", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      })
+      
+      console.log("✅ AdminFileUpload: Upload successful", response.data);
+
+      toast.success("فایل با موفقیت آپلود شد!")
+
+      // Call success callback with response data
+      if (onUploadSuccess) {
+        onUploadSuccess(response.data)
+      }
+
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
     } catch (error: any) {
-      console.error("File upload error:", error)
-      toast.error(error.message || "خطا در آپلود فایل")
+      console.error("❌ AdminFileUpload: Upload error:", error)
+      
+      // بررسی نوع خطا برای پیام مناسب
+      if (error.response?.status === 401) {
+        toast.error("خطای احراز هویت - لطفاً دوباره وارد شوید")
+      } else if (error.response?.status === 403) {
+        toast.error("دسترسی غیرمجاز - شما اجازه آپلود فایل را ندارید")
+      } else if (error.message === 'احراز هویت انجام نشده است') {
+        toast.error(error.message)
+      } else {
+        toast.error(error.response?.data?.detail || error.message || "خطا در آپلود فایل")
+      }
     } finally {
       setIsUploading(false)
     }
@@ -99,6 +150,15 @@ const AdminFileUpload: React.FC<FileUploadProps> = ({
 
   const openFileDialog = () => {
     if (disabled) return
+    
+    // بررسی اینکه احراز هویت کامل شده یا نه
+    if (authLoading || !isAuthenticated || !user) {
+      console.log("❌ AdminFileUpload: Auth not ready, preventing file dialog");
+      toast.error("لطفاً صبر کنید تا سیستم کاملاً بارگذاری شود")
+      return
+    }
+    
+    console.log("✅ AdminFileUpload: Opening file dialog");
     fileInputRef.current?.click()
   }
 
@@ -149,14 +209,15 @@ const AdminFileUpload: React.FC<FileUploadProps> = ({
             
             <button
               type="button"
-              disabled={disabled}
+              disabled={disabled || authLoading || !isAuthenticated || !user}
               className={`px-4 py-2 rounded-md text-sm font-medium ${
-                disabled
+                disabled || authLoading || !isAuthenticated || !user
                   ? "bg-secondary text-muted-foreground cursor-not-allowed"
                   : "btn-primary"
               }`}
+              title={authLoading || !isAuthenticated || !user ? "لطفاً صبر کنید تا سیستم بارگذاری شود" : "انتخاب فایل"}
             >
-              انتخاب فایل
+              {authLoading ? "در حال بارگذاری..." : !isAuthenticated || !user ? "در حال ورود..." : "انتخاب فایل"}
             </button>
           </div>
         )}

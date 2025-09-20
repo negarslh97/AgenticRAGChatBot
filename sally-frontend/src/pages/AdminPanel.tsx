@@ -5,7 +5,19 @@ import { useAuth } from "../context/AuthContext"
 import AdminArticleForm from "../components/AdminArticleForm"
 import AdminFileUpload from "../components/AdminFileUpload"
 import { toast } from "react-hot-toast"
-import { adminService, Article } from "../services/adminService"
+
+interface Article {
+  id: string
+  title: string
+  summary?: string
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED"
+  visibility?: "public" | "customer" | "internal" | null
+  author_id: string
+  version: number
+  created_at: string
+  updated_at: string
+  published_at?: string
+}
 
 const AdminPanel: React.FC = () => {
   const { user } = useAuth()
@@ -29,7 +41,17 @@ const AdminPanel: React.FC = () => {
   const fetchArticles = async () => {
     setLoading(true)
     try {
-      const data = await adminService.getAllArticles()
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles`, {
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error("خطا در دریافت مقالات")
+      }
+
+      const data = await response.json()
       setArticles(data)
     } catch (error: any) {
       toast.error(error.message || "خطا در دریافت مقالات")
@@ -40,7 +62,22 @@ const AdminPanel: React.FC = () => {
 
   const publishArticle = async (articleId: string, visibility: "public" | "customer" | "internal") => {
     try {
-      await adminService.publishArticle(articleId, { visibility })
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}/publish`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        },
+        body: JSON.stringify({
+          visibility
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error("خطا در انتشار مقاله")
+      }
+
+      await response.json()
       toast.success("مقاله با موفقیت منتشر شد")
       fetchArticles()
       setPublishModalOpen(false)
@@ -51,7 +88,22 @@ const AdminPanel: React.FC = () => {
 
   const updateArticleStatus = async (articleId: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED") => {
     try {
-      await adminService.updateArticleStatus(articleId, { status })
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}/status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        },
+        body: JSON.stringify({
+          status
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error("خطا در تغییر وضعیت مقاله")
+      }
+
+      await response.json()
       toast.success("وضعیت مقاله با موفقیت تغییر کرد")
       fetchArticles()
     } catch (error: any) {
@@ -65,7 +117,17 @@ const AdminPanel: React.FC = () => {
     }
 
     try {
-      await adminService.deleteArticle(articleId)
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error("خطا در حذف مقاله")
+      }
+
       toast.success("مقاله با موفقیت حذف شد")
       fetchArticles()
     } catch (error: any) {
@@ -75,7 +137,22 @@ const AdminPanel: React.FC = () => {
 
   const handleUploadFile = async (file: File) => {
     try {
-      const data = await adminService.uploadFile(file)
+      const formData = new FormData()
+      formData.append("file", file)
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/upload`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        },
+        body: formData
+      })
+
+      if (!response.ok) {
+        throw new Error("خطا در آپلود فایل")
+      }
+
+      const data = await response.json()
       toast.success(`فایل ${file.name} با موفقیت آپلود شد و مقاله پیش‌نویس ایجاد شد!`)
       setShowUploadForm(false)
       fetchArticles()
@@ -102,7 +179,12 @@ const AdminPanel: React.FC = () => {
     : articles
 
   const getVisibilityLabel = (visibility: string | null | undefined) => {
-    return adminService.getVisibilityText(visibility)
+    switch (visibility) {
+      case "public": return "عمومی"
+      case "customer": return "مشتریان"
+      case "internal": return "داخلی"
+      default: return "تعیین نشده"
+    }
   }
 
   return (
@@ -252,7 +334,8 @@ const AdminPanel: React.FC = () => {
                                 ? "bg-yellow-100 text-yellow-800"
                                 : "bg-gray-100 text-gray-800"
                             }`}>
-                              {adminService.getArticleStatusText(article.status)}
+                              {article.status === "PUBLISHED" ? "منتشر شده" :
+                               article.status === "DRAFT" ? "پیش‌نویس" : "بایگانی شده"}
                             </span>
                             
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${

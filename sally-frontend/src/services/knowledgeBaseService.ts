@@ -7,10 +7,13 @@ export interface Article {
   summary?: string
   category_id?: string
   tags: string[]
-  status: "draft" | "published" | "archived"
-  is_public: boolean
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED"
+  visibility?: "public" | "customer" | "internal" | null
+  author_id: string
+  version: number
   created_at: string
   updated_at: string
+  published_at?: string
 }
 
 export interface Category {
@@ -33,7 +36,6 @@ export interface CreateArticleData {
   summary?: string
   category_id?: string
   tags: string[]
-  is_public: boolean
 }
 
 export interface UpdateArticleData {
@@ -73,27 +75,42 @@ export const knowledgeBaseService = {
 
   // admin API
   async getAllArticles(): Promise<Article[]> {
-    const response = await api.get("/admin/kb/articles")
-    return response.data
+    try {
+      const response = await api.get("/admin/kb/articles")
+      console.log("KB Service - Raw response:", response)
+      console.log("KB Service - Response data:", response.data)
+      
+      // بررسی اینکه داده درست برگشته یا نه
+      if (response.data && Array.isArray(response.data)) {
+        return response.data
+      } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
+        return response.data.data
+      } else {
+        console.error("Unexpected response format:", response.data)
+        return []
+      }
+    } catch (error) {
+      console.error("KB Service - Error in getAllArticles:", error)
+      throw error
+    }
   },
 
-  async createArticle(articleData: CreateArticleData): Promise<{ id: string; message: string }> {
+  async createArticle(articleData: CreateArticleData): Promise<Article> {
     const response = await api.post("/admin/kb/articles", articleData)
     return response.data
   },
 
-  async updateArticle(articleId: string, articleData: UpdateArticleData): Promise<{ message: string }> {
+  async updateArticle(articleId: string, articleData: UpdateArticleData): Promise<Article> {
     const response = await api.put(`/admin/kb/articles/${articleId}`, articleData)
     return response.data
   },
 
-  async publishArticle(articleId: string): Promise<{ message: string }> {
-    const response = await api.post(`/admin/kb/articles/${articleId}/publish`)
+  async publishArticle(articleId: string, visibility: string = "public"): Promise<Article> {
+    const response = await api.post(`/admin/kb/articles/${articleId}/publish`, { visibility })
     return response.data
   },
 
-  async deleteArticle(articleId: string): Promise<{ message: string }> {
-    const response = await api.delete(`/admin/kb/articles/${articleId}`)
-    return response.data
+  async deleteArticle(articleId: string): Promise<void> {
+    await api.delete(`/admin/kb/articles/${articleId}`)
   },
 }

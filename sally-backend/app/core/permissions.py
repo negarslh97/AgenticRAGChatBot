@@ -3,12 +3,27 @@ RBAC (Role-Based Access Control) system for admin and customer permissions.
 This file defines permission constants, default roles, and FastAPI dependencies for authentication and authorization.
 """
 
+import logging
 from typing import List, Optional, Union
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from app.domain.entities_refactored import Admin, Customer, Role, PermissionDetail
 from app.core.security import verify_token
-from app.api.dependencies import get_optional_auth_header
+
+logger = logging.getLogger(__name__)
+
+
+async def get_optional_auth_header(request: Request) -> Optional[HTTPAuthorizationCredentials]:
+    """Get authorization header if it exists and is valid, otherwise return None."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.split(" ")[1]
+    if not token:
+        return None
+
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
 
 # --- 1. Permission Constants ---
@@ -72,10 +87,10 @@ DEFAULT_ROLES = {
             {"permission_key": Permission.MANAGE_SYSTEM_SETTINGS, "description": "Manage system settings", "resource": "system_settings", "action": "manage"}
         ]
     },
-    
-    "admin": {
-        "name": "admin",
-        "description": "administrator with limited access",
+
+    "Admin": {
+        "name": "Admin",
+        "description": "Administrator with limited access",
         "permissions": [
             {"permission_key": Permission.VIEW_CUSTOMERS, "description": "View customer users", "resource": "customers", "action": "view"},
             {"permission_key": Permission.VIEW_ALL_TICKETS, "description": "View all tickets", "resource": "tickets", "action": "view_all"},
@@ -87,7 +102,7 @@ DEFAULT_ROLES = {
             {"permission_key": Permission.VIEW_ACTIVITY_LOGS, "description": "View activity logs", "resource": "activity_logs", "action": "view"}
         ]
     },
-    
+
     "Customer": {
         "name": "Customer",
         "description": "Customer with access to their own data",
@@ -97,7 +112,7 @@ DEFAULT_ROLES = {
             {"permission_key": Permission.VIEW_PUBLIC_KB, "description": "View public knowledge base", "resource": "kb_articles", "action": "view_public"}
         ]
     },
-    
+
     "Guest": {
         "name": "Guest",
         "description": "Unauthenticated user with access to public resources",
@@ -111,9 +126,12 @@ DEFAULT_ROLES = {
 # --- 3. Function to Create Default Roles ---
 async def create_default_roles():
     """Create default roles in the database if they don't exist."""
+    print(f"DEBUG: Attempting to create default roles: {list(DEFAULT_ROLES.keys())}")
     for role_name, role_data in DEFAULT_ROLES.items():
         existing_role = await Role.find_one(Role.name == role_name)
-        if not existing_role:
+        if existing_role:
+            print(f"DEBUG: Role '{role_name}' already exists, skipping creation")
+        else:
             permission_details = [PermissionDetail(**perm) for perm in role_data["permissions"]]
             role = Role(
                 name=role_data["name"],
@@ -128,17 +146,43 @@ async def create_default_roles():
 # --- 4. admin Authentication and Authorization Dependencies ---
 async def get_admin_from_token(token: str) -> Optional[Admin]:
     """Extract admin from JWT token, returns None if invalid or inactive."""
+    logger.info(f"==== GET ADMIN FROM TOKEN START ====")
+    logger.info(f"Token received: {token[:20]}...")
+    
     try:
         payload = verify_token(token)
+        logger.info(f"Token payload verified: {payload}")
+        
         # توکن‌های ادمین باید نوع مشخصی داشته باشند تا با توکن مشتری اشتباه گرفته نشوند
         if payload.get("type") != "admin":
+            logger.info(f"Token type is not 'admin': {payload.get('type')}")
+            logger.info("==== GET ADMIN FROM TOKEN END (WRONG TYPE) ====")
             return None
+            
         admin_id = payload.get("sub")
         if admin_id is None:
+            logger.info("No 'sub' claim in token payload")
+            logger.info("==== GET ADMIN FROM TOKEN END (NO SUB) ====")
             return None
+            
+        logger.info(f"Looking for admin with ID: {admin_id}")
         admin = await Admin.get(admin_id)
+        
+        if admin:
+            logger.info(f"Admin found: {admin.full_name} ({admin.email}) - Active: {admin.is_active}")
+            if admin.is_active:
+                logger.info("==== GET ADMIN FROM TOKEN END (SUCCESS) ====")
+            else:
+                logger.info("==== GET ADMIN FROM TOKEN END (INACTIVE) ====")
+        else:
+            logger.info(f"No admin found with ID: {admin_id}")
+            logger.info("==== GET ADMIN FROM TOKEN END (NOT FOUND) ====")
+            
         return admin if admin and admin.is_active else None
-    except Exception:
+        
+    except Exception as e:
+        logger.error(f"Error getting admin from token: {str(e)}")
+        logger.info("==== GET ADMIN FROM TOKEN END (ERROR) ====")
         return None
 
 async def get_current_admin(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Admin:
@@ -168,17 +212,43 @@ def get_current_admin_with_permission(permission: str):
 # --- 5. Customer Authentication Dependencies ---
 async def get_current_customer_from_token(token: str) -> Optional[Customer]:
     """Extract customer from JWT token, returns None if invalid or inactive."""
+    logger.info(f"==== GET CUSTOMER FROM TOKEN START ====")
+    logger.info(f"Token received: {token[:20]}...")
+    
     try:
         payload = verify_token(token)
+        logger.info(f"Token payload verified: {payload}")
+        
         # توکن‌های مشتری باید نوع مشخصی داشته باشند
         if payload.get("type") != "customer":
+            logger.info(f"Token type is not 'customer': {payload.get('type')}")
+            logger.info("==== GET CUSTOMER FROM TOKEN END (WRONG TYPE) ====")
             return None
+            
         customer_id = payload.get("sub")
         if customer_id is None:
+            logger.info("No 'sub' claim in token payload")
+            logger.info("==== GET CUSTOMER FROM TOKEN END (NO SUB) ====")
             return None
+            
+        logger.info(f"Looking for customer with ID: {customer_id}")
         customer = await Customer.get(customer_id)
+        
+        if customer:
+            logger.info(f"Customer found: {customer.full_name} ({customer.email}) - Active: {customer.is_active}")
+            if customer.is_active:
+                logger.info("==== GET CUSTOMER FROM TOKEN END (SUCCESS) ====")
+            else:
+                logger.info("==== GET CUSTOMER FROM TOKEN END (INACTIVE) ====")
+        else:
+            logger.info(f"No customer found with ID: {customer_id}")
+            logger.info("==== GET CUSTOMER FROM TOKEN END (NOT FOUND) ====")
+            
         return customer if customer and customer.is_active else None
-    except Exception:
+        
+    except Exception as e:
+        logger.error(f"Error getting customer from token: {str(e)}")
+        logger.info("==== GET CUSTOMER FROM TOKEN END (ERROR) ====")
         return None
 
 async def get_current_customer(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Customer:

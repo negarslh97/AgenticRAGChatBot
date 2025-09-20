@@ -62,9 +62,9 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
 
   const getStatusColor = (status: string) => {
     const colors = {
-      draft: "bg-gray-100 text-gray-800",
-      published: "bg-green-100 text-green-800",
-      archived: "bg-red-100 text-red-800",
+      DRAFT: "bg-gray-100 text-gray-800",
+      PUBLISHED: "bg-green-100 text-green-800",
+      ARCHIVED: "bg-red-100 text-red-800",
     }
     return colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"
   }
@@ -127,7 +127,7 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
 
           {isadminView && (
             <div className="flex flex-col space-y-2 ml-6">
-              {article.status === "draft" && isSuperAdmin && (
+              {article.status === "DRAFT" && isSuperAdmin && (
                 <button onClick={handlePublish} className="btn-primary text-sm">
                   Publish Article
                 </button>
@@ -165,7 +165,7 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
       {/* Navigation */}
       <div className="mt-12 pt-8 border-t border-gray-200">
         <Link to={isadminView ? "/admin/kb" : "/kb"} className="text-blue-600 hover:text-blue-500 font-medium">
-          ← Back to {isadminView ? "admin" : ""} Knowledge Base
+          ← Back to {isadminView ? "Admin" : ""} Knowledge Base
         </Link>
       </div>
     </div>

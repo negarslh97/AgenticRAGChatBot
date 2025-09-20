@@ -33,10 +33,30 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 def verify_token(token: str) -> dict:
     """Verify and decode JWT token."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"==== JWT TOKEN VERIFICATION START ====")
+    logger.info(f"Token received: {token[:20]}...")
+    logger.info(f"Using algorithm: {settings.jwt_algorithm}")
+    
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        logger.info(f"JWT verification successful")
+        logger.info(f"Payload: {payload}")
+        logger.info("==== JWT TOKEN VERIFICATION END (SUCCESS) ====")
         return payload
-    except JWTError:
+    except JWTError as e:
+        logger.error(f"JWT verification failed: {str(e)}")
+        logger.info("==== JWT TOKEN VERIFICATION END (FAILED) ====")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during JWT verification: {str(e)}")
+        logger.info("==== JWT TOKEN VERIFICATION END (ERROR) ====")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",

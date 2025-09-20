@@ -27,14 +27,16 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
 
     setLoading(true)
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/knowledge-base/`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${localStorage.getItem("token")}`
         },
         body: JSON.stringify({
-          ...formData,
+          title: formData.title,
+          content: formData.content,
+          summary: formData.summary || undefined,
           tags: formData.tags.split(",").map(tag => tag.trim()).filter(Boolean)
         })
       })
@@ -43,7 +45,7 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
         throw new Error("خطا در ایجاد مقاله")
       }
 
-      const article = await response.json()
+      await response.json()
       toast.success("مقاله با موفقیت ایجاد شد!")
       
       // Reset form

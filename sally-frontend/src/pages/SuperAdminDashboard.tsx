@@ -1,9 +1,9 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import StatCard from '../components/StatCard'
-import { superAdminService, DashboardStats } from '../services/superAdminService'
 import {
   Users,
   Ticket,
@@ -13,37 +13,114 @@ import {
   Crown
 } from 'lucide-react'
 
+interface DashboardStats {
+  users: {
+    totalAdmins: number
+    totalCustomers: number
+  }
+  tickets: {
+    open: number
+    awaitingReply: number
+    resolved: number
+  }
+  knowledgeBase: {
+    published: number
+    drafts: number
+  }
+  activityLogs: {
+    total: number
+  }
+}
+
 const SuperAdminDashboard: React.FC = () => {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [stats, setStats] = useState<DashboardStats>({
     users: { totalAdmins: 0, totalCustomers: 0 },
     tickets: { open: 0, awaitingReply: 0, resolved: 0 },
-    knowledgeBase: { published: 0, drafts: 0 }
+    knowledgeBase: { published: 0, drafts: 0 },
+    activityLogs: { total: 0 }
   })
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Fetch dashboard stats
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        setLoading(true)
-        const dashboardStats = await superAdminService.getDashboardStats()
-        setStats(dashboardStats)
-      } catch (error) {
-        console.error('Error fetching dashboard stats:', error)
-        // Fallback data if API fails
-        setStats({
-          users: { totalAdmins: 0, totalCustomers: 0 },
-          tickets: { open: 0, awaitingReply: 0, resolved: 0 },
-          knowledgeBase: { published: 0, drafts: 0 }
-        })
-      } finally {
-        setLoading(false)
+  // Fetch dashboard stats function
+  const fetchStats = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Check if user is authenticated and is SuperAdmin
+      if (!user) {
+        throw new Error('User not authenticated. Please log in.')
       }
-    }
 
-    fetchStats()
-  }, [])
+      if (user.role !== 'SuperAdmin') {
+        throw new Error('Access denied. SuperAdmin role required.')
+      }
+
+      // Get token from localStorage
+      const token = localStorage.getItem('token')
+      console.log('Token from localStorage:', token ? 'Present' : 'Missing')
+      console.log('Current user:', user)
+
+      if (!token) {
+        throw new Error('No authentication token found. Please log in again.')
+      }
+
+      const response = await fetch('/api/admin/superadmin/stats', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      console.log('API Response status:', response.status)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API Error response:', errorText)
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`)
+      }
+
+      const data = await response.json()
+      console.log('API Response data:', data)
+      setStats(data)
+
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      setError(`خطا در بارگذاری آمار داشبورد: ${errorMessage}`)
+      // Fallback mock data
+      setStats({
+        users: { totalAdmins: 0, totalCustomers: 0 },
+        tickets: { open: 0, awaitingReply: 0, resolved: 0 },
+        knowledgeBase: { published: 0, drafts: 0 },
+        activityLogs: { total: 0 }
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch dashboard stats on mount and user change
+  useEffect(() => {
+    if (user) {
+      fetchStats()
+    }
+  }, [user])
+
+  // Real-time updates - poll every 60 seconds for dashboard stats
+  useEffect(() => {
+    if (!user) return
+
+    const interval = setInterval(() => {
+      fetchStats()
+    }, 60000) // 60 seconds
+
+    return () => clearInterval(interval)
+  }, [user])
 
   // Removed handleLogout since logout button is now in navbar
 
@@ -59,11 +136,11 @@ const SuperAdminDashboard: React.FC = () => {
       actions: [
         {
           label: 'مدیریت ادمین‌ها',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          onClick: () => navigate('/super-admin/admin/users')
         },
         {
           label: 'مدیریت مشتریان',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          onClick: () => navigate('/super-admin/customer/users')
         }
       ]
     },
@@ -108,6 +185,9 @@ const SuperAdminDashboard: React.FC = () => {
     },
     {
       title: 'لاگ‌های فعالیت سیستم',
+      stats: [
+        { label: 'کل لاگ‌ها', value: stats.activityLogs.total }
+      ],
       description: 'نظارت بر تمام اقدامات کاربران و سیستم',
       icon: Activity,
       iconColor: 'text-orange-600',
@@ -136,6 +216,22 @@ const SuperAdminDashboard: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="text-red-600 text-lg mb-4">{error}</div>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            تلاش دوباره
+          </button>
+        </div>
       </div>
     )
   }
