@@ -18,7 +18,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
 
   return (
     // <nav className="bg-white border-b border-gray-200 px-4 py-3">
-    <nav className="fixed top-0 left-0 right-0 bg-white px-4 py-3 border-b border-gray-200 z-50">
+    <nav className="bg-white px-4 py-3 border-b border-gray-200">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
 
         {/* Left side - Logo and Mobile Menu */}

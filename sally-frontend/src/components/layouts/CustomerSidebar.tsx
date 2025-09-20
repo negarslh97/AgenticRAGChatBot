@@ -20,10 +20,8 @@ import {
   X
 } from 'lucide-react'
 
-// Navbar height constant - should match CustomerLayout
-// Logo: h-[72px] = 72px, py-3 = 12px top + 12px bottom = 24px, border-b = 1px, total ~97px
-// Adding 3px extra padding to ensure no overlap with any potential line-height or font metrics
-const NAVBAR_HEIGHT = '1.5rem' // 97px + 3px safety margin
+// Note: Navbar height is approximately 97px
+// If navbar height changes in the future, update the sidebar positioning accordingly
 
 interface CustomerSidebarProps {
   onClose?: () => void

@@ -5,7 +5,6 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Button } from '../components/ui/button'
 import CustomerLayout from '../components/layouts/CustomerLayout'
-import Navbar from '../components/Navbar'
 import DashboardStats from '../components/dashboard/DashboardStats'
 import NavigationCards from '../components/dashboard/NavigationCards'
 import RecentActivities from '../components/dashboard/RecentActivities'
@@ -209,13 +208,11 @@ const DashboardPage: React.FC = () => {
   }
 
   return (
-    <>
-      <Navbar onMobileMenuToggle={handleMobileSidebarToggle} />
-      <CustomerLayout
-        backgroundPattern="aurora"
-        showMobileSidebar={showMobileSidebar}
-        onMobileSidebarToggle={handleMobileSidebarToggle}
-      >
+    <CustomerLayout
+      backgroundPattern="aurora"
+      showMobileSidebar={showMobileSidebar}
+      onMobileSidebarToggle={handleMobileSidebarToggle}
+    >
       {/* Header Section */}
       <div className="mb-8">
         <div className="flex justify-between items-center">
@@ -268,7 +265,6 @@ const DashboardPage: React.FC = () => {
         />
       </div>
       </CustomerLayout>
-    </>
   )
 }
 

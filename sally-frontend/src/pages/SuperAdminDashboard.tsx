@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import StatCard from '../components/StatCard'
@@ -45,7 +45,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
 
   // Fetch dashboard stats function
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
@@ -102,14 +102,14 @@ const SuperAdminDashboard: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user])
 
   // Fetch dashboard stats on mount and user change
   useEffect(() => {
     if (user) {
       fetchStats()
     }
-  }, [user])
+  }, [user, fetchStats])
 
   // Real-time updates - poll every 60 seconds for dashboard stats
   useEffect(() => {
@@ -120,7 +120,7 @@ const SuperAdminDashboard: React.FC = () => {
     }, 60000) // 60 seconds
 
     return () => clearInterval(interval)
-  }, [user])
+  }, [user, fetchStats])
 
   // Removed handleLogout since logout button is now in navbar
 

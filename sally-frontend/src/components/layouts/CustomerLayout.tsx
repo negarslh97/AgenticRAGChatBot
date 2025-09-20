@@ -2,7 +2,6 @@
 
 import React from 'react'
 import { Outlet } from 'react-router-dom'
-import Navbar from '../Navbar'
 import CustomerSidebar from './CustomerSidebar'
 
 interface CustomerLayoutProps {
@@ -14,14 +13,6 @@ interface CustomerLayoutProps {
   onMobileSidebarToggle?: () => void
 }
 
-// Navbar height constant - calculated from logo height + vertical padding + border
-// Logo: h-[72px] = 72px, py-3 = 12px top + 12px bottom = 24px, border-b = 1px, total ~97px
-// Adding 3px extra padding to ensure no overlap with any potential line-height or font metrics
-const NAVBAR_HEIGHT = '120px' // 97px + 3px safety margin
-
-// Note: Using static value for better performance and simplicity
-// If Navbar height changes in the future, update this constant accordingly
-// To verify the exact height, inspect the Navbar element in browser DevTools
 
 const CustomerLayout: React.FC<CustomerLayoutProps> = ({
   children,
@@ -82,18 +73,12 @@ const CustomerLayout: React.FC<CustomerLayoutProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Create new stacking context */}
-      <div
-        className="relative isolate"
-        style={{ paddingTop: NAVBAR_HEIGHT }}
-      >
 
-        {/* Main Layout Container - Height calculated to account for Navbar */}
-        <div
-          className="relative"
-          style={{ minHeight: `calc(100vh - ${NAVBAR_HEIGHT})` }}
-        >
-          {/* Main Content Area - With left padding for desktop sidebar */}
+      {/* Create new stacking context */}
+      <div className="relative isolate">
+
+        {/* Main Layout Container */}
+        <div className="relative min-h-screen">
           <main className={`relative overflow-y-auto overflow-x-hidden transition-all duration-300 ${
             showSidebar ? 'lg:pr-64' : ''
           }`}>
@@ -112,8 +97,8 @@ const CustomerLayout: React.FC<CustomerLayoutProps> = ({
           {showSidebar && (
             <aside className="hidden lg:block w-64 flex-shrink-0 h-full fixed top-0 right-0 z-30"
                 style={{
-                  top: NAVBAR_HEIGHT,
-                  height: `calc(100vh - ${NAVBAR_HEIGHT})`
+                  top: '120px',
+                  height: `calc(100vh - 120px)`
                 }}>
               <CustomerSidebar />
             </aside>
@@ -129,8 +114,8 @@ const CustomerLayout: React.FC<CustomerLayoutProps> = ({
               <div
                 className="fixed right-0 w-64 bg-white shadow-xl z-50"
                 style={{
-                  top: NAVBAR_HEIGHT,
-                  height: `calc(100vh - ${NAVBAR_HEIGHT})`
+                  top: '97px',
+                  height: `calc(100vh - 97px)`
                 }}
               >
                 <CustomerSidebar onClose={onMobileSidebarToggle} />
