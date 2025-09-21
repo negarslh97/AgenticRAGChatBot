@@ -96,7 +96,7 @@ app.include_router(chat_router, prefix="/api", tags=["Chat"])
 app.include_router(tickets_router, prefix="/api", tags=["Tickets"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(kb_router, prefix="/api/kb", tags=["Knowledge Base"])
-app.include_router(admin_kb_router, prefix="/admin/knowledge-base", tags=["Admin Knowledge Base"])
+app.include_router(admin_kb_router, prefix="/admin/kb", tags=["Admin Knowledge Base"])
 app.include_router(upload_router, prefix="/api", tags=["Upload"])
 
 # Alias for /api/users/me to /api/auth/me

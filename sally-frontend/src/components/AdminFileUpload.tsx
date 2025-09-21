@@ -110,8 +110,8 @@ const AdminFileUpload: React.FC<FileUploadProps> = ({
       formData.append("file", file)
 
       // Upload to backend
-      console.log("AdminFileUpload: Sending request to /admin/kb/upload");
-      const response = await api.post("/admin/kb/upload", formData, {
+      console.log("AdminFileUpload: Sending request to /admin/kb/articles/upload");
+      const response = await api.post("/admin/kb/articles/upload", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },

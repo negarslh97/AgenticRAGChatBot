@@ -2,19 +2,21 @@ from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 import openai
 from app.core.config import settings
-from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, User, UserRole
-from app.domain.entities_refactored import Customer, Admin
+from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility, Customer, Admin
 
 
 class RAGService(ABC):
     """Abstract base class for RAG services."""
-    
+
     def __init__(self):
+        # Initialize OpenAI client
         if settings.openai_api_key_loaded:
-            openai.api_key = settings.openai_api_key_loaded
-            # Configure base URL if using OpenRouter
-            if settings.openai_base_url_loaded:
-                openai.base_url = settings.openai_base_url_loaded
+            self.client = openai.OpenAI(
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded if settings.openai_base_url_loaded else None
+            )
+        else:
+            self.client = None
     
     @abstractmethod
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -25,9 +27,9 @@ class RAGService(ABC):
         """Retrieve relevant documents from knowledge base."""
         # Build query for articles
         article_query = KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED
-        
+
         if is_public_only:
-            article_query = article_query & (KnowledgeBaseArticle.is_public == True)
+            article_query = article_query & (KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC)
         
         articles = await KnowledgeBaseArticle.find(article_query).to_list()
         
@@ -68,56 +70,29 @@ class SimpleRAGService(RAGService):
     """Simple RAG for guest users - uses public knowledge base only."""
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Generate response using simple RAG for guests."""
-        
-        # Retrieve relevant documents from public knowledge base
-        relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=True)
-        
-        if not relevant_docs:
-            print("DEBUG: No relevant documents found, using OpenAI for direct response")
-            # Use OpenAI directly instead of fallback when no documents found
-            if settings.openai_api_key_loaded:
-                try:
-                    direct_response = await self._generate_direct_openai_response(query, {})
-                    return {
-                        "response": direct_response,
-                        "sources": [],
-                        "confidence": 0.7
-                    }
-                except Exception as e:
-                    print(f"Direct OpenAI API error: {e}")
-            
-            # Fallback response only if OpenAI fails
-            return {
-                "response": "I couldn't find specific information about your question in our knowledge base. Please try rephrasing your question or contact our support team for assistance.",
-                "sources": [],
-                "confidence": 0.1
-            }
-        
-        # Build context from retrieved documents
-        context_text = "\n\n".join([
-            f"Document: {doc['title']}\nContent: {doc['content']}"
-            for doc in relevant_docs[:3]
-        ])
-        
-        # Generate response using OpenAI (if available) or fallback
+        """Generate response using direct OpenAI for guests (no RAG)."""
+
+        print("DEBUG: Using direct OpenAI response for guest (no RAG)")
+
+        # Always use OpenAI directly for chat
         if settings.openai_api_key_loaded:
             try:
-                response = await self._generate_openai_response(query, context_text)
+                direct_response = await self._generate_direct_openai_response(query, {})
                 return {
-                    "response": response,
-                    "sources": [{"title": doc["title"], "id": doc["id"]} for doc in relevant_docs[:3]],
+                    "response": direct_response,
+                    "sources": [],
                     "confidence": 0.8
                 }
             except Exception as e:
-                print(f"OpenAI API error: {e}")
-        
-        # Fallback response
-        best_doc = relevant_docs[0]
+                print(f"Direct OpenAI API error: {e}")
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}")
+
+        # Fallback response if OpenAI fails
         return {
-            "response": f"Based on our knowledge base, here's what I found about '{query}':\n\n{best_doc['summary'] or best_doc['content'][:300]}...\n\nFor more detailed information, please refer to our documentation or contact support.",
-            "sources": [{"title": best_doc["title"], "id": best_doc["id"]}],
-            "confidence": 0.6
+            "response": "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید.",
+            "sources": [],
+            "confidence": 0.1
         }
     
     async def _generate_openai_response(self, query: str, context: str) -> str:
@@ -138,14 +113,12 @@ Please provide a clear, helpful response based on the context provided. If the c
         
         try:
             # Use the new OpenAI API (v1.0+)
-            response = openai.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
                     {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.7
+                ]
             )
             print(f"DEBUG: Simple RAG OpenAI API call successful")
             return response.choices[0].message.content.strip()
@@ -165,21 +138,19 @@ Please provide a helpful response to their question. Since I don't have specific
 
 Your response:"""
 
-        model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
+        model = settings.openai_model_loaded or "gpt-3.5-turbo"
         print(f"DEBUG: Using model: {model}")
         print(f"DEBUG: Base URL: {openai.base_url}")
         print(f"DEBUG: API Key: {openai.api_key[:20]}..." if openai.api_key else "No API key")
-        
+
         try:
-            # Use the new OpenAI API (v1.0+) which is compatible with OpenRouter
-            response = openai.chat.completions.create(
+            # Use OpenAI API with minimal parameters
+            response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
                     {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.7
+                ]
             )
             print(f"DEBUG: API response received successfully")
             return response.choices[0].message.content.strip()
@@ -193,18 +164,16 @@ class AgenticRAGService(RAGService):
     """Agentic RAG for authenticated customers - uses full knowledge base and customer context."""
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Generate response using agentic RAG for customers."""
-        
+        """Generate response using RAG with fallback to OpenAI for customers."""
+
         user_context = context or {}
         user_id = user_context.get("user_id")
-        
-        # Retrieve relevant documents from full knowledge base (including private)
+
+        # Try to retrieve relevant documents from knowledge base
         print(f"DEBUG: Retrieving documents for query: '{query}'")
         relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=False)
         print(f"DEBUG: Found {len(relevant_docs)} relevant documents")
-        if relevant_docs:
-            print(f"DEBUG: Top document: {relevant_docs[0]['title']} (score: {relevant_docs[0]['score']})")
-        
+
         # Get user-specific context if available
         user_info = ""
         if user_id:
@@ -214,83 +183,84 @@ class AgenticRAGService(RAGService):
             try:
                 user = await Customer.get(user_id)
                 if user:
-                    user_info = f"Customer: {user.full_name} ({user.email})\nRole: Customer\n"
+                    user_info = f"You are a customer: {user.full_name} ({user.email}). "
                 else:
                     user = await Admin.get(user_id)
                     if user:
-                        user_info = f"Admin: {user.full_name} ({user.email})\nRole: Admin\n"
+                        user_info = f"You are an admin: {user.full_name} ({user.email}). "
             except Exception as e:
                 print(f"Error fetching user info: {e}")
-                user_info = "Customer information not available\n"
-        
-        if not relevant_docs:
-            print("DEBUG: No relevant documents found, using OpenAI for direct response")
-            # Use OpenAI directly instead of fallback when no documents found
-            if settings.openai_api_key_loaded:
+                user_info = "User information not available. "
+
+        if relevant_docs:
+            print("DEBUG: Using RAG with knowledge base documents")
+            # Build context from retrieved documents
+            context_text = user_info + "\n\n".join([
+                f"Document: {doc['title']}\nContent: {doc['content']}"
+                for doc in relevant_docs[:3]
+            ])
+
+            # Generate response using OpenAI with context
+            if settings.openai_api_key_loaded and self.client:
                 try:
-                    direct_response = await self._generate_direct_openai_response(query, user_context)
+                    response = await self._generate_openai_response_with_context(query, context_text)
                     return {
-                        "response": direct_response,
-                        "sources": [],
-                        "confidence": 0.7,
-                        "suggested_actions": self._suggest_actions(query, [])
+                        "response": response,
+                        "sources": [{"title": doc["title"], "id": doc["id"]} for doc in relevant_docs[:3]],
+                        "confidence": 0.9,
+                        "suggested_actions": self._suggest_actions(query, relevant_docs)
                     }
                 except Exception as e:
-                    print(f"Direct OpenAI API error: {e}")
-            
-            # Fallback response only if OpenAI fails
-            return {
-                "response": "I couldn't find specific information about your question in our knowledge base. As a registered customer, I can create a support ticket for you to get personalized assistance from our team. Would you like me to help you with that?",
-                "sources": [],
-                "confidence": 0.2,
-                "suggested_actions": ["create_ticket"]
-            }
-        
-        # Build enhanced context
-        context_text = f"{user_info}\n" + "\n\n".join([
-            f"Document: {doc['title']}\nContent: {doc['content']}"
-            for doc in relevant_docs[:5]
-        ])
-        
-        # Generate response using OpenAI (if available) or enhanced fallback
-        if settings.openai_api_key_loaded:
+                    print(f"OpenAI API error with context: {e}")
+
+        print("DEBUG: Using direct OpenAI response (no relevant docs or API error)")
+
+        # Fallback to direct OpenAI without context
+        if settings.openai_api_key_loaded and self.client:
             try:
-                print(f"DEBUG: Attempting to call OpenAI API with model: {settings.openai_model_loaded}")
-                print(f"DEBUG: API Base URL: {settings.openai_base_url_loaded}")
-                print(f"DEBUG: API Key loaded: {bool(settings.openai_api_key_loaded)}")
-                
-                response = await self._generate_agentic_response(query, context_text, user_context)
-                print(f"DEBUG: OpenAI API call successful, response length: {len(response)}")
-                
+                direct_response = await self._generate_direct_openai_response(query, user_context)
                 return {
-                    "response": response,
-                    "sources": [{"title": doc["title"], "id": doc["id"]} for doc in relevant_docs[:5]],
-                    "confidence": 0.9,
-                    "suggested_actions": self._suggest_actions(query, relevant_docs)
+                    "response": direct_response,
+                    "sources": [],
+                    "confidence": 0.7,
+                    "suggested_actions": []
                 }
             except Exception as e:
-                print(f"OpenAI API error: {e}")
-                print(f"Error type: {type(e).__name__}")
-                import traceback
-                print(f"Traceback: {traceback.format_exc()}")
-        
-        # Enhanced fallback response for customers
-        best_docs = relevant_docs[:2]
-        response_parts = []
-        
-        for doc in best_docs:
-            response_parts.append(f"**{doc['title']}**\n{doc['summary'] or doc['content'][:200]}...")
-        
-        response = f"Based on your question about '{query}', here's what I found:\n\n" + "\n\n".join(response_parts)
-        response += "\n\nAs a registered customer, I can also help you create a support ticket if you need more personalized assistance."
-        
+                print(f"Direct OpenAI API error: {e}")
+
+        # Final fallback response
         return {
-            "response": response,
-            "sources": [{"title": doc["title"], "id": doc["id"]} for doc in best_docs],
-            "confidence": 0.7,
-            "suggested_actions": ["create_ticket", "view_related_articles"]
+            "response": f"{user_info}متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید.",
+            "sources": [],
+            "confidence": 0.1,
+            "suggested_actions": ["contact_support"]
         }
     
+    async def _generate_openai_response_with_context(self, query: str, context: str) -> str:
+        """Generate response using OpenAI API with context from knowledge base."""
+        prompt = f"""You are Sally, a helpful customer support assistant. Use the following context to answer the user's question accurately and helpfully. Answer in Persian (Farsi) language.
+
+Context:
+{context}
+
+User Question: {query}
+
+Please provide a clear, helpful response based on the context provided. If the context doesn't contain enough information, acknowledge this and offer to help with other ways."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=settings.openai_model_loaded or "gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are Sally, a helpful customer support assistant. Always respond in Persian (Farsi)."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            print(f"DEBUG: OpenAI API call with context successful")
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"OpenAI API error with context: {e}")
+            raise Exception("OpenAI API unavailable")
+
     async def _generate_agentic_response(self, query: str, context: str, user_context: Dict[str, Any]) -> str:
         """Generate response using OpenAI with agentic capabilities."""
         prompt = f"""You are Sally, an advanced AI customer support agent. You have access to the full knowledge base and customer information. Use this context to provide personalized, actionable responses.
@@ -311,14 +281,12 @@ Provide a helpful, personalized response that goes beyond just answering the que
         model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
         try:
             # Use the new OpenAI API (v1.0+)
-            response = openai.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": "You are Sally, an advanced AI customer support agent with agentic capabilities."},
                     {"role": "user", "content": prompt}
-                ],
-                max_tokens=800,
-                temperature=0.7
+                ]
             )
             print(f"DEBUG: Agentic OpenAI API call successful")
             return response.choices[0].message.content.strip()
@@ -356,17 +324,15 @@ Please provide a helpful response to their question. Since I don't have specific
 
 Your response:"""
 
-        model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
+        model = settings.openai_model_loaded or "gpt-3.5-turbo"
         try:
-            # Use the new OpenAI API (v1.0+)
-            response = openai.chat.completions.create(
+            # Use OpenAI API with minimal parameters
+            response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
                     {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.7
+                ]
             )
             print(f"DEBUG: Direct OpenAI API call successful")
             return response.choices[0].message.content.strip()

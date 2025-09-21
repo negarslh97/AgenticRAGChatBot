@@ -140,7 +140,7 @@ const AdminPanel: React.FC = () => {
       const formData = new FormData()
       formData.append("file", file)
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/upload`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/upload`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`

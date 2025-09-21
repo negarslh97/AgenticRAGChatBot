@@ -47,7 +47,7 @@ class ArticlePublishRequest(BaseModel):
 
 # --- API Endpoints ---
 
-@router.post("/", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/articles", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
 async def create_article(
     article_data: ArticleCreate,
     current_user: Admin = Depends(get_current_admin)
@@ -70,7 +70,7 @@ async def create_article(
     new_article.id = str(new_article.id)
     return new_article
 
-@router.post("/upload", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/articles/upload", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
 async def upload_kb_file(
     file: UploadFile = File(...),
     current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
@@ -80,7 +80,7 @@ async def upload_kb_file(
     Accessible by SuperAdmin only.
     """
     # Create uploads directory if it doesn't exist
-    upload_dir = Path("sally-backend/uploads")
+    upload_dir = Path("uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
     
     # Save file to uploads directory
@@ -100,7 +100,7 @@ async def upload_kb_file(
     new_article.id = str(new_article.id)
     return new_article
 
-@router.post("/{article_id}/publish", response_model=ArticleResponse)
+@router.post("/articles/{article_id}/publish", response_model=ArticleResponse)
 async def publish_article(
     article_id: str,
     publish_request: ArticlePublishRequest,
@@ -129,7 +129,7 @@ async def publish_article(
     article.id = str(article.id)
     return article
 
-@router.get("/", response_model=List[ArticleResponse])
+@router.get("/articles", response_model=List[ArticleResponse])
 async def list_articles(
     status_filter: Optional[ArticleStatus] = None,
     current_user: Admin = Depends(get_current_admin)
@@ -148,7 +148,7 @@ async def list_articles(
         article.id = str(article.id)
     return articles
 
-@router.get("/{article_id}", response_model=ArticleResponse)
+@router.get("/articles/{article_id}", response_model=ArticleResponse)
 async def get_article(
     article_id: str,
     current_user: Admin = Depends(get_current_admin)
@@ -162,7 +162,7 @@ async def get_article(
     article.id = str(article.id)
     return article
 
-@router.put("/{article_id}", response_model=ArticleResponse)
+@router.put("/articles/{article_id}", response_model=ArticleResponse)
 async def update_article(
     article_id: str,
     article_data: ArticleUpdate,
@@ -195,7 +195,7 @@ async def update_article(
     await article.save()
     return article
 
-@router.delete("/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_article(
     article_id: str,
     current_user: Admin = Depends(get_current_admin_with_permission(Permission.DELETE_ARTICLES))

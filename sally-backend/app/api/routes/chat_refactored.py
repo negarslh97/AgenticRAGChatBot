@@ -86,10 +86,13 @@ async def get_conversations(current_customer: Customer = Depends(get_current_cus
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+class TitleUpdateRequest(BaseModel):
+    title: str
+
 @router.put("/conversations/{conversation_id}/title")
 async def update_conversation_title(
     conversation_id: str,
-    title: str,
+    title_request: TitleUpdateRequest,
     current_customer: Customer = Depends(get_current_customer)
 ):
     """Update conversation title."""
@@ -100,11 +103,11 @@ async def update_conversation_title(
             raise HTTPException(status_code=404, detail="Conversation not found")
         
         # Check if customer owns the conversation
-        if conversation.customer_id != current_customer.id:
+        if conversation.customer_id != str(current_customer.id):
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Update the title
-        conversation.title = title
+        conversation.title = title_request.title
         conversation.updated_at = datetime.utcnow()
         await conversation.save()
         

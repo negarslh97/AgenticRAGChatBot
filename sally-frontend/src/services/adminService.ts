@@ -147,7 +147,7 @@ export const adminService = {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await api.post<{ message: string; article_id?: string }>("/api/admin/kb/upload", formData, {
+      const response = await api.post<{ message: string; article_id?: string }>("/admin/kb/articles/upload", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
