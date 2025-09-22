@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from beanie import Document, Indexed
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import Optional, List, Dict, Any, Union
@@ -106,7 +108,8 @@ class Conversation(Document):
     """Conversation can belong to either a customer or a guest session."""
     customer_id: Optional[str] = None
     guest_session_id: Optional[str] = None
-    title: Optional[str] = None
+    title: Optional[str] = None  # AI-generated title for the conversation
+    tags: List[str] = []  # AI-generated tags for categorizing the conversation
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
@@ -116,12 +119,24 @@ class Conversation(Document):
         name = "conversations"
 
 
+class MessageRating(BaseModel):
+    """User rating for AI responses."""
+    rating: int  # 1-5 scale
+    comment: Optional[str] = None
+    rated_by: Optional[str] = None  # User ID who rated
+    rated_at: Optional[datetime] = None
+
+
 class Message(Document):
     """Message belongs to a conversation."""
     conversation_id: str
     content: str
-    is_from_user: bool = True
-    metadata: Optional[Dict[str, Any]] = None
+    sender_type: str = "Guest"  # Who sent this message
+    sender_id: Optional[str] = None  # ID of the sender (user ID or None for AI/guest)
+    is_failed: bool = False  # Whether AI failed to generate response
+    failure_reason: Optional[str] = None  # Reason for failure if is_failed=True
+    metadata: Optional[Dict[str, Any]] = None  # Rich metadata
+    rating: Optional[MessageRating] = None  # User rating for AI responses
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)

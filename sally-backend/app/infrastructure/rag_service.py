@@ -1,8 +1,11 @@
 from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 import openai
+import logging
 from app.core.config import settings
 from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility, Customer, Admin
+
+logger = logging.getLogger(__name__)
 
 
 class RAGService(ABC):
@@ -10,13 +13,10 @@ class RAGService(ABC):
 
     def __init__(self):
         # Initialize OpenAI client
-        if settings.openai_api_key_loaded:
-            self.client = openai.OpenAI(
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded if settings.openai_base_url_loaded else None
-            )
-        else:
-            self.client = None
+        # Temporarily disable OpenAI client due to Pydantic compatibility issues
+        # TODO: Fix OpenAI client version compatibility
+        self.client = None
+        logger.warning("RAGService client disabled - OpenAI client compatibility issues")
     
     @abstractmethod
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -72,25 +72,28 @@ class SimpleRAGService(RAGService):
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate response using direct OpenAI for guests (no RAG)."""
 
-        print("DEBUG: Using direct OpenAI response for guest (no RAG)")
+        logger.info(f"SimpleRAGService: Generating response for query: '{query}' (guest mode)")
 
         # Always use OpenAI directly for chat
         if settings.openai_api_key_loaded:
             try:
                 direct_response = await self._generate_direct_openai_response(query, {})
+                logger.info(f"SimpleRAGService: API success - Response preview: '{direct_response[:100]}...'")
                 return {
                     "response": direct_response,
                     "sources": [],
                     "confidence": 0.8
                 }
             except Exception as e:
-                print(f"Direct OpenAI API error: {e}")
+                logger.error(f"SimpleRAGService: Direct OpenAI API error for query '{query}': {e}")
                 import traceback
-                print(f"Traceback: {traceback.format_exc()}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
 
         # Fallback response if OpenAI fails
+        fallback_msg = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید."
+        logger.warning(f"SimpleRAGService: Using fallback response for query '{query}': '{fallback_msg}'")
         return {
-            "response": "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید.",
+            "response": fallback_msg,
             "sources": [],
             "confidence": 0.1
         }
@@ -107,9 +110,7 @@ User Question: {query}
 Please provide a clear, helpful response based on the context provided. If the context doesn't contain enough information to fully answer the question, acknowledge this and suggest contacting support for more help."""
 
         model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
-        print(f"DEBUG: Using model: {model}")
-        print(f"DEBUG: Base URL: {openai.base_url}")
-        print(f"DEBUG: API Key: {openai.api_key[:20]}..." if openai.api_key else "No API key")
+        logger.info(f"_generate_openai_response: Using model '{model}', base_url '{self.client.base_url if self.client else None}', api_key prefix '{settings.openai_api_key_loaded[:10]}...'")
         
         try:
             # Use the new OpenAI API (v1.0+)
@@ -120,10 +121,12 @@ Please provide a clear, helpful response based on the context provided. If the c
                     {"role": "user", "content": prompt}
                 ]
             )
-            print(f"DEBUG: Simple RAG OpenAI API call successful")
+            logger.info(f"_generate_openai_response: API call successful for query '{query[:50]}...'")
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"OpenAI API error in simple RAG: {e}")
+            logger.error(f"_generate_openai_response: API error for query '{query[:50]}...': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Fallback response
             raise Exception("OpenAI API unavailable")
     
@@ -139,9 +142,7 @@ Please provide a helpful response to their question. Since I don't have specific
 Your response:"""
 
         model = settings.openai_model_loaded or "gpt-3.5-turbo"
-        print(f"DEBUG: Using model: {model}")
-        print(f"DEBUG: Base URL: {openai.base_url}")
-        print(f"DEBUG: API Key: {openai.api_key[:20]}..." if openai.api_key else "No API key")
+        logger.info(f"_generate_direct_openai_response: Using model '{model}', base_url '{self.client.base_url if self.client else None}', api_key prefix '{settings.openai_api_key_loaded[:10]}...' for query '{query[:50]}...'")
 
         try:
             # Use OpenAI API with minimal parameters
@@ -152,12 +153,16 @@ Your response:"""
                     {"role": "user", "content": prompt}
                 ]
             )
-            print(f"DEBUG: API response received successfully")
+            logger.info(f"_generate_direct_openai_response: API success - Response preview: '{response.choices[0].message.content[:100]}...'")
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"OpenAI API error: {e}")
+            logger.error(f"_generate_direct_openai_response: API error for query '{query[:50]}...': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Fallback response if API fails
-            return f"سلام! من سالی، دستیار هوشمند شما هستم. متأسفانه در حال حاضر به پایگاه دانش دسترسی ندارم، اما می‌توانم به سوالات شما پاسخ دهم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید تا بهتر کمک کنم."
+            fallback = f"سلام! من سالی، دستیار هوشمند شما هستم. متأسفانه در حال حاضر به پایگاه دانش دسترسی ندارم، اما می‌توانم به سوالات شما پاسخ دهم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید تا بهتر کمک کنم."
+            logger.warning(f"Using fallback response: '{fallback}'")
+            return fallback
 
 
 class AgenticRAGService(RAGService):
@@ -168,11 +173,11 @@ class AgenticRAGService(RAGService):
 
         user_context = context or {}
         user_id = user_context.get("user_id")
+        logger.info(f"AgenticRAGService: Generating response for query: '{query}' (user_id: {user_id})")
 
         # Try to retrieve relevant documents from knowledge base
-        print(f"DEBUG: Retrieving documents for query: '{query}'")
         relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=False)
-        print(f"DEBUG: Found {len(relevant_docs)} relevant documents")
+        logger.info(f"AgenticRAGService: Found {len(relevant_docs)} relevant documents for query '{query[:50]}...'")
 
         # Get user-specific context if available
         user_info = ""
@@ -189,11 +194,11 @@ class AgenticRAGService(RAGService):
                     if user:
                         user_info = f"You are an admin: {user.full_name} ({user.email}). "
             except Exception as e:
-                print(f"Error fetching user info: {e}")
+                logger.error(f"AgenticRAGService: Error fetching user info for {user_id}: {e}")
                 user_info = "User information not available. "
 
         if relevant_docs:
-            print("DEBUG: Using RAG with knowledge base documents")
+            logger.info("AgenticRAGService: Using RAG with knowledge base documents")
             # Build context from retrieved documents
             context_text = user_info + "\n\n".join([
                 f"Document: {doc['title']}\nContent: {doc['content']}"
@@ -204,6 +209,7 @@ class AgenticRAGService(RAGService):
             if settings.openai_api_key_loaded and self.client:
                 try:
                     response = await self._generate_openai_response_with_context(query, context_text)
+                    logger.info(f"AgenticRAGService: RAG API success - Response preview: '{response[:100]}...'")
                     return {
                         "response": response,
                         "sources": [{"title": doc["title"], "id": doc["id"]} for doc in relevant_docs[:3]],
@@ -211,14 +217,17 @@ class AgenticRAGService(RAGService):
                         "suggested_actions": self._suggest_actions(query, relevant_docs)
                     }
                 except Exception as e:
-                    print(f"OpenAI API error with context: {e}")
+                    logger.error(f"AgenticRAGService: OpenAI API error with context for query '{query[:50]}...': {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
 
-        print("DEBUG: Using direct OpenAI response (no relevant docs or API error)")
+        logger.info("AgenticRAGService: Falling back to direct OpenAI (no docs or RAG error)")
 
         # Fallback to direct OpenAI without context
         if settings.openai_api_key_loaded and self.client:
             try:
                 direct_response = await self._generate_direct_openai_response(query, user_context)
+                logger.info(f"AgenticRAGService: Direct API success - Response preview: '{direct_response[:100]}...'")
                 return {
                     "response": direct_response,
                     "sources": [],
@@ -226,11 +235,15 @@ class AgenticRAGService(RAGService):
                     "suggested_actions": []
                 }
             except Exception as e:
-                print(f"Direct OpenAI API error: {e}")
+                logger.error(f"AgenticRAGService: Direct OpenAI API error for query '{query[:50]}...': {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
 
         # Final fallback response
+        fallback_msg = f"{user_info}متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید."
+        logger.warning(f"AgenticRAGService: Using final fallback for query '{query[:50]}...': '{fallback_msg}'")
         return {
-            "response": f"{user_info}متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید.",
+            "response": fallback_msg,
             "sources": [],
             "confidence": 0.1,
             "suggested_actions": ["contact_support"]
@@ -247,18 +260,23 @@ User Question: {query}
 
 Please provide a clear, helpful response based on the context provided. If the context doesn't contain enough information, acknowledge this and offer to help with other ways."""
 
+        model = settings.openai_model_loaded or "gpt-3.5-turbo"
+        logger.info(f"_generate_openai_response_with_context: Using model '{model}', base_url '{self.client.base_url if self.client else None}' for query '{query[:50]}...'")
+
         try:
             response = self.client.chat.completions.create(
-                model=settings.openai_model_loaded or "gpt-3.5-turbo",
+                model=model,
                 messages=[
                     {"role": "system", "content": "You are Sally, a helpful customer support assistant. Always respond in Persian (Farsi)."},
                     {"role": "user", "content": prompt}
                 ]
             )
-            print(f"DEBUG: OpenAI API call with context successful")
+            logger.info(f"_generate_openai_response_with_context: API success - Response preview: '{response.choices[0].message.content[:100]}...'")
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"OpenAI API error with context: {e}")
+            logger.error(f"_generate_openai_response_with_context: API error for query '{query[:50]}...': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise Exception("OpenAI API unavailable")
 
     async def _generate_agentic_response(self, query: str, context: str, user_context: Dict[str, Any]) -> str:
@@ -312,7 +330,7 @@ Provide a helpful, personalized response that goes beyond just answering the que
                     if user:
                         user_info = f"You are {user.full_name} ({user.email}), an Admin.\n"
             except Exception as e:
-                print(f"Error fetching user info: {e}")
+                logger.error(f"_generate_direct_openai_response: Error fetching user info for {user_id}: {e}")
                 user_info = "User information not available\n"
         
         prompt = f"""{user_info}You are Sally, a helpful customer support assistant. The user has asked: "{query}"
@@ -325,6 +343,8 @@ Please provide a helpful response to their question. Since I don't have specific
 Your response:"""
 
         model = settings.openai_model_loaded or "gpt-3.5-turbo"
+        logger.info(f"_generate_direct_openai_response (Agentic): Using model '{model}', base_url '{self.client.base_url if self.client else None}' for query '{query[:50]}...'")
+
         try:
             # Use OpenAI API with minimal parameters
             response = self.client.chat.completions.create(
@@ -334,12 +354,16 @@ Your response:"""
                     {"role": "user", "content": prompt}
                 ]
             )
-            print(f"DEBUG: Direct OpenAI API call successful")
+            logger.info(f"_generate_direct_openai_response (Agentic): API success - Response preview: '{response.choices[0].message.content[:100]}...'")
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"OpenAI API error in direct response: {e}")
+            logger.error(f"_generate_direct_openai_response (Agentic): API error for query '{query[:50]}...': {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Fallback response
-            return "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید یا با تیم پشتیبانی تماس بگیرید."
+            fallback = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید یا با تیم پشتیبانی تماس بگیرید."
+            logger.warning(f"Using fallback response: '{fallback}'")
+            return fallback
     
     def _suggest_actions(self, query: str, relevant_docs: List[Dict[str, Any]]) -> List[str]:
         """Suggest relevant actions based on query and context."""

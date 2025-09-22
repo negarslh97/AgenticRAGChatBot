@@ -3,6 +3,8 @@ from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from bson import ObjectId
+import openai
+import json
 
 # --- وارد کردن مدل‌های دیتابیس ---
 from app.domain.entities_refactored import (
@@ -14,11 +16,84 @@ from app.core.permissions import (
     get_current_admin_with_permission, Permission
 )
 from app.core.security import get_password_hash
+from app.core.config import settings
 
 router = APIRouter()
 
 
 # --- مدل‌های Pydantic برای ورودی و خروجی API ---
+
+# --- تابع کمکی برای تولید متادیتای هوش مصنوعی ---
+async def _generate_metadata_from_ai(title: str, content: str) -> dict:
+    """تولید متادیتای مقاله با استفاده از OpenAI"""
+    try:
+        # تنظیمات OpenAI client
+        client = openai.OpenAI(
+            api_key=settings.openai_api_key_loaded,
+            base_url=settings.openai_base_url_loaded,
+        )
+
+        prompt_template = f"""
+You are an expert content strategist for a knowledge base. Your task is to analyze the following article and generate structured metadata in Persian (Farsi).
+
+**Instructions:**
+1. Generate a concise, professional **summary**.
+2. Generate 3 to 5 relevant **tags**.
+3. Suggest a **category** from the provided list.
+4. Suggest a **visibility** level based on the content.
+5. Your output **MUST** be a single, valid JSON object and nothing else.
+
+**Available Options:**
+- Categories: ["راهنمای محصول", "مشکلات فنی", "حساب کاربری و صورتحساب", "عمومی"]
+- Visibility: ["public", "customer", "internal"]
+
+**Article to Analyze:**
+- Title: {title}
+- Content: {content}
+
+**Required JSON Output:**
+{{
+  "summary": "...",
+  "tags": ["...", "..."],
+  "suggested_category": "...",
+  "suggested_visibility": "..."
+}}
+"""
+
+        # ارسال درخواست به OpenAI
+        response = client.chat.completions.create(
+            model=settings.openai_model_loaded or "gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that generates metadata for knowledge base articles."},
+                {"role": "user", "content": prompt_template}
+            ],
+            max_tokens=500,
+            temperature=0.7,
+        )
+
+        # استخراج پاسخ
+        ai_response = response.choices[0].message.content.strip()
+
+        # تلاش برای پارس کردن JSON
+        try:
+            metadata = json.loads(ai_response)
+            return metadata
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"خطا در پارس کردن پاسخ AI: {str(e)}"
+            )
+
+    except openai.OpenAIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطا در ارتباط با سرویس OpenAI: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطای غیرمنتظره در تولید متادیتا: {str(e)}"
+        )
 
 # مدل‌های مربوط به مدیریت دسترسی‌ها (Permissions)
 class PermissionDetailResponse(BaseModel):
@@ -90,6 +165,17 @@ class ArticleUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     summary: Optional[str] = None
+
+# مدل‌های مربوط به تولید متادیتای هوش مصنوعی
+class ArticleContentPayload(BaseModel):
+    title: str
+    content: str
+
+class GeneratedMetadataResponse(BaseModel):
+    summary: str
+    tags: List[str]
+    suggested_category: str
+    suggested_visibility: str
 
 
 # --- Endpoints مدیریت ادمین‌ها (فقط SuperAdmin) ---
@@ -415,6 +501,18 @@ async def delete_article(article_id: str, current_admin: Admin = Depends(get_cur
 
     await article.delete()
     return
+
+@router.post("/articles/generate-metadata", response_model=GeneratedMetadataResponse, summary="Generate AI metadata for article")
+async def generate_article_metadata(
+    payload: ArticleContentPayload,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.CREATE_KB_ARTICLES))
+):
+    """
+    تولید متادیتای هوش مصنوعی برای مقاله بر اساس عنوان و محتوا.
+    فقط ادمین‌های دارای دسترسی ایجاد مقاله می‌توانند از این API استفاده کنند.
+    """
+    metadata = await _generate_metadata_from_ai(payload.title, payload.content)
+    return GeneratedMetadataResponse(**metadata)
 
 
 # --- Endpoints مدیریت نقش‌ها (Roles) ---

@@ -48,6 +48,25 @@ interface Message {
   content: string
   role: 'user' | 'assistant'
   timestamp: Date
+  sender_type?: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'customer' | 'admin' | 'super_admin' | 'guest' | 'ai'
+  is_failed?: boolean
+  failure_reason?: string
+  rating?: {
+    rating: number
+    comment?: string
+    rated_by?: string
+    rated_at?: string
+  }
+  metadata?: {
+    model_name?: string
+    provider?: string
+    confidence?: number
+    token_usage?: {
+      prompt_tokens?: number
+      completion_tokens?: number
+      total_tokens?: number
+    }
+  }
   sources?: Array<{ title: string; id: string }>
   confidence?: number
   suggested_actions?: string[]
@@ -157,11 +176,16 @@ const ChatPage = () => {
                 const formattedMessages: Message[] = messages.map(msg => ({
                     id: msg.id,
                     content: msg.content,
-                    role: msg.is_from_user ? 'user' : 'assistant',
+                    role: msg.sender_type === 'ai' ? 'assistant' : 'user',
                     timestamp: new Date(msg.created_at),
                     sources: msg.metadata?.sources,
                     confidence: msg.metadata?.confidence,
-                    suggested_actions: msg.metadata?.suggested_actions
+                    suggested_actions: msg.metadata?.suggested_actions,
+                    sender_type: msg.sender_type,
+                    is_failed: msg.is_failed,
+                    failure_reason: msg.failure_reason,
+                    rating: msg.rating,
+                    metadata: msg.metadata
                 }))
                 console.log('✅ Loaded messages from database:', formattedMessages.length, 'messages')
                 return formattedMessages
@@ -852,7 +876,6 @@ const ChatPage = () => {
                         {conversations.length === 0 && !isInitialLoading && (
                             <div className="p-4 text-center text-gray-500">
                                 <p className="text-sm">هنوز گفتگویی ندارید</p>
-                                <p className="text-xs mt-1">روی "گفتگوی جدید" کلیک کنید تا شروع کنید</p>
                             </div>
                         )}
                     </div>

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react"
 import { useAuth } from "../context/AuthContext"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
+import { adminService, type GeneratedMetadata } from "../services/adminService"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table"
@@ -10,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import AdminFileUpload from "../components/AdminFileUpload"
 import toast from "react-hot-toast"
-import { Plus, Edit, Trash2, Eye, Search, ChevronLeft, ChevronRight, Upload } from "lucide-react"
+import { Plus, Edit, Trash2, Eye, Search, ChevronLeft, ChevronRight, Upload, Sparkles } from "lucide-react"
 
 // Article Form Component
 const ArticleForm: React.FC<{
@@ -26,6 +27,7 @@ const ArticleForm: React.FC<{
     tags: article?.tags?.join(", ") || ""
   })
   const [loading, setLoading] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -51,6 +53,36 @@ const ArticleForm: React.FC<{
       toast.error(error.message || "خطا در ذخیره مقاله")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGenerateMetadata = async () => {
+    if (!formData.title.trim() || !formData.content.trim()) {
+      toast.error("لطفاً عنوان و محتوای مقاله را وارد کنید")
+      return
+    }
+
+    setAiLoading(true)
+    try {
+      const metadata: GeneratedMetadata = await adminService.generateArticleMetadata(
+        formData.title,
+        formData.content
+      )
+
+      // بروزرسانی فرم با متادیتای تولید شده
+      setFormData(prev => ({
+        ...prev,
+        summary: metadata.summary,
+        tags: metadata.tags.join(", "),
+        category_id: metadata.suggested_category
+      }))
+
+      toast.success("متادیتای هوش مصنوعی با موفقیت تولید شد ✨")
+    } catch (error: any) {
+      console.error("Error generating metadata:", error)
+      toast.error(error.message || "خطا در تولید متادیتای هوش مصنوعی")
+    } finally {
+      setAiLoading(false)
     }
   }
 
@@ -110,6 +142,20 @@ const ArticleForm: React.FC<{
               className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="محتوای مقاله را وارد کنید (TinyMCE در آینده اضافه خواهد شد)"
             />
+          </div>
+
+          {/* AI Metadata Generation Button */}
+          <div className="flex justify-center mb-4">
+            <Button
+              type="button"
+              onClick={handleGenerateMetadata}
+              disabled={aiLoading || !formData.title.trim() || !formData.content.trim()}
+              variant="outline"
+              className="flex items-center gap-2 bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 border-purple-200"
+            >
+              <Sparkles className="h-4 w-4 text-purple-600" />
+              {aiLoading ? "در حال تولید..." : "تولید با هوش مصنوعی ✨"}
+            </Button>
           </div>
 
           <div className="flex gap-2">
@@ -284,8 +330,9 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
           <CardContent>
             <AdminFileUpload
               onUploadSuccess={(data) => {
-                toast.success(`فایل ${data.filename} با موفقیت آپلود شد!`)
+                toast.success(`فایل ${data.title} با موفقیت آپلود شد و متادیتای هوش مصنوعی تولید گردید! ✨`)
                 setShowUpload(false)
+                loadArticles() // Reload articles to show the new one
               }}
               onClose={() => setShowUpload(false)}
             />

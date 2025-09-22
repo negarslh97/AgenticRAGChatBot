@@ -41,10 +41,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       console.log("Processing messages:", conversationMessages.length)
       if (conversationMessages.length === 0) {
         console.log("No messages found, showing welcome message")
-        const welcomeMessage = {
+        const welcomeMessage: ChatMessage = {
           id: "welcome",
           content: "👋 Hi! I'm Sally, your AI assistant. How can I help you today?",
-          is_from_user: false,
+          sender_type: "ai" as const,
           created_at: new Date().toISOString(),
         }
         console.log("Setting welcome message:", welcomeMessage)
@@ -66,10 +66,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       loadConversationMessages()
     } else {
       // Show welcome message for new conversation
-      const welcomeMessage = {
+      const welcomeMessage: ChatMessage = {
         id: "welcome",
         content: "👋 Hi! I'm Sally, your AI assistant. How can I help you today?",
-        is_from_user: false,
+        sender_type: "ai" as const,
         created_at: new Date().toISOString(),
       }
       setMessages([welcomeMessage])
@@ -94,7 +94,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
     const userMessage: ChatMessage = {
       id: `temp_${Date.now()}`,
       content: inputMessage,
-      is_from_user: true,
+        sender_type: user ? "Customer" : "Guest" as const,
       created_at: new Date().toISOString(),
     }
 
@@ -122,7 +122,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       const aiMessage: ChatMessage = {
         id: response.message_id,
         content: response.message,
-        is_from_user: false,
+        sender_type: "ai" as const,
         created_at: new Date().toISOString(),
         metadata: {
           sources: response.sources,
@@ -147,7 +147,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
   }
 
   const renderMessage = (message: ChatMessage) => {
-    const isUser = message.is_from_user
+    const isUser = message.sender_type !== 'ai'
     const sources = message.metadata?.sources || []
     const suggestedActions = message.metadata?.suggested_actions || []
 

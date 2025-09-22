@@ -1,17 +1,35 @@
-import axios from "axios"
 import api from "./authService"
-
-const API_BASE_URL = "http://localhost:8000"
 
 export interface ChatMessage {
   id: string
   content: string
-  is_from_user: boolean
+  sender_type: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'customer' | 'admin' | 'super_admin' | 'guest' | 'ai'
+  sender_id?: string
+  is_failed?: boolean
+  failure_reason?: string
+  rating?: {
+    rating: number
+    comment?: string
+    rated_by?: string
+    rated_at?: string
+  }
   created_at: string
   metadata?: {
     sources?: Array<{ title: string; id: string }>
     confidence?: number
     suggested_actions?: string[]
+    model_name?: string
+    provider?: string
+    token_usage?: {
+      prompt_tokens?: number
+      completion_tokens?: number
+      total_tokens?: number
+    }
+    processing_details?: {
+      retrieval_method?: string
+      knowledge_base_used?: boolean
+      fallback_used?: boolean
+    }
   }
 }
 
@@ -27,6 +45,7 @@ export interface ChatResponse {
 export interface Conversation {
   id: string
   title: string
+  tags: string[]
   created_at: string
   updated_at: string
 }
@@ -68,6 +87,9 @@ export const chatService = {
     return response.data.messages
   },
 
+  // WebSocket functionality - currently disabled
+  // TODO: Implement real-time chat features when needed
+  /*
   createWebSocketConnection(onMessage: (data: any) => void): WebSocket {
     const ws = new WebSocket("ws://localhost:8000/api/ws")
 
@@ -87,5 +109,26 @@ export const chatService = {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message))
     }
+  },
+  */
+
+  async rateMessage(messageId: string, rating: number, comment?: string): Promise<void> {
+    await api.post(`/api/messages/${messageId}/rate`, {
+      rating,
+      comment
+    })
+  },
+
+  async getConversationRatingStats(conversationId: string): Promise<{
+    conversation_id: string
+    rating_stats: {
+      total_rated_messages: number
+      average_rating: number
+      rating_distribution: { [key: number]: number }
+      total_ratings: number
+    }
+  }> {
+    const response = await api.get(`/api/conversations/${conversationId}/rating-stats`)
+    return response.data
   },
 }

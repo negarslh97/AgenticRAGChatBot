@@ -23,6 +23,25 @@ interface Message {
   content: string;
   role: 'user' | 'assistant';
   timestamp: Date;
+  sender_type?: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'customer' | 'admin' | 'super_admin' | 'guest' | 'ai';
+  is_failed?: boolean;
+  failure_reason?: string;
+  rating?: {
+    rating: number;
+    comment?: string;
+    rated_by?: string;
+    rated_at?: string;
+  };
+  metadata?: {
+    model_name?: string;
+    provider?: string;
+    confidence?: number;
+    token_usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+  };
 }
 
 interface Conversation extends ApiConversation {
@@ -74,8 +93,13 @@ const Chat: React.FC = () => {
       const transformedMessages: Message[] = fetchedMessages.map(msg => ({
         id: msg.id,
         content: msg.content,
-        role: msg.is_from_user ? 'user' : 'assistant',
+        role: msg.sender_type === 'ai' ? 'assistant' : 'user',
         timestamp: new Date(msg.created_at),
+        sender_type: msg.sender_type,
+        is_failed: msg.is_failed,
+        failure_reason: msg.failure_reason,
+        rating: msg.rating,
+        metadata: msg.metadata,
       }));
 
       setSelectedConversation({
@@ -112,6 +136,7 @@ const Chat: React.FC = () => {
       setSelectedConversation({
         id: 'new-chat',
         title: newMessage.slice(0, 30),
+        tags: [],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         messages: [optimisticUserMessage],
@@ -136,7 +161,13 @@ const Chat: React.FC = () => {
 
       // If it was a new chat, update the conversation list and the selected conversation
       if (!selectedConversation || selectedConversation.id === 'new-chat') {
-        const newConvFromServer = { id: response.conversation_id, title: newMessage.slice(0, 30), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        const newConvFromServer: ApiConversation = {
+          id: response.conversation_id,
+          title: newMessage.slice(0, 30),
+          tags: [],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
         setConversations(prev => [newConvFromServer, ...prev]);
         setSelectedConversation({
             ...newConvFromServer,
@@ -259,12 +290,30 @@ const Chat: React.FC = () => {
                     </div>
                   )}
                   <div className={`max-w-[70%]`}>
-                    <div className={`p-4 rounded-lg shadow-sm ${message.role === 'user' ? 'bg-white text-slate-800' : 'bg-blue-600 text-white'}`}>
+                    <div className={`p-4 rounded-lg shadow-sm ${message.role === 'user' ? 'bg-white text-slate-800' : message.is_failed ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-blue-600 text-white'}`}>
                       <p className="text-right whitespace-pre-wrap">{message.content}</p>
+                      {message.is_failed && message.failure_reason && (
+                        <p className="text-xs text-red-600 mt-2 text-right">
+                          خطا: {message.failure_reason}
+                        </p>
+                      )}
+                      {message.metadata && message.role === 'assistant' && (
+                        <div className="mt-2 text-xs opacity-75 text-left">
+                          {message.metadata.model_name && (
+                            <span>مدل: {message.metadata.model_name}</span>
+                          )}
+                          {message.metadata.confidence && (
+                            <span className="mr-2">دقت: {Math.round(message.metadata.confidence * 100)}%</span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <p className={`text-xs text-gray-500 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+                    <div className={`text-xs text-gray-500 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                       {formatTime(message.timestamp)}
-                    </p>
+                      {message.sender_type && message.sender_type !== 'ai' && message.sender_type !== 'Guest' && message.sender_type !== 'guest' && (
+                        <span className="mr-2">({message.sender_type})</span>
+                      )}
+                    </div>
                   </div>
                   {message.role === 'user' && (
                     <div className="h-8 w-8 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center">
@@ -327,6 +376,20 @@ const Chat: React.FC = () => {
                                   <h4 className="font-medium text-gray-900 truncate text-right">
                                       {conversation.title}
                                   </h4>
+                                  {conversation.tags && conversation.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {conversation.tags.slice(0, 3).map((tag, index) => (
+                                        <span key={index} className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                      {conversation.tags.length > 3 && (
+                                        <span className="text-xs text-gray-500">
+                                          +{conversation.tags.length - 3} بیشتر
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                   <p className="text-xs text-gray-500 text-right">
                                       {formatTime(new Date(conversation.created_at))}
                                   </p>

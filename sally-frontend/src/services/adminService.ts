@@ -37,6 +37,13 @@ export interface PublishArticleRequest {
   visibility?: "public" | "customer" | "internal";
 }
 
+export interface GeneratedMetadata {
+  summary: string;
+  tags: string[];
+  suggested_category: string;
+  suggested_visibility: string;
+}
+
 export interface Ticket {
   id: string;
   title: string;
@@ -157,6 +164,22 @@ export const adminService = {
     } catch (error) {
       console.error("Error uploading file:", error);
       throw new Error("خطا در آپلود فایل");
+    }
+  },
+
+  /**
+   * تولید متادیتای هوش مصنوعی برای مقاله
+   */
+  async generateArticleMetadata(title: string, content: string): Promise<GeneratedMetadata> {
+    try {
+      const response = await api.post<GeneratedMetadata>("/api/admin/articles/generate-metadata", {
+        title,
+        content,
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error generating metadata:", error);
+      throw new Error("خطا در تولید متادیتای هوش مصنوعی");
     }
   },
 

@@ -3,7 +3,8 @@ from typing import Optional, List, Union
 from pydantic import BaseModel
 from bson import ObjectId
 from app.domain.entities_refactored import (
-    Customer, Admin, Conversation, Message, GuestSession, UnansweredQuestion
+    Customer, Admin, Conversation, Message, GuestSession, UnansweredQuestion,
+    MessageRating
 )
 from app.core.permissions import get_current_customer, get_optional_customer, get_optional_admin
 from app.use_cases.chat_use_cases_refactored import ChatUseCases
@@ -89,6 +90,11 @@ async def get_conversations(current_customer: Customer = Depends(get_current_cus
 class TitleUpdateRequest(BaseModel):
     title: str
 
+
+class MessageRatingRequest(BaseModel):
+    rating: int  # 1-5 scale
+    comment: Optional[str] = None
+
 @router.put("/conversations/{conversation_id}/title")
 async def update_conversation_title(
     conversation_id: str,
@@ -101,20 +107,151 @@ async def update_conversation_title(
         conversation = await Conversation.get(ObjectId(conversation_id))
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        
+
         # Check if customer owns the conversation
         if conversation.customer_id != str(current_customer.id):
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         # Update the title
         conversation.title = title_request.title
         conversation.updated_at = datetime.utcnow()
         await conversation.save()
-        
+
         return {"message": "Title updated successfully"}
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/conversations/{conversation_id}/generate-title-tags")
+async def generate_conversation_title_tags(
+    conversation_id: str,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Generate AI-powered title and tags for a conversation."""
+    try:
+        # Get the conversation to check ownership
+        conversation = await Conversation.get(ObjectId(conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Check permissions
+        if current_customer and conversation.customer_id != str(current_customer.id):
+            raise HTTPException(status_code=403, detail="Access denied")
+        elif not current_customer and not current_admin:
+            # For guests, check guest session ownership
+            raise HTTPException(status_code=403, detail="Access denied - authentication required")
+
+        # Generate title and tags
+        result = await ChatUseCases.generate_conversation_title_and_tags(conversation_id)
+
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return {
+            "message": "Title and tags generated successfully",
+            "title": result["title"],
+            "tags": result["tags"]
+        }
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"Error generating title and tags: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/messages/{message_id}/rate")
+async def rate_message(
+    message_id: str,
+    rating_request: MessageRatingRequest,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Rate an AI message response."""
+    try:
+        # Validate rating range
+        if not 1 <= rating_request.rating <= 5:
+            raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+
+        # Get the message
+        message = await Message.get(ObjectId(message_id))
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        # Check if message is from AI
+        if message.sender_type != "ai":
+            raise HTTPException(status_code=400, detail="Only AI messages can be rated")
+
+        # Get the conversation to check ownership
+        conversation = await Conversation.get(ObjectId(message.conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Check permissions - only conversation owner can rate messages
+        rater_id = None
+        if current_customer and conversation.customer_id == str(current_customer.id):
+            rater_id = str(current_customer.id)
+        elif current_admin:
+            rater_id = str(current_admin.id)
+        else:
+            raise HTTPException(status_code=403, detail="Access denied - only conversation participants can rate messages")
+
+        # Create or update rating
+        message.rating = MessageRating(
+            rating=rating_request.rating,
+            comment=rating_request.comment,
+            rated_by=rater_id,
+            rated_at=datetime.utcnow()
+        )
+
+        await message.save()
+
+        return {
+            "message": "Rating submitted successfully",
+            "rating": rating_request.rating,
+            "comment": rating_request.comment
+        }
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"Error rating message: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/conversations/{conversation_id}/rating-stats")
+async def get_conversation_rating_stats(
+    conversation_id: str,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Get rating statistics for a conversation."""
+    try:
+        # Get the conversation to check ownership
+        conversation = await Conversation.get(ObjectId(conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Check permissions
+        if current_customer and conversation.customer_id != str(current_customer.id):
+            raise HTTPException(status_code=403, detail="Access denied")
+        elif not current_customer and not current_admin:
+            raise HTTPException(status_code=403, detail="Access denied - authentication required")
+
+        # Get rating statistics
+        stats = await ChatUseCases.get_message_rating_stats(conversation_id)
+
+        return {
+            "conversation_id": conversation_id,
+            "rating_stats": stats
+        }
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"Error getting rating stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -163,6 +300,9 @@ async def get_conversation_messages(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# WebSocket functionality - temporarily disabled
+# TODO: Implement WebSocket support when real-time features are needed
+"""
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -188,43 +328,6 @@ manager = ConnectionManager()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time chat."""
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
-            
-            # Extract user info if available (in real implementation, verify JWT token)
-            user_id = message_data.get("user_id")
-            user_type = message_data.get("user_type", "guest")
-            
-            user = None
-            if user_id and user_type == "Admin":
-                user = await Admin.get(user_id)
-            elif user_id and user_type == "Customer":
-                user = await Customer.get(user_id)
-            
-            # Process message
-            response = await ChatUseCases.send_message(
-                content=message_data.get("content", ""),
-                user=user,
-                user_type=user_type,
-                conversation_id=message_data.get("conversation_id"),
-                guest_session_id=message_data.get("guest_session_id")
-            )
-            
-            # Send response back
-            await manager.send_personal_message(json.dumps({
-                "type": "message_response",
-                "data": response
-            }), websocket)
-            
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception as e:
-        await manager.send_personal_message(json.dumps({
-            "type": "error",
-            "message": "An error occurred processing your message"
-        }), websocket)
-        manager.disconnect(websocket)
+    # WebSocket endpoint temporarily disabled
+    await websocket.close(code=1001)  # Going away
+"""
