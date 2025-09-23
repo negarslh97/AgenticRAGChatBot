@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useState } from "react"
-import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
+import React, { useState, useEffect } from "react"
+import { knowledgeBaseService, type Article, type Category } from "../services/knowledgeBaseService"
 import { adminService, type GeneratedMetadata } from "../services/adminService"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -22,10 +22,26 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
     content_markdown: article?.content_markdown || "",
     summary: article?.summary || "",
     category_id: article?.category?.id || "",
-    tag_names: article?.tags?.map(tag => tag.name).join(", ") || ""
+    tag_names: article?.tags?.map(tag => tag.name).join(", ") || "",
+    status: article?.status || "draft",
+    visibility: article?.visibility || ""
   })
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
+
+  useEffect(() => {
+    loadCategories()
+  }, [])
+
+  const loadCategories = async () => {
+    try {
+      const cats = await knowledgeBaseService.getCategories()
+      setCategories(cats)
+    } catch (error) {
+      console.error("Error loading categories:", error)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,7 +53,9 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
         content_html: undefined, // Will be generated from markdown
         summary: formData.summary || undefined,
         category_id: formData.category_id || undefined,
-        tag_names: formData.tag_names.split(",").map(tag => tag.trim()).filter(Boolean)
+        tag_names: formData.tag_names.split(",").map(tag => tag.trim()).filter(Boolean),
+        status: formData.status as "draft" | "published" | "archived",
+        visibility: formData.status === "published" ? (formData.visibility as "public" | "customer" | "internal") : undefined
       }
 
       if (article) {
@@ -115,11 +133,18 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
 
           <div>
             <label className="block text-sm font-medium mb-1">دسته‌بندی</label>
-            <Input
+            <select
               value={formData.category_id}
               onChange={(e) => setFormData(prev => ({ ...prev, category_id: e.target.value }))}
-              placeholder="شناسه دسته‌بندی"
-            />
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">انتخاب دسته‌بندی...</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -130,6 +155,41 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
               placeholder="برچسب1, برچسب2"
             />
           </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">وضعیت مقاله *</label>
+            <select
+              value={formData.status}
+              onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))}
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="draft">پیش‌نویس</option>
+              <option value="published">منتشر شده</option>
+              <option value="archived">بایگانی شده</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              وضعیت مقاله را انتخاب کنید. توجه: انتشار فقط برای سوپر ادمین ممکن است.
+            </p>
+          </div>
+
+          {formData.status === "published" && (
+            <div>
+              <label className="block text-sm font-medium mb-1">سطح دسترسی *</label>
+              <select
+                value={formData.visibility}
+                onChange={(e) => setFormData(prev => ({ ...prev, visibility: e.target.value }))}
+                className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">انتخاب کنید...</option>
+                <option value="public">عمومی</option>
+                <option value="customer">مشتری</option>
+                <option value="internal">داخلی (فقط ادمین‌ها)</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                تعیین کنید مقاله برای چه کسانی قابل مشاهده باشد.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-1">محتوا *</label>

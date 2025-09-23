@@ -12,12 +12,13 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
-  const { user, loading } = useAuth()
+  const { user, userType, loading } = useAuth()
   const [isReady, setIsReady] = useState(false)
   
   console.log("ProtectedRoute render:", {
     loading,
     user: user?.email,
+    userType,
     userRole: user?.role,
     requiredRole,
     hasToken: !!localStorage.getItem('token'),
@@ -66,16 +67,34 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
   }
 
   if (requiredRole) {
+    // استفاده از userType به جای user.role برای تعیین سطح دسترسی
     const roleHierarchy = {
       Customer: 1,
       Admin: 2,
       SuperAdmin: 3,
     }
 
-    const userLevel = roleHierarchy[user.role as keyof typeof roleHierarchy] || 0
+    let userLevel = 0
+    if (userType === "SuperAdmin") {
+      userLevel = 3
+    } else if (userType === "Admin") {
+      userLevel = 2
+    } else if (userType === "Customer") {
+      userLevel = 1
+    }
+
     const requiredLevel = roleHierarchy[requiredRole]
 
+    console.log("ProtectedRoute role check:", {
+      userType,
+      userLevel,
+      requiredRole,
+      requiredLevel,
+      hasAccess: userLevel >= requiredLevel
+    })
+
     if (userLevel < requiredLevel) {
+      console.log("❌ ProtectedRoute: Insufficient permissions, redirecting to home")
       return <Navigate to="/" replace />
     }
   }

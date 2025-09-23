@@ -51,6 +51,8 @@ export interface CreateArticleData {
   summary?: string
   category_id?: string
   tag_names: string[]
+  status?: "draft" | "published" | "archived"
+  visibility?: "public" | "customer" | "internal"
 }
 
 export interface UpdateArticleData {
@@ -60,7 +62,8 @@ export interface UpdateArticleData {
   summary?: string
   category_id?: string
   tag_names?: string[]
-  is_public?: boolean
+  status?: "draft" | "published" | "archived"
+  visibility?: "public" | "customer" | "internal"
 }
 
 export interface ArticleHistoryItem {

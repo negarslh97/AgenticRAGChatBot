@@ -6,6 +6,7 @@ import { authService, type User } from "../services/authService"
 
 interface AuthContextType {
   user: User | null
+  userType: "Admin" | "SuperAdmin"| "Customer" | null
   login: (email: string, password: string) => Promise<{ user: User }>
   register: (email: string, password: string, fullName: string) => Promise<{ user: User }>
   logout: () => void
@@ -32,6 +33,7 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
+  const [userType, setUserType] = useState<"Admin" | "SuperAdmin" | "Customer" | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -100,6 +102,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const response = await authService.login(email, password)
     localStorage.setItem("token", response.access_token)
     setUser(response.user)
+    setUserType(response.user_type)
     return { user: response.user }
   }
 
@@ -113,12 +116,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = () => {
     localStorage.removeItem("token")
     setUser(null)
+    setUserType(null)
     authService.logout()
   }
 
   const isAuthenticated = !!user
-  const isAdmin = user?.role === "Admin" || user?.role === "SuperAdmin"
-  const isSuperAdmin = user?.role === "SuperAdmin"
+  const isAdmin = userType === "Admin" || userType === "SuperAdmin"
+  const isSuperAdmin = userType === "SuperAdmin"
 
   const getDashboardByRole = (role: string): string => {
     switch (role) {
@@ -133,6 +137,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const value: AuthContextType = {
     user,
+    userType,
     login,
     register,
     logout,

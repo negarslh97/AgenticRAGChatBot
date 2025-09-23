@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { AxiosResponse, AxiosError, InternalAxiosRequestConfig } from "axios";
 import type { User } from "../types/user";
 
 const API_BASE_URL = "http://localhost:8000";
@@ -15,7 +15,7 @@ export type { User };
 export interface LoginResponse {
   access_token: string;
   token_type: string;
-  user_type: "admin" | "Customer"; // این فیلد جدید از بک‌اند می‌آید
+  user_type: "Admin" | "SuperAdmin" | "Customer"; // این فیلد جدید از بک‌اند می‌آید
   user: User;
 }
 
@@ -27,7 +27,7 @@ const api = axios.create({
 });
 
 // اضافه کردن توکن به هدر درخواست‌ها
-api.interceptors.request.use((config) => {
+api.interceptors.request.use((config: InternalAxiosRequestConfig): InternalAxiosRequestConfig => {
   const token = localStorage.getItem("token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -37,8 +37,8 @@ api.interceptors.request.use((config) => {
 
 // مدیریت خطای 401 برای خروج خودکار کاربر
 api.interceptors.response.use(
-  (response) => response,
-  (error) => {
+  (response: AxiosResponse) => response,
+  (error: AxiosError) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("token");
       // برای جلوگیری از ریدایرکت‌های بی‌نهایت، چک می‌کنیم که در صفحه لاگین نباشیم

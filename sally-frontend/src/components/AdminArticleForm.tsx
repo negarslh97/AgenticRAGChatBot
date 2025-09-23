@@ -16,7 +16,9 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
     title: "",
     content_markdown: "",
     summary: "",
-    tag_names: ""
+    tag_names: "",
+    status: "draft",
+    visibility: ""
   })
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -34,7 +36,9 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
         title: formData.title,
         content_markdown: formData.content_markdown,
         summary: formData.summary || undefined,
-        tag_names: formData.tag_names.split(",").map(tag => tag.trim()).filter(Boolean)
+        tag_names: formData.tag_names.split(",").map(tag => tag.trim()).filter(Boolean),
+        status: formData.status as "draft" | "published" | "archived",
+        visibility: formData.status === "published" ? (formData.visibility as "public" | "customer" | "internal") : undefined
       })
 
       toast.success("مقاله با موفقیت ایجاد شد!")
@@ -44,7 +48,9 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
         title: "",
         content_markdown: "",
         summary: "",
-        tag_names: ""
+        tag_names: "",
+        status: "draft",
+        visibility: ""
       })
 
       onArticleCreated?.()
@@ -55,7 +61,7 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData(prev => ({
       ...prev,
       [e.target.name]: e.target.value
@@ -76,7 +82,9 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
           title: result.title,
           content_markdown: result.markdown_content,
           summary: result.summary,
-          tag_names: result.suggested_tags.join(", ")
+          tag_names: result.suggested_tags.join(", "),
+          status: "draft",
+          visibility: ""
         }))
         toast.success("فایل با موفقیت آپلود و تبدیل شد!")
       } else {
@@ -193,6 +201,49 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
             placeholder="برچسب1, برچسب2, برچسب3"
           />
         </div>
+
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-1">
+            وضعیت مقاله *
+          </label>
+          <select
+            name="status"
+            value={formData.status}
+            onChange={handleChange}
+            required
+            className="input-field"
+          >
+            <option value="draft">پیش‌نویس</option>
+            <option value="published">منتشر شده</option>
+            <option value="archived">بایگانی شده</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            وضعیت مقاله را انتخاب کنید. توجه: انتشار مستقیم فقط برای سوپر ادمین ممکن است.
+          </p>
+        </div>
+
+        {formData.status === "published" && (
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              سطح دسترسی *
+            </label>
+            <select
+              name="visibility"
+              value={formData.visibility}
+              onChange={handleChange}
+              required
+              className="input-field"
+            >
+              <option value="">انتخاب کنید...</option>
+              <option value="public">عمومی</option>
+              <option value="customer">مشتری</option>
+              <option value="internal">داخلی (فقط ادمین‌ها)</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              تعیین کنید مقاله برای چه کسانی قابل مشاهده باشد.
+            </p>
+          </div>
+        )}
 
         <button
           type="submit"

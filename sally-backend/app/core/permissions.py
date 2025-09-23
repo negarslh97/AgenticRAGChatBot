@@ -154,8 +154,10 @@ async def get_admin_from_token(token: str) -> Optional[Admin]:
         logger.info(f"Token payload verified: {payload}")
         
         # توکن‌های ادمین باید نوع مشخصی داشته باشند تا با توکن مشتری اشتباه گرفته نشوند
-        if payload.get("type") != "admin":
-            logger.info(f"Token type is not 'admin': {payload.get('type')}")
+        token_type = payload.get("type")
+        logger.info(f"Checking token type: {token_type}")
+        if token_type not in ["Admin", "SuperAdmin"]:
+            logger.info(f"Token type '{token_type}' is not in ['Admin', 'SuperAdmin']")
             logger.info("==== GET ADMIN FROM TOKEN END (WRONG TYPE) ====")
             return None
             
@@ -220,7 +222,7 @@ async def get_current_customer_from_token(token: str) -> Optional[Customer]:
         logger.info(f"Token payload verified: {payload}")
         
         # توکن‌های مشتری باید نوع مشخصی داشته باشند
-        if payload.get("type") != "customer":
+        if payload.get("type") != "Customer":
             logger.info(f"Token type is not 'customer': {payload.get('type')}")
             logger.info("==== GET CUSTOMER FROM TOKEN END (WRONG TYPE) ====")
             return None

@@ -123,6 +123,8 @@ class ArticleCreate(BaseModel):
     summary: Optional[str] = None
     category_id: Optional[str] = None
     tag_names: List[str] = []
+    status: Optional[ArticleStatus] = ArticleStatus.DRAFT
+    visibility: Optional[ArticleVisibility] = None
 
 class ArticleUpdate(BaseModel):
     title: str
@@ -131,6 +133,8 @@ class ArticleUpdate(BaseModel):
     summary: Optional[str] = None
     category_id: Optional[str] = None
     tag_names: List[str] = []
+    status: Optional[ArticleStatus] = None
+    visibility: Optional[ArticleVisibility] = None
 
 class ArticleResponse(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
@@ -198,8 +202,9 @@ async def create_article(
     current_user: Admin = Depends(get_current_admin)
 ):
     """
-    Create a new knowledge base article as a draft.
+    Create a new knowledge base article.
     Accessible by admin and SuperAdmin.
+    Only SuperAdmin can create published articles directly.
     """
     # Generate HTML from markdown if not provided
     content_html = article_data.content_html
@@ -216,6 +221,26 @@ async def create_article(
     # Handle tags
     tags = await get_or_create_tags(article_data.tag_names)
 
+    # Check permissions for publishing
+    if article_data.status == ArticleStatus.PUBLISHED and current_user.role != UserRole.SuperAdmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only SuperAdmin can publish articles directly. Create as draft and use publish endpoint."
+        )
+
+    # Set published_at and publisher if status is PUBLISHED
+    published_at = None
+    publisher = None
+    if article_data.status == ArticleStatus.PUBLISHED:
+        published_at = datetime.utcnow()
+        publisher = current_user
+        # Require visibility for published articles
+        if not article_data.visibility:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Visibility is required when publishing an article"
+            )
+
     new_article = KnowledgeBaseArticle(
         title=article_data.title,
         content_markdown=article_data.content_markdown,
@@ -223,9 +248,11 @@ async def create_article(
         summary=article_data.summary,
         category=category,
         tags=tags,
-        author=current_user,
-        status=ArticleStatus.DRAFT,
-        visibility=None  # Visibility set only when published
+        author_id=str(current_user.id),
+        status=article_data.status or ArticleStatus.DRAFT,
+        visibility=article_data.visibility,
+        published_at=published_at,
+        publisher_id=str(publisher.id) if publisher else None
     )
     await new_article.insert()
     new_article.id = str(new_article.id)
@@ -251,7 +278,7 @@ async def create_article(
         summary=new_article.summary,
         status=new_article.status,
         visibility=new_article.visibility,
-        author_id=str(new_article.author.ref) if new_article.author else "",
+        author_id=new_article.author_id,
         category=new_article.category.model_dump() if new_article.category else None,
         tags=[tag.model_dump() for tag in new_article.tags],
         version=new_article.version,
@@ -339,7 +366,7 @@ async def upload_kb_file(
         summary=ai_metadata.get("summary") if ai_metadata else f"محتوای استخراج شده از فایل: {original_filename}",
         category=category,
         tags=tags,
-        author=current_user,
+        author_id=str(current_user.id),
         status=ArticleStatus.DRAFT,
         visibility=None
     )
@@ -367,7 +394,7 @@ async def upload_kb_file(
         summary=new_article.summary,
         status=new_article.status,
         visibility=new_article.visibility,
-        author_id=str(new_article.author.ref) if new_article.author else "",
+        author_id=new_article.author_id,
         category=new_article.category.model_dump() if new_article.category else None,
         tags=[tag.model_dump() for tag in new_article.tags],
         version=new_article.version,
@@ -399,7 +426,7 @@ async def publish_article(
     article.status = ArticleStatus.PUBLISHED
     article.visibility = publish_request.visibility
     article.published_at = datetime.utcnow()
-    article.publisher = current_user
+    article.publisher_id = str(current_user.id)
 
     await article.save()
     article.id = str(article.id)
@@ -425,7 +452,7 @@ async def publish_article(
         summary=article.summary,
         status=article.status,
         visibility=article.visibility,
-        author_id=str(article.author.ref) if article.author else "",
+        author_id=article.author_id,
         category=article.category.model_dump() if article.category else None,
         tags=[tag.model_dump() for tag in article.tags],
         version=article.version,
@@ -452,11 +479,8 @@ async def list_articles(
     # Transform to ArticleResponse format
     response_articles = []
     for article in articles:
-        # For Link fields, we need to get the ID from the ref attribute
-        author_id = ""
-        if article.author:
-            # In Beanie Link, the ObjectId is accessible via .ref attribute
-            author_id = str(article.author.ref)
+        # Use author_id directly from the article
+        author_id = article.author_id
 
         response_articles.append(ArticleResponse(
             id=str(article.id),
@@ -496,7 +520,7 @@ async def get_article(
         summary=article.summary,
         status=article.status,
         visibility=article.visibility,
-        author_id=str(article.author.ref) if article.author else "",
+        author_id=article.author_id,
         category=article.category.model_dump() if article.category else None,
         tags=[tag.model_dump() for tag in article.tags],
         version=article.version,
@@ -520,9 +544,25 @@ async def update_article(
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
+    # Check permissions for status and visibility changes
+    if article_data.status is not None and article_data.status != article.status:
+        # Only SuperAdmin can change status to PUBLISHED
+        if article_data.status == ArticleStatus.PUBLISHED and current_user.role_name != "SuperAdmin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only SuperAdmin can publish articles."
+            )
+
+        # Require visibility when publishing
+        if article_data.status == ArticleStatus.PUBLISHED and not article_data.visibility:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Visibility is required when publishing an article."
+            )
+
     if current_user.role_name != "SuperAdmin":
         # Check if the current user is the author (using Link comparison)
-        if str(article.author.ref) != str(current_user.id) or article.status != ArticleStatus.DRAFT:
+        if article.author_id != str(current_user.id) or article.status != ArticleStatus.DRAFT:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only update your own draft articles."
@@ -532,23 +572,36 @@ async def update_article(
     content_html = article_data.content_html
     if not content_html:
         content_html = markdown.markdown(article_data.content_markdown)
-    
+
     # Handle category
     category = None
     if article_data.category_id:
         cat = await Category.get(article_data.category_id)
         if cat:
             category = ArticleCategory(id=str(cat.id), name=cat.name, slug=cat.slug)
-    
+
     # Handle tags
     tags = await get_or_create_tags(article_data.tag_names)
 
+    # Update article fields
     article.title = article_data.title
     article.content_markdown = article_data.content_markdown
     article.content_html = content_html
     article.summary = article_data.summary
     article.category = category
     article.tags = tags
+
+    # Update status and visibility if provided
+    if article_data.status is not None:
+        article.status = article_data.status
+        # Set published timestamp if status changed to PUBLISHED
+        if article_data.status == ArticleStatus.PUBLISHED and article.status != ArticleStatus.PUBLISHED:
+            article.published_at = datetime.utcnow()
+            article.publisher_id = str(current_user.id)
+
+    if article_data.visibility is not None:
+        article.visibility = article_data.visibility
+
     article.updated_at = datetime.utcnow()
     article.version += 1
 
@@ -575,7 +628,7 @@ async def update_article(
         summary=article.summary,
         status=article.status,
         visibility=article.visibility,
-        author_id=str(article.author.ref) if article.author else "",
+        author_id=article.author_id,
         category=article.category.model_dump() if article.category else None,
         tags=[tag.model_dump() for tag in article.tags],
         version=article.version,

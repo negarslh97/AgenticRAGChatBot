@@ -250,8 +250,8 @@ class KnowledgeBaseArticle(Document):
     tags: List[ArticleTag] = []  # Embedded tags
     status: ArticleStatus = ArticleStatus.DRAFT
     visibility: Optional[ArticleVisibility] = None  # Only set for published articles
-    author: Link[Admin]  # Direct reference to author
-    publisher: Optional[Link[Admin]] = None  # Direct reference to publisher
+    author_id: str  # Author ID as string
+    publisher_id: Optional[str] = None  # Publisher ID as string
     version: int = 1
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

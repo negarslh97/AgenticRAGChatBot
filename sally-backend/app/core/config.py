@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
 
+    # Docs-as-Code Git Configuration
+    kb_git_repo_url: Optional[str] = None
+    kb_git_username: Optional[str] = None
+    kb_git_password: Optional[str] = None
+    kb_git_local_path: str = "./knowledge-base"
+    kb_git_branch: str = "main"
+    kb_sync_interval: int = 300
+
     # Legacy fields for backward compatibility
     api_key: Optional[str] = None
     model: Optional[str] = None
