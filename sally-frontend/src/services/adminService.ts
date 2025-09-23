@@ -1,7 +1,8 @@
 // src/services/adminService.ts
 
-import axios from "axios";
+// import axios from "axios";
 import api from "./authService";
+import { Article } from "./knowledgeBaseService";
 
 // ============================================================================
 // Interfaces for Admin API responses and requests
@@ -54,6 +55,19 @@ export const adminService = {
   // Article Management Functions
   // ============================================================================
 
+
+  /**
+   * دریافت مقاله بر اساس ID
+   */
+  async getArticle(articleId: string): Promise<Article> {
+    try {
+      const response = await api.get<Article>(`/admin/kb/articles/${articleId}`);
+      return response.data;
+    } catch (error) {
+      console.error("Error getting article:", error);
+      throw new Error("خطا در دریافت مقاله");
+    }
+  },
 
   /**
    * ایجاد مقاله جدید در حالت پیش‌نویس

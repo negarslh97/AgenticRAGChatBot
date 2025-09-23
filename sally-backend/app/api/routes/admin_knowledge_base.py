@@ -25,6 +25,7 @@ from app.api.dependencies import get_current_admin
 from app.core.permissions import get_current_admin_with_permission, Permission
 from app.core.config import settings
 from app.docs_as_code.sync_service import MongoToGitSync
+from app.docs_as_code.config import get_default_config
 from app.docs_as_code.git_manager import GitManager
 from app.docs_as_code.monitoring import get_system_stats
 
@@ -99,67 +100,13 @@ def extract_text_from_csv(file_path: Path) -> str:
 
 
 async def generate_metadata_from_ai(title: str, content: str) -> dict:
-    """Generate metadata from AI for uploaded file content."""
+    """Generate metadata from AI for uploaded file content using LangChain."""
+    from app.infrastructure.langchain_utils import langchain_service
+
     try:
-        # Initialize OpenAI client
-        client = openai.OpenAI(
-            api_key=settings.openai_api_key_loaded,
-            base_url=settings.openai_base_url_loaded,
-        )
-
-        prompt_template = f"""
-You are an expert content strategist for a knowledge base. Your task is to analyze the following article and generate structured metadata in Persian (Farsi).
-
-**Instructions:**
-1. Generate a concise, professional **summary**.
-2. Generate 3 to 5 relevant **tags**.
-3. Suggest a **category** from the provided list.
-4. Suggest a **visibility** level based on the content.
-5. Your output **MUST** be a single, valid JSON object and nothing else.
-
-**Available Options:**
-- Categories: ["راهنمای محصول", "مشکلات فنی", "حساب کاربری و صورتحساب", "عمومی"]
-- Visibility: ["public", "customer", "internal"]
-
-**Article to Analyze:**
-- Title: {title}
-- Content: {content}
-
-**Required JSON Output:**
-{{
-  "summary": "...",
-  "tags": ["...", "..."],
-  "suggested_category": "...",
-  "suggested_visibility": "..."
-}}
-"""
-
-        # Make API call
-        response = client.chat.completions.create(
-            model=settings.openai_model_loaded or "gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that generates metadata for knowledge base articles."},
-                {"role": "user", "content": prompt_template}
-            ],
-            max_tokens=500,
-            temperature=0.7,
-        )
-
-        # Parse AI response
-        ai_response = response.choices[0].message.content.strip()
-        metadata = json.loads(ai_response)
-        return metadata
-
-    except openai.OpenAIError as e:
-        # Return default metadata if AI fails
-        return {
-            "summary": f"محتوای استخراج شده از فایل: {title}",
-            "tags": ["آپلود شده", "فایل"],
-            "suggested_category": "عمومی",
-            "suggested_visibility": "internal"
-        }
+        return await langchain_service.generate_metadata(title, content)
     except Exception as e:
-        # Return default metadata if parsing fails
+        # Return default metadata if AI fails
         return {
             "summary": f"محتوای استخراج شده از فایل: {title}",
             "tags": ["آپلود شده", "فایل"],
@@ -285,7 +232,8 @@ async def create_article(
 
     # Sync to Git repository
     try:
-        sync_service = MongoToGitSync()
+        config = get_default_config()
+        sync_service = MongoToGitSync(config)
         author_info = {
             "name": current_user.full_name,
             "email": current_user.email
@@ -303,13 +251,13 @@ async def create_article(
         summary=new_article.summary,
         status=new_article.status,
         visibility=new_article.visibility,
-        author_id=str(new_article.author.id) if new_article.author else "",
-        category=new_article.category,
-        tags=new_article.tags,
+        author_id=str(new_article.author.ref) if new_article.author else "",
+        category=new_article.category.model_dump() if new_article.category else None,
+        tags=[tag.model_dump() for tag in new_article.tags],
         version=new_article.version,
-        created_at=new_article.created_at,
-        updated_at=new_article.updated_at,
-        published_at=new_article.published_at
+        created_at=new_article.created_at.isoformat() if new_article.created_at else None,
+        updated_at=new_article.updated_at.isoformat() if new_article.updated_at else None,
+        published_at=new_article.published_at.isoformat() if new_article.published_at else None
     )
 
 @router.post("/articles/upload", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
@@ -370,7 +318,7 @@ async def upload_kb_file(
 
     # Generate HTML from markdown if not provided (for text content)
     content_html = markdown.markdown(article_content) if article_content else ""
-    
+
     # Handle category from AI metadata
     category = None
     if ai_metadata and ai_metadata.get("suggested_category"):
@@ -378,11 +326,11 @@ async def upload_kb_file(
         cat = await Category.find_one(Category.name == ai_metadata["suggested_category"])
         if cat:
             category = ArticleCategory(id=str(cat.id), name=cat.name, slug=cat.slug)
-    
+
     # Handle tags from AI metadata
     tag_names = ai_metadata.get("tags", []) if ai_metadata else ["آپلود شده", file_extension[1:]]
     tags = await get_or_create_tags(tag_names)
-    
+
     # Create article with extracted content and AI-generated metadata
     new_article = KnowledgeBaseArticle(
         title=article_title,
@@ -397,10 +345,11 @@ async def upload_kb_file(
     )
     await new_article.insert()
     new_article.id = str(new_article.id)
-    
+
     # Sync to Git repository
     try:
-        sync_service = MongoToGitSync()
+        config = get_default_config()
+        sync_service = MongoToGitSync(config)
         author_info = {
             "name": current_user.full_name,
             "email": current_user.email
@@ -418,13 +367,13 @@ async def upload_kb_file(
         summary=new_article.summary,
         status=new_article.status,
         visibility=new_article.visibility,
-        author_id=str(new_article.author.id) if new_article.author else "",
-        category=new_article.category,
-        tags=new_article.tags,
+        author_id=str(new_article.author.ref) if new_article.author else "",
+        category=new_article.category.model_dump() if new_article.category else None,
+        tags=[tag.model_dump() for tag in new_article.tags],
         version=new_article.version,
-        created_at=new_article.created_at,
-        updated_at=new_article.updated_at,
-        published_at=new_article.published_at
+        created_at=new_article.created_at.isoformat() if new_article.created_at else None,
+        updated_at=new_article.updated_at.isoformat() if new_article.updated_at else None,
+        published_at=new_article.published_at.isoformat() if new_article.published_at else None
     )
 
 @router.post("/articles/{article_id}/publish", response_model=ArticleResponse)
@@ -451,13 +400,14 @@ async def publish_article(
     article.visibility = publish_request.visibility
     article.published_at = datetime.utcnow()
     article.publisher = current_user
-    
+
     await article.save()
     article.id = str(article.id)
-    
+
     # Sync to Git repository
     try:
-        sync_service = MongoToGitSync()
+        config = get_default_config()
+        sync_service = MongoToGitSync(config)
         author_info = {
             "name": current_user.full_name,
             "email": current_user.email
@@ -475,13 +425,13 @@ async def publish_article(
         summary=article.summary,
         status=article.status,
         visibility=article.visibility,
-        author_id=str(article.author.id) if article.author else "",
-        category=article.category,
-        tags=article.tags,
+        author_id=str(article.author.ref) if article.author else "",
+        category=article.category.model_dump() if article.category else None,
+        tags=[tag.model_dump() for tag in article.tags],
         version=article.version,
-        created_at=article.created_at,
-        updated_at=article.updated_at,
-        published_at=article.published_at
+        created_at=article.created_at.isoformat() if article.created_at else None,
+        updated_at=article.updated_at.isoformat() if article.updated_at else None,
+        published_at=article.published_at.isoformat() if article.published_at else None
     )
 
 @router.get("/articles", response_model=List[ArticleResponse])
@@ -546,13 +496,13 @@ async def get_article(
         summary=article.summary,
         status=article.status,
         visibility=article.visibility,
-        author_id=str(article.author.id) if article.author else "",
-        category=article.category,
-        tags=article.tags,
+        author_id=str(article.author.ref) if article.author else "",
+        category=article.category.model_dump() if article.category else None,
+        tags=[tag.model_dump() for tag in article.tags],
         version=article.version,
-        created_at=article.created_at,
-        updated_at=article.updated_at,
-        published_at=article.published_at
+        created_at=article.created_at.isoformat() if article.created_at else None,
+        updated_at=article.updated_at.isoformat() if article.updated_at else None,
+        published_at=article.published_at.isoformat() if article.published_at else None
     )
 
 @router.put("/articles/{article_id}", response_model=ArticleResponse)
@@ -572,7 +522,7 @@ async def update_article(
 
     if current_user.role_name != "SuperAdmin":
         # Check if the current user is the author (using Link comparison)
-        if str(article.author.id) != str(current_user.id) or article.status != ArticleStatus.DRAFT:
+        if str(article.author.ref) != str(current_user.id) or article.status != ArticleStatus.DRAFT:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only update your own draft articles."
@@ -601,12 +551,13 @@ async def update_article(
     article.tags = tags
     article.updated_at = datetime.utcnow()
     article.version += 1
-    
+
     await article.save()
-    
+
     # Sync to Git repository
     try:
-        sync_service = MongoToGitSync()
+        config = get_default_config()
+        sync_service = MongoToGitSync(config)
         author_info = {
             "name": current_user.full_name,
             "email": current_user.email
@@ -624,13 +575,13 @@ async def update_article(
         summary=article.summary,
         status=article.status,
         visibility=article.visibility,
-        author_id=str(article.author.id) if article.author else "",
-        category=article.category,
-        tags=article.tags,
+        author_id=str(article.author.ref) if article.author else "",
+        category=article.category.model_dump() if article.category else None,
+        tags=[tag.model_dump() for tag in article.tags],
         version=article.version,
-        created_at=article.created_at,
-        updated_at=article.updated_at,
-        published_at=article.published_at
+        created_at=article.created_at.isoformat() if article.created_at else None,
+        updated_at=article.updated_at.isoformat() if article.updated_at else None,
+        published_at=article.published_at.isoformat() if article.published_at else None
     )
 
 @router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -650,7 +601,8 @@ async def delete_article(
     
     # Sync deletion to Git repository
     try:
-        sync_service = MongoToGitSync()
+        config = get_default_config()
+        sync_service = MongoToGitSync(config)
         author_info = {
             "name": current_user.full_name,
             "email": current_user.email

@@ -1,6 +1,5 @@
 from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
-import openai
 import logging
 from app.core.config import settings
 from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility, Customer, Admin
@@ -99,68 +98,38 @@ class SimpleRAGService(RAGService):
         }
     
     async def _generate_openai_response(self, query: str, context: str) -> str:
-        """Generate response using OpenAI API."""
-        prompt = f"""You are Sally, a helpful customer support assistant. Use the following context to answer the user's question accurately and helpfully.
+        """Generate response using LangChain."""
+        from app.infrastructure.langchain_utils import langchain_service
 
-Context:
-{context}
-
-User Question: {query}
-
-Please provide a clear, helpful response based on the context provided. If the context doesn't contain enough information to fully answer the question, acknowledge this and suggest contacting support for more help."""
-
-        model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
-        logger.info(f"_generate_openai_response: Using model '{model}', base_url '{self.client.base_url if self.client else None}', api_key prefix '{settings.openai_api_key_loaded[:10]}...'")
-        
         try:
-            # Use the new OpenAI API (v1.0+)
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            logger.info(f"_generate_openai_response: API call successful for query '{query[:50]}...'")
-            return response.choices[0].message.content.strip()
+            logger.info(f"_generate_openai_response: Using LangChain RAG model for query '{query[:50]}...'")
+            return await langchain_service.generate_rag_response(query, context)
         except Exception as e:
-            logger.error(f"_generate_openai_response: API error for query '{query[:50]}...': {e}")
+            logger.error(f"_generate_openai_response: LangChain error for query '{query[:50]}...': {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             # Fallback response
-            raise Exception("OpenAI API unavailable")
+            raise Exception("AI service unavailable")
     
     async def _generate_direct_openai_response(self, query: str, user_context: Dict[str, Any]) -> str:
-        """Generate response using OpenAI API directly without RAG context."""
-        prompt = f"""You are Sally, a helpful customer support assistant. The user has asked: "{query}"
-
-Please provide a helpful response to their question. Since I don't have specific information from our knowledge base available, respond in a general but helpful way. If appropriate:
-- Offer to help contact support for more specific assistance
-- Suggest they provide more details if they need a more specific answer
-- Be friendly and professional in your response
-
-Your response:"""
-
-        model = settings.openai_model_loaded or "gpt-3.5-turbo"
-        logger.info(f"_generate_direct_openai_response: Using model '{model}', base_url '{self.client.base_url if self.client else None}', api_key prefix '{settings.openai_api_key_loaded[:10]}...' for query '{query[:50]}...'")
+        """Generate response using LangChain directly without RAG context."""
+        from app.infrastructure.langchain_utils import langchain_service
 
         try:
-            # Use OpenAI API with minimal parameters
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            logger.info(f"_generate_direct_openai_response: API success - Response preview: '{response.choices[0].message.content[:100]}...'")
-            return response.choices[0].message.content.strip()
+            logger.info(f"_generate_direct_openai_response: Using LangChain chat model for query '{query[:50]}...'")
+
+            # Convert user_context to messages format if needed
+            messages = [
+                {"role": "user", "content": query}
+            ]
+
+            return await langchain_service.generate_chat_response(messages)
         except Exception as e:
-            logger.error(f"_generate_direct_openai_response: API error for query '{query[:50]}...': {e}")
+            logger.error(f"_generate_direct_openai_response: LangChain error for query '{query[:50]}...': {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             # Fallback response if API fails
-            fallback = f"سلام! من سالی، دستیار هوشمند شما هستم. متأسفانه در حال حاضر به پایگاه دانش دسترسی ندارم، اما می‌توانم به سوالات شما پاسخ دهم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید تا بهتر کمک کنم."
+            fallback = "سلام! من سالی، دستیار هوشمند شما هستم. متأسفانه در حال حاضر به پایگاه دانش دسترسی ندارم، اما می‌توانم به سوالات شما پاسخ دهم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید تا بهتر کمک کنم."
             logger.warning(f"Using fallback response: '{fallback}'")
             return fallback
 
@@ -260,24 +229,16 @@ User Question: {query}
 
 Please provide a clear, helpful response based on the context provided. If the context doesn't contain enough information, acknowledge this and offer to help with other ways."""
 
-        model = settings.openai_model_loaded or "gpt-3.5-turbo"
-        logger.info(f"_generate_openai_response_with_context: Using model '{model}', base_url '{self.client.base_url if self.client else None}' for query '{query[:50]}...'")
+        from app.infrastructure.langchain_utils import langchain_service
 
         try:
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are Sally, a helpful customer support assistant. Always respond in Persian (Farsi)."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            logger.info(f"_generate_openai_response_with_context: API success - Response preview: '{response.choices[0].message.content[:100]}...'")
-            return response.choices[0].message.content.strip()
+            logger.info(f"_generate_openai_response_with_context: Using LangChain RAG model for query '{query[:50]}...'")
+            return await langchain_service.generate_rag_response(query, context)
         except Exception as e:
-            logger.error(f"_generate_openai_response_with_context: API error for query '{query[:50]}...': {e}")
+            logger.error(f"_generate_openai_response_with_context: LangChain error for query '{query[:50]}...': {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            raise Exception("OpenAI API unavailable")
+            raise Exception("AI service unavailable")
 
     async def _generate_agentic_response(self, query: str, context: str, user_context: Dict[str, Any]) -> str:
         """Generate response using OpenAI with agentic capabilities."""
@@ -296,20 +257,19 @@ As an agentic assistant, you can:
 
 Provide a helpful, personalized response that goes beyond just answering the question - anticipate follow-up needs and offer proactive assistance."""
 
-        model = settings.openai_model_loaded or "moonshotai/kimi-k2:free"
+        from app.infrastructure.langchain_utils import langchain_service
+
         try:
-            # Use the new OpenAI API (v1.0+)
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are Sally, an advanced AI customer support agent with agentic capabilities."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            print(f"DEBUG: Agentic OpenAI API call successful")
-            return response.choices[0].message.content.strip()
+            logger.info(f"_generate_agentic_response: Using LangChain chat model for query '{query[:50]}...'")
+
+            # Convert to messages format
+            messages = [
+                {"role": "user", "content": query}
+            ]
+
+            return await langchain_service.generate_chat_response(messages, context)
         except Exception as e:
-            print(f"OpenAI API error in agentic response: {e}")
+            logger.error(f"_generate_agentic_response: LangChain error for query '{query[:50]}...': {e}")
             # Fallback to simple response
             return f"متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم. اما می‌توانم به شما کمک کنم: {query}"
     
@@ -342,22 +302,19 @@ Please provide a helpful response to their question. Since I don't have specific
 
 Your response:"""
 
-        model = settings.openai_model_loaded or "gpt-3.5-turbo"
-        logger.info(f"_generate_direct_openai_response (Agentic): Using model '{model}', base_url '{self.client.base_url if self.client else None}' for query '{query[:50]}...'")
+        from app.infrastructure.langchain_utils import langchain_service
 
         try:
-            # Use OpenAI API with minimal parameters
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are Sally, a helpful customer support assistant."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            logger.info(f"_generate_direct_openai_response (Agentic): API success - Response preview: '{response.choices[0].message.content[:100]}...'")
-            return response.choices[0].message.content.strip()
+            logger.info(f"_generate_direct_openai_response (Agentic): Using LangChain chat model for query '{query[:50]}...'")
+
+            # Convert to messages format
+            messages = [
+                {"role": "user", "content": query}
+            ]
+
+            return await langchain_service.generate_chat_response(messages)
         except Exception as e:
-            logger.error(f"_generate_direct_openai_response (Agentic): API error for query '{query[:50]}...': {e}")
+            logger.error(f"_generate_direct_openai_response (Agentic): LangChain error for query '{query[:50]}...': {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             # Fallback response

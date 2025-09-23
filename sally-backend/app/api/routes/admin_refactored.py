@@ -26,70 +26,11 @@ router = APIRouter()
 
 # --- تابع کمکی برای تولید متادیتای هوش مصنوعی ---
 async def _generate_metadata_from_ai(title: str, content: str) -> dict:
-    """تولید متادیتای مقاله با استفاده از OpenAI"""
+    """تولید متادیتای مقاله با استفاده از LangChain"""
+    from app.infrastructure.langchain_utils import langchain_service
+
     try:
-        # تنظیمات OpenAI client
-        client = openai.OpenAI(
-            api_key=settings.openai_api_key_loaded,
-            base_url=settings.openai_base_url_loaded,
-        )
-
-        prompt_template = f"""
-You are an expert content strategist for a knowledge base. Your task is to analyze the following article and generate structured metadata in Persian (Farsi).
-
-**Instructions:**
-1. Generate a concise, professional **summary**.
-2. Generate 3 to 5 relevant **tags**.
-3. Suggest a **category** from the provided list.
-4. Suggest a **visibility** level based on the content.
-5. Your output **MUST** be a single, valid JSON object and nothing else.
-
-**Available Options:**
-- Categories: ["راهنمای محصول", "مشکلات فنی", "حساب کاربری و صورتحساب", "عمومی"]
-- Visibility: ["public", "customer", "internal"]
-
-**Article to Analyze:**
-- Title: {title}
-- Content: {content}
-
-**Required JSON Output:**
-{{
-  "summary": "...",
-  "tags": ["...", "..."],
-  "suggested_category": "...",
-  "suggested_visibility": "..."
-}}
-"""
-
-        # ارسال درخواست به OpenAI
-        response = client.chat.completions.create(
-            model=settings.openai_model_loaded or "gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that generates metadata for knowledge base articles."},
-                {"role": "user", "content": prompt_template}
-            ],
-            max_tokens=500,
-            temperature=0.7,
-        )
-
-        # استخراج پاسخ
-        ai_response = response.choices[0].message.content.strip()
-
-        # تلاش برای پارس کردن JSON
-        try:
-            metadata = json.loads(ai_response)
-            return metadata
-        except json.JSONDecodeError as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"خطا در پارس کردن پاسخ AI: {str(e)}"
-            )
-
-    except openai.OpenAIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"خطا در ارتباط با سرویس OpenAI: {str(e)}"
-        )
+        return await langchain_service.generate_metadata(title, content)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

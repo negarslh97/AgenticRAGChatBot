@@ -9,6 +9,7 @@ import SuperAdminLayout from "./components/layouts/SuperAdminLayout"
 
 // Components
 import ProtectedRoute from "./components/ProtectedRoute"
+import ArticleDetail from "./components/ArticleDetail"
 
 // Lazy loaded pages
 const HomePage = lazy(() => import("./pages/HomePage"))
@@ -131,6 +132,7 @@ const App: React.FC = () => {
               <Route path="customer/users" element={<CustomerUsersPage />} />
               <Route path="tickets" element={<div className="p-6"><h1 className="text-2xl font-bold">مدیریت تیکت‌ها</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="knowledge-base" element={<SuperAdminKnowledgeBasePage />} />
+              <Route path="knowledge-base/articles/:articleId" element={<ArticleDetail isadminView={true} />} />
               <Route path="logs" element={<div className="p-6"><h1 className="text-2xl font-bold">لاگ‌های فعالیت</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">تنظیمات سیستم</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
             </Route>

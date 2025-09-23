@@ -4,6 +4,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
+import { adminService } from "../services/adminService"
 import { useAuth } from "../context/AuthContext"
 import toast from "react-hot-toast"
 
@@ -25,10 +26,14 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
 
   const loadArticle = async () => {
     try {
-      const articleData = await knowledgeBaseService.getArticle(articleId!)
+      // اگر در حالت admin هستیم، از admin API استفاده کنیم
+      const articleData = isadminView
+        ? await adminService.getArticle(articleId!)
+        : await knowledgeBaseService.getArticle(articleId!)
       setArticle(articleData)
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to load article")
+      console.error("Error loading article:", error)
+      toast.error(error.response?.data?.detail || "خطا در بارگذاری مقاله")
     } finally {
       setLoading(false)
     }
@@ -102,16 +107,16 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
       <div className="mb-8">
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">{article.title}</h1>
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">{article.title || "عنوان مقاله"}</h1>
 
             <div className="flex items-center space-x-4 mb-4">
-              {isadminView && (
+              {isadminView && article.status && (
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(article.status)}`}>
                   {article.status.toUpperCase()}
                 </span>
               )}
 
-              {article.tags.length > 0 && (
+              {article.tags && article.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {article.tags.map((tag, index) => (
                     <span key={index} className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
@@ -126,48 +131,29 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
           </div>
 
           {isadminView && (
-            <div className="flex flex-col space-y-2 ml-6">
-              {article.status === "DRAFT" && isSuperAdmin && (
-                <button onClick={handlePublish} className="btn-primary text-sm">
-                  Publish Article
-                </button>
-              )}
-
-              {isAdmin && (
-                <Link to={`/admin/kb/articles/${article.id}/edit`} className="btn-secondary text-sm">
-                  Edit Article
-                </Link>
-              )}
-
-              {isSuperAdmin && (
-                <button
-                  onClick={handleDelete}
-                  className="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
-                >
-                  Delete Article
-                </button>
-              )}
+            <div className="mt-12 pt-8 border-t border-gray-200">
+              <Link to={isadminView ? "/super-admin/knowledge-base" : "/kb"} className="text-blue-600 hover:text-blue-500 font-large">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                </svg>
+              </Link>
             </div>
           )}
         </div>
 
         <div className="text-sm text-gray-500 border-b border-gray-200 pb-4">
-          <p>Created: {new Date(article.created_at).toLocaleDateString()}</p>
-          <p>Last updated: {new Date(article.updated_at).toLocaleDateString()}</p>
+          <p>Created: {article.created_at ? new Date(article.created_at).toLocaleDateString() : "نامشخص"}</p>
+          <p>Last updated: {article.updated_at ? new Date(article.updated_at).toLocaleDateString() : "نامشخص"}</p>
         </div>
       </div>
 
       {/* Article Content */}
-      <div className="prose prose-lg max-w-none">
-        <div className="whitespace-pre-wrap text-gray-800 leading-relaxed" dangerouslySetInnerHTML={{ __html: article.content_html }}></div>
+      <div className="prose prose-lg max-w-none text-right" dir="rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+        <div className="whitespace-pre-wrap text-gray-800 leading-relaxed" dangerouslySetInnerHTML={{ __html: article.content_html || "<p>محتوایی برای نمایش وجود ندارد.</p>" }}></div>
       </div>
 
       {/* Navigation */}
-      <div className="mt-12 pt-8 border-t border-gray-200">
-        <Link to={isadminView ? "/admin/kb" : "/kb"} className="text-blue-600 hover:text-blue-500 font-medium">
-          ← Back to {isadminView ? "Admin" : ""} Knowledge Base
-        </Link>
-      </div>
+      
     </div>
   )
 }
