@@ -44,8 +44,8 @@ class RAGService(ABC):
             if any(word in article.title.lower() for word in query_lower.split()):
                 score += 10
             
-            # Score based on content match
-            content_matches = sum(1 for word in query_lower.split() if word in article.content.lower())
+            # Score based on content match (using HTML content for better search)
+            content_matches = sum(1 for word in query_lower.split() if word in article.content_html.lower())
             score += content_matches * 2
             
             # Score based on summary match
@@ -56,7 +56,7 @@ class RAGService(ABC):
                 relevant_docs.append({
                     "id": str(article.id),
                     "title": article.title,
-                    "content": article.content[:1000],  # Truncate for context
+                    "content": article.content_html[:1000],  # Truncate HTML content for context
                     "summary": article.summary,
                     "score": score
                 })

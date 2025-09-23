@@ -21,10 +21,10 @@ const ArticleForm: React.FC<{
 }> = ({ article, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
     title: article?.title || "",
-    content: article?.content || "",
+    content_markdown: article?.content_markdown || "",
     summary: article?.summary || "",
-    category_id: article?.category_id || "",
-    tags: article?.tags?.join(", ") || ""
+    category_id: article?.category?.id || "",
+    tag_names: article?.tags?.map(tag => tag.name).join(", ") || ""
   })
   const [loading, setLoading] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
@@ -35,10 +35,11 @@ const ArticleForm: React.FC<{
     try {
       const data = {
         title: formData.title,
-        content: formData.content,
+        content_markdown: formData.content_markdown,
+        content_html: undefined, // Will be generated from markdown
         summary: formData.summary || undefined,
         category_id: formData.category_id || undefined,
-        tags: formData.tags.split(",").map(tag => tag.trim()).filter(Boolean)
+        tag_names: formData.tag_names.split(",").map(tag => tag.trim()).filter(Boolean)
       }
 
       if (article) {
@@ -57,7 +58,7 @@ const ArticleForm: React.FC<{
   }
 
   const handleGenerateMetadata = async () => {
-    if (!formData.title.trim() || !formData.content.trim()) {
+    if (!formData.title.trim() || !formData.content_markdown.trim()) {
       toast.error("لطفاً عنوان و محتوای مقاله را وارد کنید")
       return
     }
@@ -66,14 +67,14 @@ const ArticleForm: React.FC<{
     try {
       const metadata: GeneratedMetadata = await adminService.generateArticleMetadata(
         formData.title,
-        formData.content
+        formData.content_markdown
       )
 
       // بروزرسانی فرم با متادیتای تولید شده
       setFormData(prev => ({
         ...prev,
         summary: metadata.summary,
-        tags: metadata.tags.join(", "),
+        tag_names: metadata.tags.join(", "),
         category_id: metadata.suggested_category
       }))
 
@@ -126,8 +127,8 @@ const ArticleForm: React.FC<{
           <div>
             <label className="block text-sm font-medium mb-1">برچسب‌ها</label>
             <Input
-              value={formData.tags}
-              onChange={(e) => setFormData(prev => ({ ...prev, tags: e.target.value }))}
+              value={formData.tag_names}
+              onChange={(e) => setFormData(prev => ({ ...prev, tag_names: e.target.value }))}
               placeholder="برچسب1, برچسب2"
             />
           </div>
@@ -135,8 +136,8 @@ const ArticleForm: React.FC<{
           <div>
             <label className="block text-sm font-medium mb-1">محتوا *</label>
             <textarea
-              value={formData.content}
-              onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+              value={formData.content_markdown}
+              onChange={(e) => setFormData(prev => ({ ...prev, content_markdown: e.target.value }))}
               rows={10}
               required
               className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -149,7 +150,7 @@ const ArticleForm: React.FC<{
             <Button
               type="button"
               onClick={handleGenerateMetadata}
-              disabled={aiLoading || !formData.title.trim() || !formData.content.trim()}
+              disabled={aiLoading || !formData.title.trim() || !formData.content_markdown.trim()}
               variant="outline"
               className="flex items-center gap-2 bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 border-purple-200"
             >
@@ -278,7 +279,7 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
 
   const filteredArticles = Array.isArray(articles) ? articles.filter(article =>
     article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    article.content.toLowerCase().includes(searchTerm.toLowerCase())
+    article.content_markdown.toLowerCase().includes(searchTerm.toLowerCase())
   ) : []
 
   const paginatedArticles = filteredArticles.slice(
@@ -435,7 +436,7 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                   {paginatedArticles.map((article) => (
                     <TableRow key={article.id}>
                       <TableCell className="font-medium">{article.title}</TableCell>
-                      <TableCell>{article.category_id || "-"}</TableCell>
+                      <TableCell>{article.category?.name || "-"}</TableCell>
                       <TableCell>
                         <Badge variant={article.status === "PUBLISHED" ? "default" : "secondary"}>
                           {article.status === "PUBLISHED" ? "منتشر شده" : "پیش‌نویس"}

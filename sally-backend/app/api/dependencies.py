@@ -5,8 +5,14 @@ from app.core.permissions import get_optional_auth_header, get_admin_from_token,
 from app.domain.entities_refactored import Admin, Customer
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(get_optional_auth_header)) -> Union[Admin, Customer]:
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Union[Admin, Customer]:
     """Get current authenticated user from JWT token."""
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication credentials required"
+        )
+
     admin = await get_admin_from_token(credentials.credentials)
     if admin:
         return admin

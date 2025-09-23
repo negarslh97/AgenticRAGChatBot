@@ -9,8 +9,9 @@ import json
 # --- وارد کردن مدل‌های دیتابیس ---
 from app.domain.entities_refactored import (
     Admin, Customer, Role, KnowledgeBaseArticle, ArticleStatus,
-    Ticket, ActivityLog, PermissionDetail
+    Ticket, ActivityLog, PermissionDetail, ArticleCategory, ArticleTag, Category, Tag
 )
+import markdown  # For markdown to HTML conversion
 # --- وارد کردن سیستم دسترسی و احراز هویت ---
 from app.core.permissions import (
     get_current_admin_with_permission, Permission
@@ -158,13 +159,19 @@ class CustomerUpdate(BaseModel):
 # مدل‌های مربوط به مدیریت مقالات دانش‌بنیان
 class ArticleCreate(BaseModel):
     title: str
-    content: str
+    content_markdown: str
+    content_html: Optional[str] = None
     summary: Optional[str] = None
+    category_id: Optional[str] = None
+    tag_names: List[str] = []
 
 class ArticleUpdate(BaseModel):
     title: Optional[str] = None
-    content: Optional[str] = None
+    content_markdown: Optional[str] = None
+    content_html: Optional[str] = None
     summary: Optional[str] = None
+    category_id: Optional[str] = None
+    tag_names: Optional[List[str]] = None
 
 # مدل‌های مربوط به تولید متادیتای هوش مصنوعی
 class ArticleContentPayload(BaseModel):
@@ -428,6 +435,19 @@ async def delete_customer(
 
     return
 
+async def get_or_create_tags(tag_names: List[str]) -> List[ArticleTag]:
+    """Get or create tags and return ArticleTag objects."""
+    article_tags = []
+    for tag_name in tag_names:
+        # Check if tag exists
+        tag = await Tag.find_one(Tag.name == tag_name)
+        if not tag:
+            # Create new tag
+            tag = Tag(name=tag_name)
+            await tag.insert()
+        article_tags.append(ArticleTag(id=str(tag.id), name=tag.name, color=tag.color))
+    return article_tags
+
 # --- Endpoints مدیریت مقالات دانش‌بنیان (تفکیک شده بر اساس دسترسی) ---
 
 @router.post("/kb/articles", summary="Create a new draft article", status_code=status.HTTP_201_CREATED)
@@ -435,11 +455,29 @@ async def create_article(article_data: ArticleCreate, current_admin: Admin = Dep
     """
     ادمین و ادمین ارشد می‌توانند مقاله جدیدی در حالت پیش‌نویس ایجاد کنند.
     """
+    # Generate HTML from markdown if not provided
+    content_html = article_data.content_html
+    if not content_html:
+        content_html = markdown.markdown(article_data.content_markdown)
+    
+    # Handle category
+    category = None
+    if article_data.category_id:
+        cat = await Category.get(article_data.category_id)
+        if cat:
+            category = ArticleCategory(id=str(cat.id), name=cat.name, slug=cat.slug)
+    
+    # Handle tags
+    tags = await get_or_create_tags(article_data.tag_names)
+    
     article = KnowledgeBaseArticle(
         title=article_data.title,
-        content=article_data.content,
+        content_markdown=article_data.content_markdown,
+        content_html=content_html,
         summary=article_data.summary,
-        author_id=str(current_admin.id),
+        category=category,
+        tags=tags,
+        author=current_admin,
         status=ArticleStatus.DRAFT  # همه مقالات به صورت پیش‌نویس شروع می‌شوند
     )
     await article.insert()
@@ -459,8 +497,35 @@ async def update_article(article_id: str, article_data: ArticleUpdate, current_a
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Article ID format")
     
     update_data = article_data.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(article, key, value)
+    
+    # Handle content updates
+    if 'content_markdown' in update_data:
+        article.content_markdown = update_data['content_markdown']
+        # Generate HTML if not provided or if markdown changed
+        if 'content_html' not in update_data or not update_data['content_html']:
+            article.content_html = markdown.markdown(update_data['content_markdown'])
+        else:
+            article.content_html = update_data['content_html']
+    
+    # Handle category
+    if 'category_id' in update_data:
+        category = None
+        if update_data['category_id']:
+            cat = await Category.get(update_data['category_id'])
+            if cat:
+                category = ArticleCategory(id=str(cat.id), name=cat.name, slug=cat.slug)
+        article.category = category
+    
+    # Handle tags
+    if 'tag_names' in update_data:
+        tags = await get_or_create_tags(update_data['tag_names'])
+        article.tags = tags
+    
+    # Handle other fields
+    if 'title' in update_data:
+        article.title = update_data['title']
+    if 'summary' in update_data:
+        article.summary = update_data['summary']
     
     article.updated_at = datetime.utcnow()
     await article.save()
@@ -483,7 +548,7 @@ async def publish_article(article_id: str, current_admin: Admin = Depends(get_cu
 
     article.status = ArticleStatus.PUBLISHED
     article.published_at = datetime.utcnow()
-    article.published_by = str(current_admin.id)
+    article.publisher = current_admin
     await article.save()
     return {"id": str(article.id), "status": "published", "message": "Article published successfully."}
 

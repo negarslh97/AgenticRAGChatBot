@@ -5,19 +5,7 @@ import { useAuth } from "../context/AuthContext"
 import AdminArticleForm from "../components/AdminArticleForm"
 import AdminFileUpload from "../components/AdminFileUpload"
 import { toast } from "react-hot-toast"
-
-interface Article {
-  id: string
-  title: string
-  summary?: string
-  status: "DRAFT" | "PUBLISHED" | "ARCHIVED"
-  visibility?: "public" | "customer" | "internal" | null
-  author_id: string
-  version: number
-  created_at: string
-  updated_at: string
-  published_at?: string
-}
+import { type Article } from "../services/knowledgeBaseService"
 
 const AdminPanel: React.FC = () => {
   const { user } = useAuth()

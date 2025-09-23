@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from beanie import Document, Indexed
+from beanie import Document, Indexed, Link
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
@@ -177,16 +177,43 @@ class TicketReply(Document):
         name = "ticket_replies"
 
 
-class Category(Document):
-    """Knowledge base category."""
+class CategoryAncestor(BaseModel):
+    """Represents an ancestor in the category hierarchy."""
+    id: str  # ObjectId as string
     name: str
+
+
+class Category(Document):
+    """Knowledge base category with hierarchical support."""
+    name: str
+    slug: Indexed(str, unique=True)  # URL-friendly identifier
     description: Optional[str] = None
-    parent_id: Optional[str] = None
+    parent: Optional[Link["Category"]] = None  # Reference to parent category
+    ancestors: List[CategoryAncestor] = []  # List of all ancestors for easy querying
     is_public: bool = True  # Public categories visible to guests
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Settings:
         name = "categories"
+    
+    async def update_ancestors(self) -> None:
+        """Update the ancestors list based on parent hierarchy."""
+        if not self.parent:
+            self.ancestors = []
+            return
+        
+        # Fetch parent and its ancestors
+        parent = await self.parent.fetch()
+        if parent:
+            # Start with parent's ancestors and add the parent itself
+            self.ancestors = parent.ancestors.copy()
+            self.ancestors.append(CategoryAncestor(id=str(parent.id), name=parent.name))
+    
+    async def before_save(self) -> None:
+        """Hook to update ancestors before saving."""
+        await self.update_ancestors()
+        self.updated_at = datetime.utcnow()
 
 
 class Tag(Document):
@@ -199,17 +226,32 @@ class Tag(Document):
         name = "tags"
 
 
+class ArticleCategory(BaseModel):
+    """Embedded category information for articles."""
+    id: str  # ObjectId as string
+    name: str
+    slug: str
+
+
+class ArticleTag(BaseModel):
+    """Embedded tag information for articles."""
+    id: str  # ObjectId as string
+    name: str
+    color: Optional[str] = None
+
+
 class KnowledgeBaseArticle(Document):
-    """Knowledge base article."""
+    """Knowledge base article with improved relationships."""
     title: str
-    content: str
+    content_markdown: str  # Raw markdown content
+    content_html: str  # Rendered HTML content
     summary: Optional[str] = None
-    category_id: Optional[str] = None
-    tags: List[str] = []
+    category: Optional[ArticleCategory] = None  # Embedded category info
+    tags: List[ArticleTag] = []  # Embedded tags
     status: ArticleStatus = ArticleStatus.DRAFT
     visibility: Optional[ArticleVisibility] = None  # Only set for published articles
-    author_id: str  # Store ObjectId as string
-    published_by: Optional[str] = None  # Store ObjectId as string
+    author: Link[Admin]  # Direct reference to author
+    publisher: Optional[Link[Admin]] = None  # Direct reference to publisher
     version: int = 1
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -220,17 +262,9 @@ class KnowledgeBaseArticle(Document):
     class Settings:
         name = "knowledge_base_articles"
     
-    async def get_author(self) -> Optional[Admin]:
-        """Get the author of this article."""
-        from bson import ObjectId
-        return await Admin.get(ObjectId(self.author_id))
-    
-    async def get_publisher(self) -> Optional[Admin]:
-        """Get the admin who published this article."""
-        if self.published_by:
-            from bson import ObjectId
-            return await Admin.get(ObjectId(self.published_by))
-        return None
+    async def before_save(self) -> None:
+        """Hook to update timestamps before saving."""
+        self.updated_at = datetime.utcnow()
 
 
 class UnansweredQuestion(Document):

@@ -1,35 +1,28 @@
 import asyncio
 import os
 import sys
-from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+import markdown  # For markdown to HTML conversion
 
 # --- Path Setup ---
 # Add the project root to the Python path to allow imports from 'app'
 # This is crucial for running the script as a standalone file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
 
-from app.domain.entities import KnowledgeBaseArticle, ArticleStatus
+from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus, Admin
+from app.infrastructure.database_refactored import init_db, create_default_SuperAdmin
 from app.core.config import settings
 
 async def ingest_data():
     """Connects to the database and ingests a sample knowledge base article."""
     print("Connecting to the database...")
     
-    # The settings object should now be correctly populated
-    db_url = settings.DATABASE_URL
-    if not db_url:
-        raise ValueError("DATABASE_URL not found in settings. Make sure your .env file is configured correctly.")
-
-    # Use the DATABASE_URL from settings
-    client = AsyncIOMotorClient(db_url)
-    
-    # Initialize Beanie with the document models
-    # The database name is typically part of the connection string, but let's get it explicitly
-    db_name = client.get_default_database().name
-    await init_beanie(database=client[db_name], document_models=[KnowledgeBaseArticle])
-    
+    # Initialize database with refactored models
+    await init_db()
     print("Database connection successful.")
+    
+    # Ensure default admin exists
+    await create_default_SuperAdmin()
+    print("Default admin ensured.")
 
     # --- Sample Article Data ---
     # You can modify this content or add more articles as needed.
@@ -64,16 +57,23 @@ Sally یک دستیار هوشمند مکالمه‌ای است که می‌تو
     else:
         print(f"Ingesting article: '{article_title}'")
         
-        # Create a new knowledge base article instance
-        # Note: In a real application, author_id should be a valid user ID.
-        # For this script, we'll use a placeholder.
+        # Get an admin to use as author
+        admin = await Admin.find_one()
+        if not admin:
+            raise Exception("No admin found in database. Cannot create article.")
+        
+        # Generate HTML from markdown content
+        content_html = markdown.markdown(article_content)
+        
+        # Create a new knowledge base article instance with refactored model
         new_article = KnowledgeBaseArticle(
             title=article_title,
-            content=article_content,
+            content_markdown=article_content,
+            content_html=content_html,
             summary=article_summary,
             status=ArticleStatus.PUBLISHED,
-            is_public=True,
-            author_id="ingestion_script"  # Placeholder author ID
+            visibility=None,  # Will be set when published, but for sample, we can leave as published
+            author=admin
         )
         
         # Insert the new article into the database

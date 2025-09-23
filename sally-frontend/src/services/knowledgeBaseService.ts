@@ -1,12 +1,25 @@
 import api from "./authService"
 
+export interface ArticleCategory {
+  id: string
+  name: string
+  slug: string
+}
+
+export interface ArticleTag {
+  id: string
+  name: string
+  color?: string
+}
+
 export interface Article {
   id: string
   title: string
-  content: string
+  content_markdown: string
+  content_html: string
   summary?: string
-  category_id?: string
-  tags: string[]
+  category?: ArticleCategory
+  tags: ArticleTag[]
   status: "DRAFT" | "PUBLISHED" | "ARCHIVED"
   visibility?: "public" | "customer" | "internal" | null
   author_id: string
@@ -19,6 +32,7 @@ export interface Article {
 export interface Category {
   id: string
   name: string
+  slug: string
   description?: string
   is_public: boolean
 }
@@ -32,19 +46,47 @@ export interface SearchResult {
 
 export interface CreateArticleData {
   title: string
-  content: string
+  content_markdown: string
+  content_html?: string
   summary?: string
   category_id?: string
-  tags: string[]
+  tag_names: string[]
 }
 
 export interface UpdateArticleData {
   title?: string
-  content?: string
+  content_markdown?: string
+  content_html?: string
   summary?: string
   category_id?: string
-  tags?: string[]
+  tag_names?: string[]
   is_public?: boolean
+}
+
+export interface ArticleHistoryItem {
+  commit_hash: string
+  author_name: string
+  author_email: string
+  message: string
+  timestamp: string
+  changes: string[]
+}
+
+export interface SyncStatusResponse {
+  status: string
+  last_sync?: string
+  pending_operations: number
+  health_status: string
+}
+
+export interface FileUploadResponse {
+  success: boolean
+  markdown_content: string
+  title: string
+  summary: string
+  suggested_tags: string[]
+  suggested_category?: string
+  error?: string
 }
 
 export const knowledgeBaseService = {
@@ -113,4 +155,27 @@ export const knowledgeBaseService = {
   async deleteArticle(articleId: string): Promise<void> {
     await api.delete(`/admin/kb/articles/${articleId}`)
   },
+
+  // New endpoints for Docs-as-Code system
+  async getArticleHistory(articleId: string): Promise<ArticleHistoryItem[]> {
+    const response = await api.get(`/admin/kb/articles/${articleId}/history`)
+    return response.data
+  },
+
+  async getSyncStatus(): Promise<SyncStatusResponse> {
+    const response = await api.get("/admin/kb/sync/status")
+    return response.data
+  },
+
+  async uploadAndConvertFile(file: File): Promise<FileUploadResponse> {
+    const formData = new FormData()
+    formData.append("file", file)
+    
+    const response = await api.post("/admin/kb/upload-convert", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data"
+      }
+    })
+    return response.data
+  }
 }

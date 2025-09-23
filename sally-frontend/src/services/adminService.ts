@@ -7,20 +7,6 @@ import api from "./authService";
 // Interfaces for Admin API responses and requests
 // ============================================================================
 
-export interface Article {
-  id: string;
-  title: string;
-  content?: string;
-  summary?: string;
-  status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
-  visibility?: "public" | "customer" | "internal" | null;
-  author_id: string;
-  version: number;
-  created_at: string;
-  updated_at: string;
-  published_at?: string;
-}
-
 export interface ArticleCreateRequest {
   title: string;
   content: string;
@@ -68,18 +54,6 @@ export const adminService = {
   // Article Management Functions
   // ============================================================================
 
-  /**
-   * دریافت لیست همه مقالات (شامل پیش‌نویس‌ها)
-   */
-  async getAllArticles(): Promise<Article[]> {
-    try {
-      const response = await api.get<Article[]>("/api/admin/kb/articles");
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching articles:", error);
-      throw new Error("خطا در دریافت مقالات");
-    }
-  },
 
   /**
    * ایجاد مقاله جدید در حالت پیش‌نویس

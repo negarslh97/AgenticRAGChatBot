@@ -115,7 +115,7 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
                 <div className="flex flex-wrap gap-2">
                   {article.tags.map((tag, index) => (
                     <span key={index} className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
-                      {tag}
+                      {tag.name}
                     </span>
                   ))}
                 </div>
@@ -159,7 +159,7 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
 
       {/* Article Content */}
       <div className="prose prose-lg max-w-none">
-        <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">{article.content}</div>
+        <div className="whitespace-pre-wrap text-gray-800 leading-relaxed" dangerouslySetInnerHTML={{ __html: article.content_html }}></div>
       </div>
 
       {/* Navigation */}
