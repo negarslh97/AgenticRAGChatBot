@@ -44,17 +44,17 @@ class Settings(BaseSettings):
     @property
     def metadata_model_loaded(self) -> str:
         import os
-        return self.metadata_model or os.getenv("METADATA_MODEL") or "gpt-3.5-turbo"
+        return self.metadata_model or os.getenv("METADATA_MODEL")
 
     @property
     def rag_model_loaded(self) -> str:
         import os
-        return self.rag_model or os.getenv("RAG_MODEL") or "gpt-3.5-turbo"
+        return self.rag_model or os.getenv("RAG_MODEL")
 
     @property
     def chat_model_loaded(self) -> str:
         import os
-        return self.chat_model or os.getenv("CHAT_MODEL") or "gpt-3.5-turbo"
+        return self.chat_model or os.getenv("CHAT_MODEL")
 
     @property
     def openai_api_key_loaded(self) -> Optional[str]:

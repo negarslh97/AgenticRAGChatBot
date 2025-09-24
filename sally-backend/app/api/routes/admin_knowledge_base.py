@@ -286,6 +286,8 @@ async def upload_kb_file(
     Upload a file to create a new knowledge base article as a draft with AI-generated metadata.
     Accessible by SuperAdmin only.
     """
+    print(f"📁 شروع آپلود فایل: {file.filename}")
+
     # Create uploads directory if it doesn't exist
     upload_dir = Path("uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -302,6 +304,8 @@ async def upload_kb_file(
     with open(file_path, "wb") as f:
         f.write(file_content)
 
+    print(f"💾 فایل ذخیره شد: {file_path}")
+
     # Extract text content based on file type
     article_content = ""
     article_title = original_filename
@@ -310,28 +314,43 @@ async def upload_kb_file(
         # For TXT files, read content directly
         try:
             article_content = file_content.decode("utf-8")
+            print(f"📄 فایل TXT خوانده شد، طول: {len(article_content)} کاراکتر")
         except UnicodeDecodeError:
             article_content = "Unable to decode file content"
+            print("❌ خطا در دیکد فایل TXT")
     elif file_extension == ".pdf":
         article_content = extract_text_from_pdf(file_path)
+        print(f"📄 متن از PDF استخراج شد، طول: {len(article_content)} کاراکتر")
     elif file_extension in [".docx", ".doc"]:
         article_content = extract_text_from_docx(file_path)
+        print(f"📄 متن از DOCX استخراج شد، طول: {len(article_content)} کاراکتر")
     elif file_extension in [".xlsx", ".xls"]:
         article_content = extract_text_from_excel(file_path)
+        print(f"📄 متن از Excel استخراج شد، طول: {len(article_content)} کاراکتر")
     elif file_extension == ".csv":
         article_content = extract_text_from_csv(file_path)
+        print(f"📄 متن از CSV استخراج شد، طول: {len(article_content)} کاراکتر")
     else:
         # For unsupported files, store file path info
         article_content = f"File uploaded: {original_filename}\nFile path: {file_path}\nFile size: {len(file_content)} bytes\n\nContent extraction not supported for {file_extension} files."
+        print(f"⚠️ نوع فایل پشتیبانی نمی‌شود: {file_extension}")
 
     # Generate AI metadata if content was extracted
     ai_metadata = None
+    print(f"🔍 شروع تولید فراداده AI برای فایل: {original_filename}")
+    print(f"📄 طول محتوا استخراج شده: {len(article_content) if article_content else 0} کاراکتر")
+
     if article_content and article_content != f"File uploaded: {original_filename}\nFile path: {file_path}\nFile size: {len(file_content)} bytes\n\nContent extraction not supported for {file_extension} files.":
+        print("🤖 شروع فراخوانی AI برای تولید فراداده...")
         try:
             ai_metadata = await generate_metadata_from_ai(article_title, article_content)
+            print(f"✅ AI فراداده تولید کرد: {bool(ai_metadata)}")
         except Exception as e:
             # Continue with default metadata if AI generation fails
+            print(f"❌ خطا در تولید فراداده AI: {str(e)}")
             pass
+    else:
+        print("⚠️ محتوا استخراج نشد یا نامعتبر است - از فراداده پیش‌فرض استفاده می‌شود")
 
     # Generate HTML from markdown if not provided (for text content)
     content_html = markdown.markdown(article_content) if article_content else ""
@@ -705,6 +724,8 @@ async def upload_and_convert_file(
     Upload a file and convert it to Markdown format without creating an article.
     Returns the converted content for the editor.
     """
+    print(f"🔄 شروع آپلود و تبدیل فایل: {file.filename}")
+
     # Create uploads directory if it doesn't exist
     upload_dir = Path("uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -721,6 +742,8 @@ async def upload_and_convert_file(
     with open(file_path, "wb") as f:
         f.write(file_content)
 
+    print(f"💾 فایل ذخیره شد برای تبدیل: {file_path}")
+
     # Extract text content based on file type
     article_content = ""
     article_title = original_filename
@@ -729,18 +752,25 @@ async def upload_and_convert_file(
         # For TXT files, read content directly
         try:
             article_content = file_content.decode("utf-8")
+            print(f"📄 فایل TXT برای تبدیل خوانده شد، طول: {len(article_content)} کاراکتر")
         except UnicodeDecodeError:
             article_content = "Unable to decode file content"
+            print("❌ خطا در دیکد فایل TXT برای تبدیل")
     elif file_extension == ".pdf":
         article_content = extract_text_from_pdf(file_path)
+        print(f"📄 متن از PDF برای تبدیل استخراج شد، طول: {len(article_content)} کاراکتر")
     elif file_extension in [".docx", ".doc"]:
         article_content = extract_text_from_docx(file_path)
+        print(f"📄 متن از DOCX برای تبدیل استخراج شد، طول: {len(article_content)} کاراکتر")
     elif file_extension in [".xlsx", ".xls"]:
         article_content = extract_text_from_excel(file_path)
+        print(f"📄 متن از Excel برای تبدیل استخراج شد، طول: {len(article_content)} کاراکتر")
     elif file_extension == ".csv":
         article_content = extract_text_from_csv(file_path)
+        print(f"📄 متن از CSV برای تبدیل استخراج شد، طول: {len(article_content)} کاراکتر")
     else:
         # For unsupported files, return error
+        print(f"⚠️ نوع فایل پشتیبانی نمی‌شود برای تبدیل: {file_extension}")
         return FileUploadResponse(
             success=False,
             markdown_content="",
@@ -751,12 +781,20 @@ async def upload_and_convert_file(
 
     # Generate AI metadata if content was extracted
     ai_metadata = None
+    print(f"🔍 شروع تولید فراداده AI برای تبدیل فایل: {original_filename}")
+    print(f"📄 طول محتوا استخراج شده برای تبدیل: {len(article_content) if article_content else 0} کاراکتر")
+
     if article_content and article_content != f"File uploaded: {original_filename}\nFile path: {file_path}\nFile size: {len(file_content)} bytes\n\nContent extraction not supported for {file_extension} files.":
+        print("🤖 شروع فراخوانی AI برای تولید فراداده تبدیل...")
         try:
             ai_metadata = await generate_metadata_from_ai(article_title, article_content)
+            print(f"✅ AI برای تبدیل فراداده تولید کرد: {bool(ai_metadata)}")
         except Exception as e:
             # Continue with default metadata if AI generation fails
+            print(f"❌ خطا در تولید فراداده AI برای تبدیل: {str(e)}")
             pass
+    else:
+        print("⚠️ محتوا استخراج نشد یا نامعتبر است برای تبدیل - از فراداده پیش‌فرض استفاده می‌شود")
 
     # Clean up the uploaded file
     try:

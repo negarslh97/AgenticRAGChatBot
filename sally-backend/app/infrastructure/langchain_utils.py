@@ -9,7 +9,10 @@ from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import json
+import logging
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class MetadataOutput(BaseModel):
@@ -29,6 +32,10 @@ class LangChainService:
     def _get_model(self, model_name: str) -> ChatOpenAI:
         """Get or create a ChatOpenAI model instance."""
         if model_name not in self._models:
+            logger.info(f"🤖 بارگذاری مدل: {model_name}")
+            logger.info(f"🔑 API Key تنظیم شده: {'بله' if settings.openai_api_key_loaded else 'خیر'}")
+            logger.info(f"🌐 Base URL: {settings.openai_base_url_loaded or 'پیش‌فرض OpenAI'}")
+
             self._models[model_name] = ChatOpenAI(
                 model_name=model_name,
                 openai_api_key=settings.openai_api_key_loaded,
@@ -36,6 +43,9 @@ class LangChainService:
                 temperature=0.7,
                 max_tokens=500,
             )
+            logger.info(f"✅ مدل {model_name} آماده استفاده است")
+        else:
+            logger.debug(f"♻️ استفاده از مدل کش شده: {model_name}")
         return self._models[model_name]
 
     async def generate_metadata(self, title: str, content: str) -> Dict[str, Any]:
@@ -50,7 +60,17 @@ class LangChainService:
             Dict containing summary, tags, category, and visibility
         """
         try:
-            model = self._get_model(settings.metadata_model_loaded)
+            selected_model = settings.metadata_model_loaded
+            print(f"🔍 تولید فراداده با مدل: {selected_model}")
+            print(f"📝 عنوان مقاله: {title[:100]}...")
+            print(f"📊 طول محتوا: {len(content)} کاراکتر")
+            logger.info(f"🔍 تولید فراداده با مدل: {selected_model}")
+            logger.info(f"📝 عنوان مقاله: {title[:100]}...")
+            logger.info(f"📊 طول محتوا: {len(content)} کاراکتر")
+
+            model = self._get_model(selected_model)
+            print(f"✅ مدل {selected_model} با موفقیت بارگذاری شد")
+            logger.info(f"✅ مدل {selected_model} با موفقیت بارگذاری شد")
 
             prompt = ChatPromptTemplate.from_template("""
                 You are an expert content strategist for a knowledge base. Your task is to analyze the following article and generate structured metadata in Persian (Farsi).
@@ -89,10 +109,23 @@ class LangChainService:
                 "content": content
             })
 
+            print(f"✨ فراداده تولید شد:")
+            print(f"   📋 خلاصه: {result.get('summary', 'N/A')[:100]}...")
+            print(f"   🏷️  تگ‌ها: {result.get('tags', [])}")
+            print(f"   📁 دسته‌بندی: {result.get('suggested_category', 'N/A')}")
+            print(f"   👁️  دسترسی: {result.get('suggested_visibility', 'N/A')}")
+            logger.info(f"✨ فراداده تولید شد:")
+            logger.info(f"   📋 خلاصه: {result.get('summary', 'N/A')[:100]}...")
+            logger.info(f"   🏷️  تگ‌ها: {result.get('tags', [])}")
+            logger.info(f"   📁 دسته‌بندی: {result.get('suggested_category', 'N/A')}")
+            logger.info(f"   👁️  دسترسی: {result.get('suggested_visibility', 'N/A')}")
+
             return result
 
         except Exception as e:
             # Return default metadata if AI fails
+            logger.error(f"❌ خطا در تولید فراداده با مدل {selected_model}: {str(e)}")
+            logger.warning("⚠️ استفاده از فراداده پیش‌فرض")
             return {
                 "summary": f"محتوای استخراج شده از فایل: {title}",
                 "tags": ["آپلود شده", "فایل"],
