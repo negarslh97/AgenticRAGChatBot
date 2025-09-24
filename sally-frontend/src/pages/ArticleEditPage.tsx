@@ -22,12 +22,12 @@ const ArticleEditPage: React.FC = () => {
 
   const loadArticle = async () => {
     try {
-      const articleData = await knowledgeBaseService.getArticle(articleId!)
+      const articleData = await knowledgeBaseService.getArticleByAdmin(articleId!)
       setArticle(articleData)
     } catch (error: any) {
       console.error("Error loading article:", error)
       toast.error(error.response?.data?.detail || "خطا در بارگذاری مقاله")
-      navigate("/admin") // Redirect to admin panel if article not found
+      navigate("/super-admin/knowledge-base") // Redirect to super-admin knowledge-base if article not found
     } finally {
       setLoading(false)
     }
@@ -56,8 +56,8 @@ const ArticleEditPage: React.FC = () => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">مقاله یافت نشد</h2>
-          <Link to="/admin" className="btn-primary">
-            بازگشت به پنل مدیریت
+          <Link to="/super-admin/knowledge-base" className="btn-primary">
+            بازگشت به پایگاه دانش
           </Link>
         </div>
       </div>
@@ -71,8 +71,8 @@ const ArticleEditPage: React.FC = () => {
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">دسترسی غیرمجاز</h2>
           <p className="text-gray-600 mb-4">شما اجازه ویرایش مقاله را ندارید.</p>
-          <Link to="/admin" className="btn-primary">
-            بازگشت به پنل مدیریت
+          <Link to="/super-admin/knowledge-base" className="btn-primary">
+            بازگشت به پایگاه دانش
           </Link>
         </div>
       </div>

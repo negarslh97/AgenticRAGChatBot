@@ -25,6 +25,7 @@ const SuperAdminDashboard = lazy(() => import("./pages/SuperAdminDashboard"))
 const SuperAdminKnowledgeBasePage = lazy(() => import("./pages/SuperAdminKnowledgeBasePage"))
 const SuperAdminAddArticlePage = lazy(() => import("./pages/SuperAdminAddArticlePage"))
 const SuperAdminUploadPage = lazy(() => import("./pages/SuperAdminUploadPage"))
+const ArticleEditPage = lazy(() => import("./pages/ArticleEditPage"))
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage"))
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"))
 const CustomerUsersPage = lazy(() => import("./pages/CustomerUsersPage"))
@@ -152,6 +153,7 @@ const App: React.FC = () => {
                 }
               />
               <Route path="knowledge-base/articles/:articleId" element={<ArticleDetail isadminView={true} />} />
+              <Route path="knowledge-base/edit/:articleId" element={<ArticleEditPage />} />
               <Route path="logs" element={<div className="p-6"><h1 className="text-2xl font-bold">لاگ‌های فعالیت</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">تنظیمات سیستم</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
             </Route>

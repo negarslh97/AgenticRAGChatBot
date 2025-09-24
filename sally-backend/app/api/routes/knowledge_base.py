@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from app.domain.entities_refactored import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility, ArticleCategory, ArticleTag
 from fastapi import HTTPException, status
 from app.api.dependencies import get_optional_user, get_current_user
-from app.domain.entities_refactored import User
+from app.domain.entities_refactored import Role
 
 router = APIRouter()
 
@@ -80,7 +80,7 @@ async def get_public_articles(
 async def get_customer_articles(
     category_id: Optional[str] = None,
     search: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: Role = Depends(get_current_user)
 ):
     """Get knowledge base articles for authenticated customers."""
     query = (KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED) & \
@@ -122,7 +122,7 @@ async def get_customer_articles(
 @router.get("/articles/{article_id}", response_model=ArticleResponse)
 async def get_article(
     article_id: str,
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: Optional[Role] = Depends(get_optional_user)
 ):
     """Get a specific article."""
     article = await KnowledgeBaseArticle.get(article_id)
@@ -155,7 +155,7 @@ async def get_article(
 
 
 @router.get("/categories", response_model=List[CategoryResponse])
-async def get_categories(current_user: Optional[User] = Depends(get_optional_user)):
+async def get_categories(current_user: Optional[Role] = Depends(get_optional_user)):
     """Get knowledge base categories."""
     query = Category.is_public == True if not current_user else {}
     categories = await Category.find(query).to_list()
@@ -175,7 +175,7 @@ async def get_categories(current_user: Optional[User] = Depends(get_optional_use
 @router.get("/search")
 async def search_articles(
     q: str,
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: Optional[Role] = Depends(get_optional_user)
 ):
     """Search knowledge base articles."""
     # Set visibility based on authentication

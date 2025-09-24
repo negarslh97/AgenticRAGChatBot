@@ -269,12 +269,7 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              // TODO: Navigate to edit page
-                              toast("ویرایش مقاله به زودی پیاده‌سازی خواهد شد.", {
-                                icon: "ℹ️"
-                              })
-                            }}
+                            onClick={() => navigate(`/super-admin/knowledge-base/edit/${article.id}`)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>

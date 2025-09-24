@@ -124,7 +124,7 @@ export const knowledgeBaseService = {
       const response = await api.get("/api/super-admin/kb/articles")
       console.log("KB Service - Raw response:", response)
       console.log("KB Service - Response data:", response.data)
-      
+
       // بررسی اینکه داده درست برگشته یا نه
       if (response.data && Array.isArray(response.data)) {
         return response.data
@@ -138,6 +138,11 @@ export const knowledgeBaseService = {
       console.error("KB Service - Error in getAllArticles:", error)
       throw error
     }
+  },
+
+  async getArticleByAdmin(articleId: string): Promise<Article> {
+    const response = await api.get(`/api/super-admin/kb/articles/${articleId}`)
+    return response.data
   },
 
   async createArticle(articleData: CreateArticleData): Promise<Article> {

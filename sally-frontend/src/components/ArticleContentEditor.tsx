@@ -45,7 +45,7 @@ const ArticleContentEditor: React.FC<ArticleContentEditorProps> = ({
   return (
     <div className="w-full" dir="rtl">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-4">
+        {/* <TabsList className="grid w-full grid-cols-2 mb-4">
           <TabsTrigger value="preview" className="flex items-center gap-2">
             <Eye className="h-4 w-4" />
             پیش‌نمایش
@@ -54,7 +54,7 @@ const ArticleContentEditor: React.FC<ArticleContentEditorProps> = ({
             <Edit3 className="h-4 w-4" />
             ویرایش
           </TabsTrigger>
-        </TabsList>
+        </TabsList> */}
 
         <TabsContent value="preview" className="mt-0">
           <div className="min-h-[400px] border border-gray-200 rounded-lg p-6 bg-white" dir="rtl">
