@@ -53,31 +53,31 @@ class LangChainService:
             model = self._get_model(settings.metadata_model_loaded)
 
             prompt = ChatPromptTemplate.from_template("""
-You are an expert content strategist for a knowledge base. Your task is to analyze the following article and generate structured metadata in Persian (Farsi).
+                You are an expert content strategist for a knowledge base. Your task is to analyze the following article and generate structured metadata in Persian (Farsi).
 
-**Instructions:**
-1. Generate a concise, professional **summary**.
-2. Generate 3 to 5 relevant **tags**.
-3. Suggest a **category** from the provided list.
-4. Suggest a **visibility** level based on the content.
-5. Your output **MUST** be a single, valid JSON object and nothing else.
+                **Instructions:**
+                1. Generate a concise, professional **summary**.
+                2. Generate 3 to 5 relevant **tags**.
+                3. Suggest a **category** from the provided list.
+                4. Suggest a **visibility** level based on the content.
+                5. Your output **MUST** be a single, valid JSON object and nothing else.
 
-**Available Options:**
-- Categories: ["راهنمای محصول", "مشکلات فنی", "حساب کاربری و صورتحساب", "عمومی"]
-- Visibility: ["public", "customer", "internal"]
+                **Available Options:**
+                - Categories: ["راهنمای محصول", "مشکلات فنی", "حساب کاربری و صورتحساب", "عمومی"]
+                - Visibility: ["public", "customer", "internal"]
 
-**Article to Analyze:**
-- Title: {title}
-- Content: {content}
+                **Article to Analyze:**
+                - Title: {title}
+                - Content: {content}
 
-**Required JSON Output:**
-{{
-  "summary": "...",
-  "tags": ["...", "..."],
-  "suggested_category": "...",
-  "suggested_visibility": "..."
-}}
-""")
+                **Required JSON Output:**
+                {{
+                "summary": "...",
+                "tags": ["...", "..."],
+                "suggested_category": "...",
+                "suggested_visibility": "..."
+                }}
+            """)
 
             # Create the chain
             parser = JsonOutputParser(pydantic_object=MetadataOutput)
@@ -157,15 +157,15 @@ You are an expert content strategist for a knowledge base. Your task is to analy
             model = self._get_model(settings.rag_model_loaded)
 
             prompt = ChatPromptTemplate.from_template("""
-Based on the following context, answer the user's question in Persian (Farsi).
-If the context doesn't contain enough information to answer the question, say so politely.
+                Based on the following context, answer the user's question in Persian (Farsi).
+                If the context doesn't contain enough information to answer the question, say so politely.
 
-Context:
-{context}
+                Context:
+                {context}
 
-Question: {query}
+                Question: {query}
 
-Answer:""")
+                Answer:""")
 
             chain = prompt | model
 

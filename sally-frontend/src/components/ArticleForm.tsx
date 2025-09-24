@@ -37,9 +37,10 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
   const loadCategories = async () => {
     try {
       const cats = await knowledgeBaseService.getCategories()
-      setCategories(cats)
+      setCategories(Array.isArray(cats) ? cats : [])
     } catch (error) {
       console.error("Error loading categories:", error)
+      setCategories([]) // Set to empty array on error
     }
   }
 
@@ -139,7 +140,7 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
               className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">انتخاب دسته‌بندی...</option>
-              {categories.map((category) => (
+              {Array.isArray(categories) && categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
                 </option>

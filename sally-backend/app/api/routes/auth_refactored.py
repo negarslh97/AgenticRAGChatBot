@@ -260,13 +260,16 @@ async def _get_current_user_info(token: str):
     admin = await get_admin_from_token(token)
     if admin:
         role = await admin.get_role()
+        role_name = role.name if role else "unknown"
+        # Set user_type based on actual role
+        user_type = "SuperAdmin" if role_name == "SuperAdmin" else "Admin"
         return {
-            "user_type": "Admin",
+            "user_type": user_type,
             "user": {
                 "id": str(admin.id),
                 "email": admin.email,
                 "full_name": admin.full_name,
-                "role": role.name if role else "unknown",
+                "role": role_name,
                 "is_active": admin.is_active
             }
         }

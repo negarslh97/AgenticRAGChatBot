@@ -79,6 +79,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           if (userData && userData.email) {
             console.log("✅ AuthContext: User data is valid, setting user");
             setUser(userData)
+            // تنظیم userType بر اساس داده‌های دریافتی
+            const responseAny = responseData as any
+            const userTypeValue = responseAny.user_type || userData.role || null
+            console.log("AuthContext: Setting userType to:", userTypeValue);
+            setUserType(userTypeValue)
           } else {
             console.log("❌ AuthContext: Invalid user data received");
             localStorage.removeItem("token")
@@ -103,6 +108,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     localStorage.setItem("token", response.access_token)
     setUser(response.user)
     setUserType(response.user_type)
+    console.log("AuthContext login: Setting userType to:", response.user_type)
     return { user: response.user }
   }
 
@@ -123,6 +129,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const isAuthenticated = !!user
   const isAdmin = userType === "Admin" || userType === "SuperAdmin"
   const isSuperAdmin = userType === "SuperAdmin"
+
+  // Debug logging
+  console.log("AuthContext computed values:", {
+    user: user?.email,
+    userType,
+    isAuthenticated,
+    isAdmin,
+    isSuperAdmin,
+    hasUser: !!user,
+    userTypeType: typeof userType
+  })
+
+  // Additional check to ensure these values are never undefined
+  const safeIsAuthenticated = !!user
+  const safeIsAdmin = userType ? (userType === "Admin" || userType === "SuperAdmin") : false
+  const safeIsSuperAdmin = userType ? userType === "SuperAdmin" : false
 
   const getDashboardByRole = (role: string): string => {
     switch (role) {

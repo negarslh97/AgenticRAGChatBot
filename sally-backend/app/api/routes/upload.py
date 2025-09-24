@@ -141,11 +141,12 @@ async def upload_file(
     try:
         article = KnowledgeBaseArticle(
             title=article_title,
-            content=article_content,
+            content_markdown=article_content,
+            content_html=f"<pre>{article_content}</pre>",  # Basic HTML conversion
             summary=f"Uploaded file: {original_filename}",
             author_id=str(current_user.id),
             status=ArticleStatus.DRAFT,
-            tags=["uploaded", file_extension[1:]]  # e.g., "pdf", "docx"
+            tags=[]  # Initialize empty tags list
         )
         await article.insert()
         article_id = str(article.id)

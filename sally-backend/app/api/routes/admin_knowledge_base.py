@@ -167,7 +167,7 @@ class ArticleHistoryItem(BaseModel):
 
 class SyncStatusResponse(BaseModel):
     status: str
-    last_sync: Optional[datetime] = None
+    last_sync: Optional[str] = None  # Change to string to handle None values
     pending_operations: int = 0
     health_status: str = "healthy"
 
@@ -222,7 +222,7 @@ async def create_article(
     tags = await get_or_create_tags(article_data.tag_names)
 
     # Check permissions for publishing
-    if article_data.status == ArticleStatus.PUBLISHED and current_user.role != UserRole.SuperAdmin:
+    if article_data.status == ArticleStatus.PUBLISHED and current_user.role_name != "SuperAdmin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only SuperAdmin can publish articles directly. Create as draft and use publish endpoint."

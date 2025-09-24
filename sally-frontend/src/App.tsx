@@ -9,6 +9,7 @@ import SuperAdminLayout from "./components/layouts/SuperAdminLayout"
 
 // Components
 import ProtectedRoute from "./components/ProtectedRoute"
+import AuthGuard from "./components/AuthGuard"
 import ArticleDetail from "./components/ArticleDetail"
 
 // Lazy loaded pages
@@ -22,6 +23,8 @@ const KnowledgeBasePage = lazy(() => import("./pages/KnowledgeBasePage"))
 const AdminPanel = lazy(() => import("./pages/AdminPanel"))
 const SuperAdminDashboard = lazy(() => import("./pages/SuperAdminDashboard"))
 const SuperAdminKnowledgeBasePage = lazy(() => import("./pages/SuperAdminKnowledgeBasePage"))
+const SuperAdminAddArticlePage = lazy(() => import("./pages/SuperAdminAddArticlePage"))
+const SuperAdminUploadPage = lazy(() => import("./pages/SuperAdminUploadPage"))
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage"))
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"))
 const CustomerUsersPage = lazy(() => import("./pages/CustomerUsersPage"))
@@ -132,6 +135,22 @@ const App: React.FC = () => {
               <Route path="customer/users" element={<CustomerUsersPage />} />
               <Route path="tickets" element={<div className="p-6"><h1 className="text-2xl font-bold">مدیریت تیکت‌ها</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="knowledge-base" element={<SuperAdminKnowledgeBasePage />} />
+              <Route
+                path="knowledge-base/add"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <SuperAdminAddArticlePage />
+                  </AuthGuard>
+                }
+              />
+              <Route
+                path="knowledge-base/upload"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <SuperAdminUploadPage />
+                  </AuthGuard>
+                }
+              />
               <Route path="knowledge-base/articles/:articleId" element={<ArticleDetail isadminView={true} />} />
               <Route path="logs" element={<div className="p-6"><h1 className="text-2xl font-bold">لاگ‌های فعالیت</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">تنظیمات سیستم</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />

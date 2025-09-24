@@ -1,29 +1,24 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
-import { adminService, type GeneratedMetadata } from "../services/adminService"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
-import AdminFileUpload from "../components/AdminFileUpload"
-import ArticleContentEditor from "../components/ArticleContentEditor"
-import ArticleForm from "../components/ArticleForm"
 import toast from "react-hot-toast"
-import { Plus, Edit, Trash2, Search, ChevronLeft, ChevronRight, Upload, Sparkles } from "lucide-react"
+import { Plus, Edit, Trash2, Search, ChevronLeft, ChevronRight, Upload } from "lucide-react"
 
 const SuperAdminKnowledgeBasePage: React.FC = () => {
+  const navigate = useNavigate()
   const { user, isSuperAdmin, loading: authLoading } = useAuth()
   const [articles, setArticles] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
-  const [showForm, setShowForm] = useState(false)
-  const [showUpload, setShowUpload] = useState(false)
-  const [editingArticle, setEditingArticle] = useState<Article | undefined>()
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; article?: Article }>({ show: false })
   const itemsPerPage = 10
 
@@ -34,7 +29,7 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
       user: user?.email,
       hasToken: !!localStorage.getItem('token')
     });
-    
+
     // فقط اگر احراز هویت کامل شده و کاربر SuperAdmin باشه، دیتا رو لود کن
     if (!authLoading && isSuperAdmin && user) {
       console.log("✅ Conditions met, loading articles...");
@@ -158,40 +153,6 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
         <p className="text-gray-600">این صفحه فقط برای سوپر ادمین‌ها قابل دسترسی است.</p>
       </div>
 
-      {/* Form */}
-      {showForm && (
-        <ArticleForm
-          article={editingArticle}
-          onSave={() => {
-            setShowForm(false)
-            setEditingArticle(undefined)
-            loadArticles()
-          }}
-          onCancel={() => {
-            setShowForm(false)
-            setEditingArticle(undefined)
-          }}
-        />
-      )}
-
-      {/* Upload Form */}
-      {showUpload && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>آپلود فایل</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AdminFileUpload
-              onUploadSuccess={(data) => {
-                toast.success(`فایل ${data.title} با موفقیت آپلود شد و متادیتای هوش مصنوعی تولید گردید! ✨`)
-                setShowUpload(false)
-                loadArticles() // Reload articles to show the new one
-              }}
-              onClose={() => setShowUpload(false)}
-            />
-          </CardContent>
-        </Card>
-      )}
 
       {/* Delete Confirmation Dialog */}
       {deleteConfirm.show && deleteConfirm.article && (
@@ -231,14 +192,14 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
       <div className="flex justify-between items-center mb-6">
         <div className="flex gap-2">
           <Button
-            onClick={() => setShowForm(true)}
+            onClick={() => navigate("/super-admin/knowledge-base/add")}
             className="flex items-center gap-2"
           >
             <Plus className="h-4 w-4" />
             افزودن مقاله جدید
           </Button>
           <Button
-            onClick={() => setShowUpload(true)}
+            onClick={() => navigate("/super-admin/knowledge-base/upload")}
             variant="outline"
             className="flex items-center gap-2"
           >
@@ -309,8 +270,10 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => {
-                              setEditingArticle(article)
-                              setShowForm(true)
+                              // TODO: Navigate to edit page
+                              toast("ویرایش مقاله به زودی پیاده‌سازی خواهد شد.", {
+                                icon: "ℹ️"
+                              })
                             }}
                           >
                             <Edit className="h-4 w-4" />

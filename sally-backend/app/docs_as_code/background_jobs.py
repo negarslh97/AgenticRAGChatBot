@@ -137,10 +137,18 @@ class JobQueue:
         job = self._jobs.get(job_id)
         if not job or job.status != JobStatus.PENDING:
             return False
-        
+
         job.status = JobStatus.CANCELLED
         job.completed_at = datetime.utcnow()
         return True
+
+    async def get_pending_count(self) -> int:
+        """Get the number of pending jobs."""
+        pending_jobs = [
+            job for job in self._jobs.values()
+            if job.status == JobStatus.PENDING
+        ]
+        return len(pending_jobs)
     
     async def _process_jobs(self):
         """Process jobs from the queue."""

@@ -380,19 +380,48 @@ retry_manager = RetryManager()
 
 async def get_system_stats() -> Dict[str, Any]:
     """Get comprehensive system statistics."""
+    # Import global instances
     from .background_jobs import job_queue
     from .conflict_resolver import conflict_manager
-    
-    health = await monitoring_service.check_system_health(job_queue, conflict_manager)
-    recent_metrics = monitoring_service.get_recent_metrics(50)
-    error_summary = monitoring_service.get_error_summary(24)
-    
-    return {
-        'health': health.to_dict(),
-        'recent_operations': recent_metrics,
-        'error_summary': error_summary,
-        'timestamp': datetime.utcnow().isoformat()
-    }
+
+    try:
+        health = await monitoring_service.check_system_health(job_queue, conflict_manager)
+        recent_metrics = monitoring_service.get_recent_metrics(50)
+        error_summary = monitoring_service.get_error_summary(24)
+
+        # Add last_sync and pending_operations for compatibility
+        last_sync = None
+        pending_operations = 0
+
+        # Try to get last sync from recent metrics
+        if recent_metrics:
+            last_sync = recent_metrics[0].get('timestamp') if isinstance(recent_metrics[0], dict) else None
+
+        # Try to get pending operations from job queue
+        try:
+            pending_operations = await job_queue.get_pending_count()
+        except Exception as e:
+            logger.warning(f"Failed to get pending operations count: {e}")
+
+        return {
+            'health': health.to_dict(),
+            'recent_operations': recent_metrics,
+            'error_summary': error_summary,
+            'last_sync': last_sync,
+            'pending_operations': pending_operations,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get system stats: {e}")
+        # Return a basic structure if there's an error
+        return {
+            'health': {'status': 'error', 'components': {}, 'last_check': datetime.utcnow().isoformat(), 'details': {}},
+            'recent_operations': [],
+            'error_summary': [],
+            'last_sync': None,
+            'pending_operations': 0,
+            'timestamp': datetime.utcnow().isoformat()
+        }
 
 
 def setup_logging():
