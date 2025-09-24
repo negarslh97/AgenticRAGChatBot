@@ -61,7 +61,7 @@ export const adminService = {
    */
   async getArticle(articleId: string): Promise<Article> {
     try {
-      const response = await api.get<Article>(`/admin/kb/articles/${articleId}`);
+      const response = await api.get<Article>(`/api/super-admin/kb/articles/${articleId}`);
       return response.data;
     } catch (error) {
       console.error("Error getting article:", error);
@@ -74,7 +74,7 @@ export const adminService = {
    */
   async createArticle(articleData: ArticleCreateRequest): Promise<{ id: string; message: string }> {
     try {
-      const response = await api.post<{ id: string; message: string }>("/api/admin/kb/articles", articleData);
+      const response = await api.post<{ id: string; message: string }>("/api/super-admin/kb/articles", articleData);
       return response.data;
     } catch (error) {
       console.error("Error creating article:", error);
@@ -87,7 +87,7 @@ export const adminService = {
    */
   async updateArticle(articleId: string, articleData: ArticleUpdateRequest): Promise<{ message: string }> {
     try {
-      const response = await api.put<{ message: string }>(`/api/admin/kb/articles/${articleId}`, articleData);
+      const response = await api.put<{ message: string }>(`/api/super-admin/kb/articles/${articleId}`, articleData);
       return response.data;
     } catch (error) {
       console.error("Error updating article:", error);
@@ -100,7 +100,7 @@ export const adminService = {
    */
   async publishArticle(articleId: string, publishData?: PublishArticleRequest): Promise<{ message: string }> {
     try {
-      const response = await api.post<{ message: string }>(`/api/admin/kb/articles/${articleId}/publish`, publishData || {});
+      const response = await api.post<{ message: string }>(`/api/super-admin/kb/articles/${articleId}/publish`, publishData || {});
       return response.data;
     } catch (error) {
       console.error("Error publishing article:", error);
@@ -113,7 +113,7 @@ export const adminService = {
    */
   async deleteArticle(articleId: string): Promise<{ message: string }> {
     try {
-      const response = await api.delete<{ message: string }>(`/api/admin/kb/articles/${articleId}`);
+      const response = await api.delete<{ message: string }>(`/api/super-admin/kb/articles/${articleId}`);
       return response.data;
     } catch (error) {
       console.error("Error deleting article:", error);
@@ -126,7 +126,7 @@ export const adminService = {
    */
   async updateArticleStatus(articleId: string, statusData: { status: string }): Promise<{ message: string }> {
     try {
-      const response = await api.put<{ message: string }>(`/api/admin/kb/articles/${articleId}/status`, statusData);
+      const response = await api.put<{ message: string }>(`/api/super-admin/kb/articles/${articleId}/status`, statusData);
       return response.data;
     } catch (error) {
       console.error("Error updating article status:", error);
@@ -142,7 +142,7 @@ export const adminService = {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await api.post<{ message: string; article_id?: string }>("/admin/kb/articles/upload", formData, {
+      const response = await api.post<{ message: string; article_id?: string }>("/api/super-admin/kb/articles/upload", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },

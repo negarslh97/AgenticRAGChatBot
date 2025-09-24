@@ -36,40 +36,44 @@ async def get_public_articles(
     search: Optional[str] = None
 ):
     """Get public knowledge base articles (visible to guests)."""
-    query = (KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED) & \
-            (KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC)
-    
-    if category_id:
-        # Use embedded category id for filtering
-        query = query & (KnowledgeBaseArticle.category.id == category_id)
-    
-    articles = await KnowledgeBaseArticle.find(query).to_list()
-    
-    # Simple search filter
-    if search:
-        search_lower = search.lower()
-        articles = [
-            article for article in articles
-            if (search_lower in article.title.lower() or
-                search_lower in article.content_html.lower() or
-                (article.summary and search_lower in article.summary.lower()))
+    try:
+        query = (KnowledgeBaseArticle.status == "published") & \
+                (KnowledgeBaseArticle.visibility == "public")
+
+        if category_id:
+            # Use embedded category id for filtering (only if category exists)
+            query = query & (KnowledgeBaseArticle.category != None) & (KnowledgeBaseArticle.category.id == category_id)
+
+        articles = await KnowledgeBaseArticle.find(query).to_list()
+
+        # Simple search filter
+        if search:
+            search_lower = search.lower()
+            articles = [
+                article for article in articles
+                if (search_lower in article.title.lower() or
+                    search_lower in article.content_html.lower() or
+                    (article.summary and search_lower in article.summary.lower()))
+            ]
+
+        return [
+            ArticleResponse(
+                id=str(article.id),
+                title=article.title,
+                content_html=article.content_html,
+                summary=article.summary,
+                category=article.category,
+                tags=article.tags,
+                status=article.status,
+                visibility=article.visibility,
+                created_at=article.created_at.isoformat(),
+                updated_at=article.updated_at.isoformat()
+            )
+            for article in articles
         ]
-    
-    return [
-        ArticleResponse(
-            id=str(article.id),
-            title=article.title,
-            content_html=article.content_html,
-            summary=article.summary,
-            category=article.category,
-            tags=article.tags,
-            status=article.status,
-            visibility=article.visibility,
-            created_at=article.created_at.isoformat(),
-            updated_at=article.updated_at.isoformat()
-        )
-        for article in articles
-    ]
+    except Exception as e:
+        print(f"Error in get_public_articles: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching public articles: {str(e)}")
 
 
 @router.get("/customer/articles", response_model=List[ArticleResponse])

@@ -90,14 +90,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include refactored routers
+# Include routers with consistent prefixes based on RBAC permissions
+
+# Public routes (accessible by all users including guests - no authentication required)
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(chat_router, prefix="/api", tags=["Chat"])
-app.include_router(tickets_router, prefix="/api", tags=["Tickets"])
-app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
-app.include_router(kb_router, prefix="/api/kb", tags=["Knowledge Base"])
-app.include_router(admin_kb_router, prefix="/admin/kb", tags=["Admin Knowledge Base"])
-app.include_router(upload_router, prefix="/api", tags=["Upload"])
+app.include_router(kb_router, prefix="/api/kb", tags=["Public Knowledge Base"])
+
+# Customer routes (Customer role permissions: CREATE_TICKETS, REPLY_TICKETS, VIEW_PUBLIC_KB)
+app.include_router(chat_router, prefix="/api/customer/chat", tags=["Customer Chat"])
+app.include_router(tickets_router, prefix="/api/customer/tickets", tags=["Customer Tickets"])
+
+# Admin routes (Admin role permissions: VIEW_CUSTOMERS, ticket management, basic KB, logs)
+app.include_router(admin_router, prefix="/api/admin", tags=["Admin Management"])
+
+# Super Admin routes (SuperAdmin role permissions: all admin + user management + full KB + system)
+app.include_router(admin_kb_router, prefix="/api/super-admin/kb", tags=["Super Admin Knowledge Base"])
+app.include_router(upload_router, prefix="/api/super-admin", tags=["Super Admin Upload"])
 
 # Alias for /api/users/me to /api/auth/me
 @app.get("/api/users/me")

@@ -29,7 +29,7 @@ const AdminPanel: React.FC = () => {
   const fetchArticles = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles`, {
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
         }
@@ -50,7 +50,7 @@ const AdminPanel: React.FC = () => {
 
   const publishArticle = async (articleId: string, visibility: "public" | "customer" | "internal") => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}/publish`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/${articleId}/publish`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -76,7 +76,7 @@ const AdminPanel: React.FC = () => {
 
   const updateArticleStatus = async (articleId: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED") => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}/status`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/${articleId}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -105,7 +105,7 @@ const AdminPanel: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/${articleId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
@@ -128,7 +128,7 @@ const AdminPanel: React.FC = () => {
       const formData = new FormData()
       formData.append("file", file)
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/upload`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/upload`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`

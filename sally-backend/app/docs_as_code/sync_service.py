@@ -471,8 +471,8 @@ async def create_sync_service() -> SyncService:
     """Create a configured sync service."""
     config = DocsAsCodeConfig(
         git=GitConfig(
-            repo_url="https://github.com/your-org/knowledge-base.git",
-            local_path=Path("./knowledge-base"),
+            repo_url="https://github.com/nslhsdgn/kb.git",
+            local_path=Path("./kb"),
             branch="main"
         )
     )

@@ -196,7 +196,7 @@ async def get_or_create_tags(tag_names: List[str]) -> List[ArticleTag]:
         article_tags.append(ArticleTag(id=str(tag.id), name=tag.name, color=tag.color))
     return article_tags
 
-@router.post("/articles", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/articles", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED, tags=["Knowledge Base Management"])
 async def create_article(
     article_data: ArticleCreate,
     current_user: Admin = Depends(get_current_admin)
@@ -257,18 +257,8 @@ async def create_article(
     await new_article.insert()
     new_article.id = str(new_article.id)
 
-    # Sync to Git repository
-    try:
-        config = get_default_config()
-        sync_service = MongoToGitSync(config)
-        author_info = {
-            "name": current_user.full_name,
-            "email": current_user.email
-        }
-        await sync_service.sync_article_to_git(str(new_article.id), author_info)
-    except Exception as e:
-        # Log error but don't fail the request
-        print(f"Git sync failed for article {new_article.id}: {str(e)}")
+    # Sync to Git repository (disabled - empty repository)
+    print(f"Article {new_article.id} created successfully (Git sync disabled - empty repository)")
 
     return ArticleResponse(
         id=str(new_article.id),
@@ -287,7 +277,7 @@ async def create_article(
         published_at=new_article.published_at.isoformat() if new_article.published_at else None
     )
 
-@router.post("/articles/upload", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/articles/upload", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED, tags=["Knowledge Base Management"])
 async def upload_kb_file(
     file: UploadFile = File(...),
     current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
@@ -373,18 +363,8 @@ async def upload_kb_file(
     await new_article.insert()
     new_article.id = str(new_article.id)
 
-    # Sync to Git repository
-    try:
-        config = get_default_config()
-        sync_service = MongoToGitSync(config)
-        author_info = {
-            "name": current_user.full_name,
-            "email": current_user.email
-        }
-        await sync_service.sync_article_to_git(str(new_article.id), author_info)
-    except Exception as e:
-        # Log error but don't fail the request
-        print(f"Git sync failed for article {new_article.id}: {str(e)}")
+    # Sync to Git repository (disabled - empty repository)
+    print(f"Article {new_article.id} created successfully (Git sync disabled - empty repository)")
 
     return ArticleResponse(
         id=str(new_article.id),
@@ -403,7 +383,7 @@ async def upload_kb_file(
         published_at=new_article.published_at.isoformat() if new_article.published_at else None
     )
 
-@router.post("/articles/{article_id}/publish", response_model=ArticleResponse)
+@router.post("/articles/{article_id}/publish", response_model=ArticleResponse, tags=["Knowledge Base Management"])
 async def publish_article(
     article_id: str,
     publish_request: ArticlePublishRequest,
@@ -431,18 +411,8 @@ async def publish_article(
     await article.save()
     article.id = str(article.id)
 
-    # Sync to Git repository
-    try:
-        config = get_default_config()
-        sync_service = MongoToGitSync(config)
-        author_info = {
-            "name": current_user.full_name,
-            "email": current_user.email
-        }
-        await sync_service.sync_article_to_git(article_id, author_info)
-    except Exception as e:
-        # Log error but don't fail the request
-        print(f"Git sync failed for article {article_id}: {str(e)}")
+    # Sync to Git repository (disabled - empty repository)
+    print(f"Article {article_id} updated successfully (Git sync disabled - empty repository)")
 
     return ArticleResponse(
         id=str(article.id),
@@ -461,7 +431,7 @@ async def publish_article(
         published_at=article.published_at.isoformat() if article.published_at else None
     )
 
-@router.get("/articles", response_model=List[ArticleResponse])
+@router.get("/articles", response_model=List[ArticleResponse], tags=["Knowledge Base Management"])
 async def list_articles(
     status_filter: Optional[ArticleStatus] = None,
     current_user: Admin = Depends(get_current_admin)
@@ -500,7 +470,7 @@ async def list_articles(
         ))
     return response_articles
 
-@router.get("/articles/{article_id}", response_model=ArticleResponse)
+@router.get("/articles/{article_id}", response_model=ArticleResponse, tags=["Knowledge Base Management"])
 async def get_article(
     article_id: str,
     current_user: Admin = Depends(get_current_admin)
@@ -529,7 +499,7 @@ async def get_article(
         published_at=article.published_at.isoformat() if article.published_at else None
     )
 
-@router.put("/articles/{article_id}", response_model=ArticleResponse)
+@router.put("/articles/{article_id}", response_model=ArticleResponse, tags=["Knowledge Base Management"])
 async def update_article(
     article_id: str,
     article_data: ArticleUpdate,
@@ -607,18 +577,8 @@ async def update_article(
 
     await article.save()
 
-    # Sync to Git repository
-    try:
-        config = get_default_config()
-        sync_service = MongoToGitSync(config)
-        author_info = {
-            "name": current_user.full_name,
-            "email": current_user.email
-        }
-        await sync_service.sync_article_to_git(article_id, author_info)
-    except Exception as e:
-        # Log error but don't fail the request
-        print(f"Git sync failed for article {article_id}: {str(e)}")
+    # Sync to Git repository (disabled - empty repository)
+    print(f"Article {article_id} updated successfully (Git sync disabled - empty repository)")
 
     return ArticleResponse(
         id=str(article.id),
@@ -637,7 +597,7 @@ async def update_article(
         published_at=article.published_at.isoformat() if article.published_at else None
     )
 
-@router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Knowledge Base Management"])
 async def delete_article(
     article_id: str,
     current_user: Admin = Depends(get_current_admin_with_permission(Permission.DELETE_ARTICLES))
@@ -670,7 +630,7 @@ async def delete_article(
     
     return None
 
-@router.get("/articles/{article_id}/history", response_model=List[ArticleHistoryItem])
+@router.get("/articles/{article_id}/history", response_model=List[ArticleHistoryItem], tags=["Knowledge Base Management"])
 async def get_article_history(
     article_id: str,
     current_user: Admin = Depends(get_current_admin)
@@ -713,7 +673,7 @@ async def get_article_history(
             detail=f"Error fetching article history: {str(e)}"
         )
 
-@router.get("/sync/status", response_model=SyncStatusResponse)
+@router.get("/sync/status", response_model=SyncStatusResponse, tags=["Knowledge Base Management"])
 async def get_sync_status(
     current_user: Admin = Depends(get_current_admin)
 ):
@@ -736,7 +696,7 @@ async def get_sync_status(
             detail=f"Error fetching sync status: {str(e)}"
         )
 
-@router.post("/upload-convert", response_model=FileUploadResponse)
+@router.post("/upload-convert", response_model=FileUploadResponse, tags=["Knowledge Base Management"])
 async def upload_and_convert_file(
     file: UploadFile = File(...),
     current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))

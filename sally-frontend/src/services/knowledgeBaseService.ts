@@ -121,7 +121,7 @@ export const knowledgeBaseService = {
   // admin API
   async getAllArticles(): Promise<Article[]> {
     try {
-      const response = await api.get("/admin/kb/articles")
+      const response = await api.get("/api/super-admin/kb/articles")
       console.log("KB Service - Raw response:", response)
       console.log("KB Service - Response data:", response.data)
       
@@ -141,32 +141,32 @@ export const knowledgeBaseService = {
   },
 
   async createArticle(articleData: CreateArticleData): Promise<Article> {
-    const response = await api.post("/admin/kb/articles", articleData)
+    const response = await api.post("/api/super-admin/kb/articles", articleData)
     return response.data
   },
 
   async updateArticle(articleId: string, articleData: UpdateArticleData): Promise<Article> {
-    const response = await api.put(`/admin/kb/articles/${articleId}`, articleData)
+    const response = await api.put(`/api/super-admin/kb/articles/${articleId}`, articleData)
     return response.data
   },
 
   async publishArticle(articleId: string, visibility: string = "public"): Promise<Article> {
-    const response = await api.post(`/admin/kb/articles/${articleId}/publish`, { visibility })
+    const response = await api.post(`/api/super-admin/kb/articles/${articleId}/publish`, { visibility })
     return response.data
   },
 
   async deleteArticle(articleId: string): Promise<void> {
-    await api.delete(`/admin/kb/articles/${articleId}`)
+    await api.delete(`/api/super-admin/kb/articles/${articleId}`)
   },
 
   // New endpoints for Docs-as-Code system
   async getArticleHistory(articleId: string): Promise<ArticleHistoryItem[]> {
-    const response = await api.get(`/admin/kb/articles/${articleId}/history`)
+    const response = await api.get(`/api/super-admin/kb/articles/${articleId}/history`)
     return response.data
   },
 
   async getSyncStatus(): Promise<SyncStatusResponse> {
-    const response = await api.get("/admin/kb/sync/status")
+    const response = await api.get("/api/super-admin/kb/sync/status")
     return response.data
   },
 
@@ -174,7 +174,7 @@ export const knowledgeBaseService = {
     const formData = new FormData()
     formData.append("file", file)
     
-    const response = await api.post("/admin/kb/upload-convert", formData, {
+    const response = await api.post("/api/super-admin/kb/upload-convert", formData, {
       headers: {
         "Content-Type": "multipart/form-data"
       }

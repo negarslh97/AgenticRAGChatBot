@@ -19,7 +19,7 @@ const ArticleCard: React.FC<ArticleCardProps> = ({ article, isadminView = false 
     return colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"
   }
 
-  const linkTo = isadminView ? `/admin/kb/articles/${article.id}` : `/kb/articles/${article.id}`
+  const linkTo = isadminView ? `/api/super-admin/kb/articles/${article.id}` : `/api/kb/articles/${article.id}`
 
   return (
     <div className="card hover:shadow-md transition-shadow">

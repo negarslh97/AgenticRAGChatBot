@@ -72,7 +72,7 @@ def extract_text_from_csv(file_path: Path) -> str:
     except Exception as e:
         return f"Error extracting CSV text: {str(e)}"
 
-@router.post("/admin/upload")
+@router.post("/upload", tags=["File Upload"])
 async def upload_file(
     file: UploadFile = File(...),
     current_user: Admin = Depends(get_current_admin)

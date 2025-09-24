@@ -104,9 +104,9 @@ def get_default_config() -> DocsAsCodeConfig:
     """Get default configuration from environment variables."""
     return DocsAsCodeConfig(
         git=GitConfig(
-            repo_url=os.getenv("KB_GIT_REPO_URL", "https://github.com/your-org/knowledge-base.git"),
-            local_path=Path(os.getenv("KB_GIT_LOCAL_PATH", "./knowledge-base")),
-            branch=os.getenv("KB_GIT_BRANCH", "main"),
+            repo_url=os.getenv("KB_GIT_REPO_URL", "https://github.com/nslhsdgn/kb.git"),
+            local_path=Path(os.getenv("KB_GIT_LOCAL_PATH", "./kb")),
+            branch=os.getenv("KB_GIT_BRANCH", "master"),
             username=os.getenv("KB_GIT_USERNAME"),
             password=os.getenv("KB_GIT_PASSWORD"),
             sync_interval=int(os.getenv("KB_SYNC_INTERVAL", "300"))
