@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from app.domain.entities_refactored import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility, ArticleCategory, ArticleTag
 from fastapi import HTTPException, status
 from app.api.dependencies import get_optional_user, get_current_user
-from app.domain.entities import User
+from app.domain.entities_refactored import User
 
 router = APIRouter()
 

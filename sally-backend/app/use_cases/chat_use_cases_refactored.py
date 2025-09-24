@@ -9,7 +9,6 @@ from app.domain.entities_refactored import (
 )
 from app.infrastructure.rag_service import get_rag_service
 from app.core.config import settings
-import openai
 
 logger = logging.getLogger(__name__)
 
@@ -67,44 +66,6 @@ class ChatUseCases:
             # TODO: Fix OpenAI client compatibility issues
             logger.info("Using fallback for title/tags generation")
             return {"title": conversation.title or "New Conversation", "tags": []}
-
-            # Commented out OpenAI code due to Pydantic compatibility issues
-            """
-            try:
-                client = openai.OpenAI(
-                    api_key=settings.openai_api_key_loaded,
-                    base_url=settings.openai_base_url_loaded
-                )
-
-                # Generate title and tags
-                prompt = f\"\"\"Based on this conversation, please provide:
-
-1. A concise, descriptive title (max 8 words)
-2. 3-5 relevant tags (comma-separated)
-
-Conversation:
-{conversation_text}
-
-Format your response as:
-Title: [title here]
-Tags: [tag1, tag2, tag3, tag4, tag5]
-
-Make the title specific to the main topic and tags relevant for categorization.\"\"\"
-
-                response = client.chat.completions.create(
-                    model=settings.openai_model_loaded or "gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=150,
-                    temperature=0.3
-                )
-
-                ai_response = response.choices[0].message.content.strip()
-            except Exception as e:
-                logger.warning(f"OpenAI API error for title/tags generation: {e}")
-                return {"title": conversation.title or "New Conversation", "tags": []}
-            """
-
-            # Title and tags will be generated later when AI service is properly configured
 
             # For now, just return the existing title and empty tags
             return {"title": conversation.title or "New Conversation", "tags": conversation.tags or []}

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from app.domain.entities import Ticket, TicketReply, TicketStatus, User
+from app.domain.entities_refactored import Ticket, TicketReply, TicketStatus, User
 
 
 class TicketUseCases:
