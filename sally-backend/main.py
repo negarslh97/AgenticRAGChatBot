@@ -92,20 +92,33 @@ app.add_middleware(
 
 # Include routers with consistent prefixes based on RBAC permissions
 
-# Public routes (accessible by all users including guests - no authentication required)
-app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(kb_router, prefix="/api/kb", tags=["Public Knowledge Base"])
+# ============================================================================
+# API ROUTES ORGANIZED BY ROLE-BASED ACCESS CONTROL (RBAC)
+# ============================================================================
 
-# Customer routes (Customer role permissions: CREATE_TICKETS, REPLY_TICKETS, VIEW_PUBLIC_KB)
-app.include_router(chat_router, prefix="/api/customer/chat", tags=["Customer Chat"])
-app.include_router(tickets_router, prefix="/api/customer/tickets", tags=["Customer Tickets"])
+# --- PUBLIC ROUTES (No authentication required) ---
+app.include_router(auth_router, prefix="/api/auth", tags=["🔓 Authentication"])
+app.include_router(kb_router, prefix="/api/kb", tags=["🔓 Public Knowledge Base"])
 
-# Admin routes (Admin role permissions: VIEW_CUSTOMERS, ticket management, basic KB, logs)
-app.include_router(admin_router, prefix="/api/admin", tags=["Admin Management"])
+# --- CUSTOMER ROUTES (Customer role permissions) ---
+# Permissions: CREATE_TICKETS, REPLY_TICKETS, VIEW_PUBLIC_KB
+app.include_router(chat_router, prefix="/api/customer/chat", tags=["👤 Customer Chat"])
+app.include_router(tickets_router, prefix="/api/customer/tickets", tags=["👤 Customer Tickets"])
+# Note: /api/kb/customer/articles requires customer authentication
+# This endpoint is part of kb_router but requires authentication
 
-# Super Admin routes (SuperAdmin role permissions: all admin + user management + full KB + system)
-app.include_router(admin_kb_router, prefix="/api/super-admin/kb", tags=["Super Admin Knowledge Base"])
-app.include_router(upload_router, prefix="/api/super-admin", tags=["Super Admin Upload"])
+# --- ADMIN ROUTES (Admin + SuperAdmin role permissions) ---
+# Permissions: VIEW_CUSTOMERS, VIEW_ALL_TICKETS, REPLY_TICKETS, ASSIGN_TICKETS,
+# MANAGE_TICKET_STATUSES, CREATE_KB_ARTICLES, UPDATE_KB_ARTICLES, VIEW_ACTIVITY_LOGS
+app.include_router(admin_router, prefix="/api/admin", tags=["👨‍💼 Admin Management"])
+
+# --- SUPER ADMIN ROUTES (SuperAdmin only - highest privilege) ---
+# Permissions: All admin permissions + MANAGE_ADMINS, MANAGE_CUSTOMERS,
+# PUBLISH_ARTICLES, DELETE_ARTICLES, MANAGE_SYSTEM_SETTINGS
+app.include_router(admin_kb_router, prefix="/api/super-admin/kb", tags=["👑 Super Admin Knowledge Base"])
+app.include_router(upload_router, prefix="/api/super-admin", tags=["👑 Super Admin Upload"])
+
+# ============================================================================
 
 # Alias for /api/users/me to /api/auth/me
 @app.get("/api/users/me")
@@ -117,19 +130,86 @@ async def get_current_user_alias(request: Request):
     token = auth_header.split(" ")[1]
     return await _get_current_user_info(token)
 
-# Serve frontend for SPA routes (development only)
+# Authentication status check endpoint
+@app.get("/api/auth/status")
+async def get_auth_status(request: Request):
+    """Check authentication status for SPA routing."""
+    from app.api.routes.auth_refactored import _get_current_user_info
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return {
+            "authenticated": False,
+            "user": None,
+            "user_type": None
+        }
+
+    try:
+        token = auth_header.split(" ")[1]
+        user_info = await _get_current_user_info(token)
+        return {
+            "authenticated": True,
+            "user": user_info["user"],
+            "user_type": user_info["user_type"]
+        }
+    except HTTPException:
+        return {
+            "authenticated": False,
+            "user": None,
+            "user_type": None
+        }
+
+# SPA Route handler with authentication check
 @app.get("/{path:path}")
-async def serve_spa(path: str):
-    # Skip API routes
-    if path.startswith("api/") or path.startswith("docs") or path.startswith("redoc") or path.startswith("openapi"):
+async def serve_spa_with_auth(path: str, request: Request):
+    """Serve SPA with authentication awareness."""
+
+    # Skip API routes, docs, and static files
+    if (path.startswith("api/") or
+        path.startswith("docs") or
+        path.startswith("redoc") or
+        path.startswith("openapi") or
+        path.startswith("_next") or
+        path.endswith((".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2"))):
         raise HTTPException(status_code=404, detail="Not found")
 
-    # Serve index.html for all other routes
+    # Check if this is a protected route
+    protected_routes = ["/dashboard", "/chat", "/tickets", "/admin", "/super-admin"]
+    is_protected_route = any(path.startswith(route) for route in protected_routes)
+
+    if is_protected_route:
+        # Check authentication for protected routes
+        from app.api.routes.auth_refactored import _get_current_user_info
+        auth_header = request.headers.get("Authorization")
+
+        if not auth_header or not auth_header.startswith("Bearer "):
+            # Return auth required response for SPA
+            return {
+                "auth_required": True,
+                "redirect_to": "/login",
+                "message": "Authentication required"
+            }
+
+        try:
+            token = auth_header.split(" ")[1]
+            user_info = await _get_current_user_info(token)
+            # User is authenticated, serve the SPA normally
+        except HTTPException:
+            # Authentication failed
+            return {
+                "auth_required": True,
+                "redirect_to": "/login",
+                "message": "Authentication required"
+            }
+
+    # Serve index.html for all other routes (including public routes)
     index_path = "sally-frontend/build/index.html"
     if os.path.exists(index_path):
         return FileResponse(index_path)
     else:
         return {"message": "Frontend not built. Run 'npm run build' in sally-frontend directory."}
+
+# Note: SPA route handler with authentication check is defined above
 
 @app.on_event("startup")
 async def startup_event():
@@ -182,7 +262,23 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    return {"message": "Sally Chat Bot API v2.0 - Multi-User System with RBAC"}
+    return {
+        "message": "🎯 Sally Chat Bot API v2.0 - Multi-User System with RBAC",
+        "version": "2.0",
+        "documentation": "/docs",
+        "roles": {
+            "SuperAdmin": "👑 Full system access",
+            "Admin": "👨‍💼 Customer & ticket management",
+            "Customer": "👤 Ticket creation & chat",
+            "Guest": "🔓 Public knowledge base only"
+        },
+        "endpoints": {
+            "public": ["/api/auth/*", "/api/kb/articles"],
+            "customer": ["/api/customer/*"],
+            "admin": ["/api/admin/*"],
+            "super_admin": ["/api/super-admin/*"]
+        }
+    }
 
 if __name__ == "__main__":
     import uvicorn

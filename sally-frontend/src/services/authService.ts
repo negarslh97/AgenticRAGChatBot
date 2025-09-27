@@ -94,6 +94,15 @@ export const authService = {
   },
 
   /**
+   * ٦. تابع چک کردن وضعیت احراز هویت:
+   * - برای SPA routing و جلوگیری از خطای unauthorized در reload
+   */
+  async getAuthStatus(): Promise<{authenticated: boolean, user?: User, user_type?: string, auth_required?: boolean, redirect_to?: string}> {
+    const response = await api.get("/api/auth/status");
+    return response.data;
+  },
+
+  /**
    * ٦. تابع خروج:
    * - آدرس API به /api/auth/logout اصلاح شد
    * - توکن از localStorage حذف می‌شود

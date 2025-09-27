@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from pydantic import BaseModel
-from app.domain.entities_refactored import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility, ArticleCategory, ArticleTag
+from app.domain.entities_refactored import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility, ArticleCategory, ArticleTag, Customer
 from fastapi import HTTPException, status
-from app.api.dependencies import get_optional_user, get_current_user
+from app.api.dependencies import get_optional_user, get_current_user, get_current_customer
 from app.domain.entities_refactored import Role
 
 router = APIRouter()
@@ -33,22 +33,21 @@ class CategoryResponse(BaseModel):
 @router.get("/articles", response_model=List[ArticleResponse])
 async def get_public_articles(
     category_id: Optional[str] = None,
-    search: Optional[str] = None
+    search_term: Optional[str] = None
 ):
     """Get public knowledge base articles (visible to guests)."""
     try:
-        query = (KnowledgeBaseArticle.status == "published") & \
-                (KnowledgeBaseArticle.visibility == "public")
+        query = {"status": "published", "visibility": "public"}
 
         if category_id:
             # Use embedded category id for filtering (only if category exists)
-            query = query & (KnowledgeBaseArticle.category != None) & (KnowledgeBaseArticle.category.id == category_id)
+            query["category.id"] = category_id
 
         articles = await KnowledgeBaseArticle.find(query).to_list()
 
         # Simple search filter
-        if search:
-            search_lower = search.lower()
+        if search_term:
+            search_lower = search_term.lower()
             articles = [
                 article for article in articles
                 if (search_lower in article.title.lower() or
@@ -72,23 +71,25 @@ async def get_public_articles(
             for article in articles
         ]
     except Exception as e:
+        import traceback
         print(f"Error in get_public_articles: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching public articles: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error fetching public articles: {type(e).__name__}")
 
 
-@router.get("/customer/articles", response_model=List[ArticleResponse])
+@router.get("/customer/articles", response_model=List[ArticleResponse], tags=["👤 Customer Knowledge Base"])
 async def get_customer_articles(
     category_id: Optional[str] = None,
     search: Optional[str] = None,
-    current_user: Role = Depends(get_current_user)
+    current_customer: Customer = Depends(get_current_customer)
 ):
+    """Get customer articles - Customer only (VIEW_PUBLIC_KB + customer visibility)"""
     """Get knowledge base articles for authenticated customers."""
-    query = (KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED) & \
-            (KnowledgeBaseArticle.visibility.in_([ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER]))
+    query = {"status": "published", "visibility": {"$in": ["public", "customer"]}}
     
     if category_id:
         # Use embedded category id for filtering
-        query = query & (KnowledgeBaseArticle.category.id == category_id)
+        query["category.id"] = category_id
     
     articles = await KnowledgeBaseArticle.find(query).to_list()
     

@@ -46,13 +46,8 @@ async def send_message(
     user_type = "Customer" if current_customer else ("Admin" if current_admin else "guest")
     
     try:
-        # Debug logging
-        print(f"DEBUG: Received message request: {message}")
-        print(f"DEBUG: Current user type: {user_type}")
-        print(f"DEBUG: Current user: {current_user}")
-        print(f"DEBUG: Guest session ID: {message.guest_session_id}")
-        print(f"DEBUG: Message content: {message.content}")
-        print(f"DEBUG: Conversation ID: {message.conversation_id}")
+        # Log message for monitoring
+        logger.info(f"Chat message received - User type: {user_type}, Content length: {len(message.content)}, Conversation ID: {message.conversation_id}")
         
         # Validate guest session ID for guests only
         if not current_user and not message.guest_session_id:
@@ -78,7 +73,11 @@ async def send_message(
 
 
 @router.get("/conversations")
-async def get_conversations(current_customer: Customer = Depends(get_current_customer)):
+async def get_conversations(
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Get conversations - authenticated users only"""
     """Get customer's conversation history."""
     try:
         conversations = await ChatUseCases.get_user_conversations(current_customer)
@@ -264,9 +263,7 @@ async def get_conversation_messages(
 ):
     """Get messages from a conversation."""
     try:
-        print(f"DEBUG: Getting messages for conversation: {conversation_id}")
-        print(f"DEBUG: Current user type: {'customer' if current_customer else ('Admin' if current_admin else 'Guest')}")
-        print(f"DEBUG: Guest session ID: {guest_session_id}")
+        logger.info(f"Getting conversation history - Conversation ID: {conversation_id}, User type: {user_type}")
         
         # Validate guest session ID for guests
         if not current_customer and not current_admin and not guest_session_id:
@@ -282,11 +279,11 @@ async def get_conversation_messages(
             user_id=user_id, 
             guest_session_id=guest_session_id
         )
-        print(f"DEBUG: Found {len(messages)} messages")
+        logger.info(f"Returning {len(messages)} messages for conversation {conversation_id}")
         
         return {"messages": messages}
     except ValueError as e:
-        print(f"DEBUG: ValueError: {e}")
+        logger.error(f"Chat API error: {e}")
         if "Conversation not found" in str(e):
             raise HTTPException(status_code=404, detail="Conversation not found")
         elif "Access denied" in str(e):
@@ -296,7 +293,7 @@ async def get_conversation_messages(
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        print(f"DEBUG: Exception: {e}")
+        logger.error(f"Unexpected error in chat API: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

@@ -14,7 +14,7 @@ from app.domain.entities_refactored import (
 import markdown  # For markdown to HTML conversion
 # --- وارد کردن سیستم دسترسی و احراز هویت ---
 from app.core.permissions import (
-    get_current_admin_with_permission, Permission
+    get_current_admin, get_current_admin_with_permission, Permission
 )
 from app.core.security import get_password_hash
 from app.core.config import settings
@@ -128,14 +128,16 @@ class GeneratedMetadataResponse(BaseModel):
 
 # --- Endpoints مدیریت ادمین‌ها (فقط SuperAdmin) ---
 
-@router.get("/admins", response_model=List[adminUserResponse], dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_adminS))])
-async def get_all_admins(
+@router.get("/admins", response_model=List[adminUserResponse])
+async def get_admins(
     skip: int = 0,
     limit: int = 10,
     search: Optional[str] = None,
     is_active: Optional[bool] = None,
-    role_name: Optional[str] = None
+    role_name: Optional[str] = None,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_adminS))
 ):
+    """SUPER ADMIN ONLY: Get all admins (VIEW_ADMINS permission)"""
     """Get all admins with pagination and filtering."""
     query = {}
 
@@ -195,16 +197,20 @@ async def get_admins_count(
     return {"count": count}
 
 @router.post("/admins", response_model=adminUserResponse, status_code=status.HTTP_201_CREATED)
-async def create_admin_user(user_data: adminUserCreate, current_admin: Admin = Depends(get_current_admin_with_permission(Permission.CREATE_adminS))):
+async def create_admin(
+    admin_data: adminUserCreate,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.CREATE_adminS))
+):
+    """SUPER ADMIN ONLY: Create new admin (CREATE_ADMINS permission)"""
     """Create a new admin user (Super admin only)."""
     # 1. بررسی اینکه آیا کاربر از قبل وجود دارد
-    if await Admin.find_one(Admin.email == user_data.email):
+    if await Admin.find_one(Admin.email == admin_data.email):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # 2. بررسی اینکه آیا نقش (Role) معتبر است
     try:
         # role_id ورودی را به ObjectId تبدیل می‌کنیم تا در دیتابیس جستجو کنیم
-        role_obj_id = ObjectId(user_data.role_id)
+        role_obj_id = ObjectId(admin_data.role_id)
         role = await Role.get(role_obj_id)
         if not role:
             raise HTTPException(status_code=400, detail="Invalid role ID")
@@ -213,9 +219,9 @@ async def create_admin_user(user_data: adminUserCreate, current_admin: Admin = D
     
     # 3. ساخت ادمین جدید
     new_admin = Admin(
-        email=user_data.email,
-        hashed_password=get_password_hash(user_data.password),
-        full_name=user_data.full_name,
+        email=admin_data.email,
+        hashed_password=get_password_hash(admin_data.password),
+        full_name=admin_data.full_name,
         # --- اصلاح اصلی: شیء ObjectId را به رشته تبدیل می‌کنیم ---
         role_id=str(role.id),
         # --- بهبود: نام نقش را هم برای خوانایی بهتر ذخیره می‌کنیم ---
@@ -251,7 +257,14 @@ async def create_admin_user(user_data: adminUserCreate, current_admin: Admin = D
 
 # --- Endpoints مدیریت مشتریان ---
 
-@router.get("/customers", response_model=List[CustomerResponse], dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_CUSTOMERS))])
+@router.get("/customers", response_model=List[CustomerResponse])
+async def get_customers(
+    skip: int = 0,
+    limit: int = 10,
+    search: Optional[str] = None,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_CUSTOMERS))
+):
+    """Get customers - Admin+ only (VIEW_CUSTOMERS permission)"""
 async def get_all_customers(
     skip: int = 0,
     limit: int = 10,
@@ -311,12 +324,13 @@ async def get_customers_count(
     count = await Customer.find(query).count()
     return {"count": count}
 
-@router.put("/customers/{customer_id}", response_model=CustomerResponse, dependencies=[Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))])
+@router.put("/customers/{customer_id}", response_model=CustomerResponse)
 async def update_customer(
     customer_id: str,
     customer_data: CustomerUpdate,
     current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))
 ):
+    """SUPER ADMIN ONLY: Update customer (MANAGE_CUSTOMERS permission)"""
     """Update a customer."""
     try:
         customer = await Customer.get(ObjectId(customer_id))
@@ -349,11 +363,12 @@ async def update_customer(
         is_active=customer.is_active
     )
 
-@router.delete("/customers/{customer_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))])
+@router.delete("/customers/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_customer(
     customer_id: str,
     current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_CUSTOMERS))
 ):
+    """SUPER ADMIN ONLY: Delete customer (MANAGE_CUSTOMERS permission)"""
     """Delete a customer."""
     try:
         customer = await Customer.get(ObjectId(customer_id))
@@ -392,7 +407,11 @@ async def get_or_create_tags(tag_names: List[str]) -> List[ArticleTag]:
 # --- Endpoints مدیریت مقالات دانش‌بنیان (تفکیک شده بر اساس دسترسی) ---
 
 @router.post("/kb/articles", summary="Create a new draft article", status_code=status.HTTP_201_CREATED)
-async def create_article(article_data: ArticleCreate, current_admin: Admin = Depends(get_current_admin_with_permission(Permission.CREATE_KB_ARTICLES))):
+async def create_kb_article(
+    article_data: ArticleCreate,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.CREATE_KB_ARTICLES))
+):
+    """Create KB article - Admin+ only (CREATE_KB_ARTICLES permission)"""
     """
     ادمین و ادمین ارشد می‌توانند مقاله جدیدی در حالت پیش‌نویس ایجاد کنند.
     """
@@ -522,10 +541,11 @@ async def generate_article_metadata(
 
 
 # --- Endpoints مدیریت نقش‌ها (Roles) ---
-@router.get("/roles", response_model=List[RoleResponse], dependencies=[Depends(get_current_admin_with_permission(Permission.VIEW_adminS))])
+@router.get("/roles", response_model=List[RoleResponse])
 async def get_all_roles(
     current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_adminS))
 ):
+    """SUPER ADMIN ONLY: Get all roles (VIEW_ADMINS permission)"""
     """Get all roles from database."""
     roles = await Role.find_all().to_list()
     response = []
@@ -542,7 +562,8 @@ async def get_all_roles(
 
 
 @router.get("/superadmin/stats", summary="Get dashboard statistics (SuperAdmin only)")
-async def get_superadmin_stats(current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_adminS))):
+async def get_dashboard_stats(current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_adminS))):
+    """SUPER ADMIN ONLY: Get system statistics"""
     """
     دریافت آمار داشبورد برای ادمین ارشد
     """

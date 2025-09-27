@@ -37,66 +37,61 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    console.log("AuthContext: Starting auth initialization...");
-    
     const initAuth = async () => {
       const token = localStorage.getItem("token")
-      console.log("AuthContext: Token found:", !!token);
-      
+
       if (token) {
         try {
-          console.log("AuthContext: Fetching current user...");
-          const responseData = await authService.getCurrentUser()
-          console.log("AuthContext: Raw response data:", responseData);
-          
-          // تبدیل ساختار داده بک‌اند به ساختار مورد انتظار فرانت‌اند
-          let userData: User | null = null;
-          
-          if (responseData && typeof responseData === 'object') {
-            // بررسی اینکه آیا بک‌اند داده رو در فیلد user قرار داده یا نه
-            const responseAny = responseData as any;
-            
-            if (responseAny.user && typeof responseAny.user === 'object') {
-              // حالت جدید: بک‌اند داده رو در فیلد user قرار داده
-              console.log("✅ AuthContext: Found user data in response.user field");
-              userData = responseAny.user as User;
-              
-              // اگر role در داده user نبود، از user_type استفاده کنیم
-              if (!userData.role && responseAny.user_type) {
-                userData.role = responseAny.user_type === 'admin' ? 'Admin' : 'Customer';
+          // اول authentication status را چک کنیم
+          const authStatus = await authService.getAuthStatus()
+
+          if (authStatus.auth_required && !authStatus.authenticated) {
+            // اگر سرور می‌گوید authentication لازم است و authenticated نیستیم
+            localStorage.removeItem("token")
+            window.location.href = authStatus.redirect_to || "/login"
+            return
+          }
+
+          if (authStatus.authenticated) {
+            // اگر authenticated هستیم، user data را بگیریم
+            const responseData = await authService.getCurrentUser()
+
+            // تبدیل ساختار داده بک‌اند به ساختار مورد انتظار فرانت‌اند
+            let userData: User | null = null;
+
+            if (responseData && typeof responseData === 'object') {
+              // بررسی اینکه آیا بک‌اند داده رو در فیلد user قرار داده یا نه
+              const responseAny = responseData as any;
+
+              if (responseAny.user && typeof responseAny.user === 'object') {
+                // حالت جدید: بک‌اند داده رو در فیلد user قرار داده
+                userData = responseAny.user as User;
+
+                // اگر role در داده user نبود، از user_type استفاده کنیم
+                if (!userData.role && responseAny.user_type) {
+                  userData.role = responseAny.user_type === 'admin' ? 'Admin' : 'Customer';
+                }
+              } else if (responseAny.email) {
+                // حالت قدیمی: داده مستقیم در response هست
+                userData = responseData as User;
               }
-            } else if (responseAny.email) {
-              // حالت قدیمی: داده مستقیم در response هست
-              console.log("✅ AuthContext: Found user data directly in response");
-              userData = responseData as User;
+            }
+
+            if (userData && userData.email) {
+              setUser(userData)
+              // تنظیم userType بر اساس داده‌های دریافتی
+              const responseAny = responseData as any
+              const userTypeValue = responseAny.user_type || userData.role || null
+              setUserType(userTypeValue)
+            } else {
+              localStorage.removeItem("token")
             }
           }
-          
-          console.log("AuthContext: Processed user data:", userData);
-          console.log("AuthContext: User email:", userData?.email);
-          console.log("AuthContext: User role:", userData?.role);
-          
-          if (userData && userData.email) {
-            console.log("✅ AuthContext: User data is valid, setting user");
-            setUser(userData)
-            // تنظیم userType بر اساس داده‌های دریافتی
-            const responseAny = responseData as any
-            const userTypeValue = responseAny.user_type || userData.role || null
-            console.log("AuthContext: Setting userType to:", userTypeValue);
-            setUserType(userTypeValue)
-          } else {
-            console.log("❌ AuthContext: Invalid user data received");
-            localStorage.removeItem("token")
-          }
         } catch (error) {
-          console.log("❌ AuthContext: Error fetching user, removing token", error);
           localStorage.removeItem("token")
         }
-      } else {
-        console.log("AuthContext: No token found");
       }
-      
-      console.log("AuthContext: Setting loading to false");
+
       setLoading(false)
     }
 

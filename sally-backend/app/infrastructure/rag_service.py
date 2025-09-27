@@ -12,10 +12,9 @@ class RAGService(ABC):
 
     def __init__(self):
         # Initialize OpenAI client
-        # Temporarily disable OpenAI client due to Pydantic compatibility issues
-        # TODO: Fix OpenAI client version compatibility
         self.client = None
-        logger.warning("RAGService client disabled - OpenAI client compatibility issues")
+        # OpenAI client initialization moved to langchain_utils.py
+        # No direct client needed here as we use LangChain service
     
     @abstractmethod
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -84,9 +83,7 @@ class SimpleRAGService(RAGService):
                     "confidence": 0.8
                 }
             except Exception as e:
-                logger.error(f"SimpleRAGService: Direct OpenAI API error for query '{query}': {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
+                logger.error(f"SimpleRAGService: Direct OpenAI API error for query '{query[:50]}...': {str(e)}")
 
         # Fallback response if OpenAI fails
         fallback_msg = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید."
@@ -105,9 +102,7 @@ class SimpleRAGService(RAGService):
             logger.info(f"_generate_openai_response: Using LangChain RAG model for query '{query[:50]}...'")
             return await langchain_service.generate_rag_response(query, context)
         except Exception as e:
-            logger.error(f"_generate_openai_response: LangChain error for query '{query[:50]}...': {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"_generate_openai_response: LangChain error for query '{query[:50]}...': {str(e)}")
             # Fallback response
             raise Exception("AI service unavailable")
     
@@ -126,8 +121,7 @@ class SimpleRAGService(RAGService):
             return await langchain_service.generate_chat_response(messages)
         except Exception as e:
             logger.error(f"_generate_direct_openai_response: LangChain error for query '{query[:50]}...': {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error details: {str(e)}")
             # Fallback response if API fails
             fallback = "سلام! من سالی، دستیار هوشمند شما هستم. متأسفانه در حال حاضر به پایگاه دانش دسترسی ندارم، اما می‌توانم به سوالات شما پاسخ دهم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید تا بهتر کمک کنم."
             logger.warning(f"Using fallback response: '{fallback}'")
@@ -236,8 +230,7 @@ Please provide a clear, helpful response based on the context provided. If the c
             return await langchain_service.generate_rag_response(query, context)
         except Exception as e:
             logger.error(f"_generate_openai_response_with_context: LangChain error for query '{query[:50]}...': {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error details: {str(e)}")
             raise Exception("AI service unavailable")
 
     async def _generate_agentic_response(self, query: str, context: str, user_context: Dict[str, Any]) -> str:
@@ -315,8 +308,7 @@ Your response:"""
             return await langchain_service.generate_chat_response(messages)
         except Exception as e:
             logger.error(f"_generate_direct_openai_response (Agentic): LangChain error for query '{query[:50]}...': {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error details: {str(e)}")
             # Fallback response
             fallback = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید یا با تیم پشتیبانی تماس بگیرید."
             logger.warning(f"Using fallback response: '{fallback}'")

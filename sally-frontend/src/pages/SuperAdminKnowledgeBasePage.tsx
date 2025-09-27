@@ -23,47 +23,30 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
   const itemsPerPage = 10
 
   useEffect(() => {
-    console.log("SuperAdminKnowledgeBasePage useEffect:", {
-      authLoading,
-      isSuperAdmin,
-      user: user?.email,
-      hasToken: !!localStorage.getItem('token')
-    });
-
     // فقط اگر احراز هویت کامل شده و کاربر SuperAdmin باشه، دیتا رو لود کن
     if (!authLoading && isSuperAdmin && user) {
-      console.log("✅ Conditions met, loading articles...");
       loadArticles()
-    } else {
-      console.log("⏳ Waiting for auth to complete...");
     }
   }, [isSuperAdmin, authLoading, user])
 
   const loadArticles = async () => {
     setLoading(true)
     try {
-      console.log("Starting to load articles...")
-      console.log("Token available:", !!localStorage.getItem("token"))
       
       const data = await knowledgeBaseService.getAllArticles()
       
       // بررسی دقیق داده‌ها
       if (data === null || data === undefined) {
-        console.error("No data received from API")
         setArticles([])
         toast.error("هیچ داده‌ای از سرور دریافت نشد")
       } else if (Array.isArray(data)) {
-        console.log("Received array with length:", data.length)
         setArticles(data)
       } else {
-        console.error("Expected array but got:", typeof data, data)
         setArticles([])
         toast.error("فرمت داده‌های دریافتی نادرست است")
       }
     } catch (error: any) {
-      console.error("Error loading articles:", error)
-      console.error("Error details:", error.message)
-      console.error("Error response:", error.response)
+      toast.error("خطا در بارگذاری مقالات")
       
       if (error.response?.status === 401) {
         toast.error("خطای احراز هویت - لطفاً دوباره وارد شوید")

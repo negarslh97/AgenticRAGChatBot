@@ -197,6 +197,11 @@ async def get_or_create_tags(tag_names: List[str]) -> List[ArticleTag]:
     return article_tags
 
 @router.post("/articles", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED, tags=["Knowledge Base Management"])
+async def create_article_admin(
+    article_data: ArticleCreate,
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """Create KB article - Admin+ only (CREATE_KB_ARTICLES permission)"""
 async def create_article(
     article_data: ArticleCreate,
     current_user: Admin = Depends(get_current_admin)

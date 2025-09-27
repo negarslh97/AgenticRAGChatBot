@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     database_url: str = "mongodb://localhost:27017/SallyChatBot"
     
     # JWT
-    jwt_secret_key: str = "your-secret-key-change-in-production"
+    jwt_secret_key: str = "sally-chatbot-super-secure-secret-key-2025-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 43200  # 30 days
     
@@ -20,12 +20,17 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: List[str] = ["http://localhost:3000", "http://localhost:3001"]
 
+    # Weaviate Vector Database Configuration
+    weaviate_url: Optional[str] = None
+    weaviate_api_key: Optional[str] = None
+
     # AI Models Configuration
     metadata_model: Optional[str] = None
     rag_model: Optional[str] = None
     chat_model: Optional[str] = None
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
+    embedder_api_key: Optional[str] = None
 
     # Docs-as-Code Git Configuration
     kb_git_repo_url: Optional[str] = None
@@ -65,7 +70,22 @@ class Settings(BaseSettings):
     def openai_base_url_loaded(self) -> Optional[str]:
         import os
         return self.openai_base_url or os.getenv("OPENAI_BASE_URL")
-    
+
+    @property
+    def weaviate_url_loaded(self) -> Optional[str]:
+        import os
+        return self.weaviate_url or os.getenv("WEAVIATE_URL")
+
+    @property
+    def weaviate_api_key_loaded(self) -> Optional[str]:
+        import os
+        return self.weaviate_api_key or os.getenv("WEAVIATE_API_KEY")
+
+    @property
+    def embedder_api_key_loaded(self) -> Optional[str]:
+        import os
+        return self.embedder_api_key or os.getenv("Embedder_API_KEY")
+
     # App settings
     app_name: str = "Sally Customer Support"
     debug: bool = True

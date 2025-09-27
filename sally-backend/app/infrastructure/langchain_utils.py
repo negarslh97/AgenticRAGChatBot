@@ -61,15 +61,11 @@ class LangChainService:
         """
         try:
             selected_model = settings.metadata_model_loaded
-            print(f"🔍 تولید فراداده با مدل: {selected_model}")
-            print(f"📝 عنوان مقاله: {title[:100]}...")
-            print(f"📊 طول محتوا: {len(content)} کاراکتر")
             logger.info(f"🔍 تولید فراداده با مدل: {selected_model}")
             logger.info(f"📝 عنوان مقاله: {title[:100]}...")
             logger.info(f"📊 طول محتوا: {len(content)} کاراکتر")
 
             model = self._get_model(selected_model)
-            print(f"✅ مدل {selected_model} با موفقیت بارگذاری شد")
             logger.info(f"✅ مدل {selected_model} با موفقیت بارگذاری شد")
 
             prompt = ChatPromptTemplate.from_template("""
@@ -109,16 +105,11 @@ class LangChainService:
                 "content": content
             })
 
-            print(f"✨ فراداده تولید شد:")
-            print(f"   📋 خلاصه: {result.get('summary', 'N/A')[:100]}...")
-            print(f"   🏷️  تگ‌ها: {result.get('tags', [])}")
-            print(f"   📁 دسته‌بندی: {result.get('suggested_category', 'N/A')}")
-            print(f"   👁️  دسترسی: {result.get('suggested_visibility', 'N/A')}")
             logger.info(f"✨ فراداده تولید شد:")
-            logger.info(f"   📋 خلاصه: {result.get('summary', 'N/A')[:100]}...")
-            logger.info(f"   🏷️  تگ‌ها: {result.get('tags', [])}")
-            logger.info(f"   📁 دسته‌بندی: {result.get('suggested_category', 'N/A')}")
-            logger.info(f"   👁️  دسترسی: {result.get('suggested_visibility', 'N/A')}")
+            logger.info(f"📋 خلاصه: {result.get('summary', 'N/A')[:100]}...")
+            logger.info(f"🏷️  تگ‌ها: {result.get('tags', [])}")
+            logger.info(f"📁 دسته‌بندی: {result.get('suggested_category', 'N/A')}")
+            logger.info(f"👁️  دسترسی: {result.get('suggested_visibility', 'N/A')}")
 
             return result
 
