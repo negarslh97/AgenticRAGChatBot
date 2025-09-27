@@ -88,7 +88,7 @@ class adminUserUpdate(BaseModel):
 # مدل‌های مربوط به مدیریت مشتریان
 class CustomerResponse(BaseModel):
     id: str
-    email: EmailStr
+    email: str
     full_name: str
     role: str  # اضافه کردن نقش برای نمایش در فرانت‌اند
     is_active: bool
@@ -196,6 +196,107 @@ async def get_admins_count(
     count = await Admin.find(query).count()
     return {"count": count}
 
+@router.put("/admins/{admin_id}", response_model=adminUserResponse)
+async def update_admin(
+    admin_id: str,
+    admin_data: adminUserUpdate,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_adminS))
+):
+    """Update admin information (SuperAdmin only)."""
+    admin = await Admin.get(ObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    # Update fields
+    update_dict = admin_data.model_dump(exclude_unset=True)
+    if update_dict:
+        for key, value in update_dict.items():
+            if key == "role_id":
+                # Verify role exists
+                role = await Role.get(ObjectId(value))
+                if not role:
+                    raise HTTPException(status_code=400, detail="Invalid role ID")
+                admin.role_id = str(role.id)
+                admin.role_name = role.name
+            else:
+                setattr(admin, key, value)
+
+        await admin.save()
+
+    # Return updated admin with role info
+    role = await admin.get_role()
+    return adminUserResponse(
+        id=str(admin.id),
+        email=admin.email,
+        full_name=admin.full_name,
+        role=RoleInadminResponse(id=str(role.id), name=role.name) if role else RoleInadminResponse(id="", name="N/A"),
+        is_active=admin.is_active
+    )
+
+
+@router.delete("/admins/{admin_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_admin(
+    admin_id: str,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.DELETE_adminS))
+):
+    """Delete admin (SuperAdmin only)."""
+    admin = await Admin.get(ObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    # Prevent deleting self
+    if admin.id == current_admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    await admin.delete()
+
+
+@router.get("/activity-logs", response_model=List[dict])
+async def get_activity_logs(
+    skip: int = 0,
+    limit: int = 50,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_ACTIVITY_LOGS))
+):
+    """Get activity logs (Admin only)."""
+    activity_logs = await ActivityLog.find().sort(-ActivityLog.created_at).skip(skip).limit(limit).to_list()
+
+    # Convert to dict for response
+    result = []
+    for log in activity_logs:
+        result.append({
+            "id": str(log.id),
+            "admin_id": log.admin_id,
+            "customer_id": log.customer_id,
+            "action": log.action,
+            "resource_type": log.resource_type,
+            "resource_id": log.resource_id,
+            "details": log.details,
+            "created_at": log.created_at.isoformat()
+        })
+
+    return result
+
+
+@router.get("/admins/{admin_id}", response_model=adminUserResponse)
+async def get_admin(
+    admin_id: str,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_adminS))
+):
+    """Get specific admin by ID (SuperAdmin only)."""
+    admin = await Admin.get(ObjectId(admin_id))
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    role = await admin.get_role()
+    return adminUserResponse(
+        id=str(admin.id),
+        email=admin.email,
+        full_name=admin.full_name,
+        role=RoleInadminResponse(id=str(role.id), name=role.name) if role else RoleInadminResponse(id="", name="N/A"),
+        is_active=admin.is_active
+    )
+
+
 @router.post("/admins", response_model=adminUserResponse, status_code=status.HTTP_201_CREATED)
 async def create_admin(
     admin_data: adminUserCreate,
@@ -265,12 +366,6 @@ async def get_customers(
     current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_CUSTOMERS))
 ):
     """Get customers - Admin+ only (VIEW_CUSTOMERS permission)"""
-async def get_all_customers(
-    skip: int = 0,
-    limit: int = 10,
-    search: Optional[str] = None,
-    is_active: Optional[bool] = None
-):
     """Get all customers with pagination and filtering."""
     query = {}
 

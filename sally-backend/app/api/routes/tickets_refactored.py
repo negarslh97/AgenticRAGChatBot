@@ -79,7 +79,7 @@ async def create_ticket(
 ):
     """Create a new support ticket."""
     ticket = Ticket(
-        customer_id=current_customer.id,
+        customer_id=str(current_customer.id),
         title=ticket_data.title,
         description=ticket_data.description,
         priority=ticket_data.priority
@@ -165,8 +165,8 @@ async def add_ticket_reply(
     # Determine reply type and author
     if isinstance(current_user, Customer):
         reply = TicketReply(
-            ticket_id=ticket.id,
-            customer_id=current_user.id,
+            ticket_id=str(ticket.id),
+            customer_id=str(current_user.id),
             content=reply_data.content,
             is_internal=False  # Customers cannot create internal replies
         )
@@ -175,8 +175,8 @@ async def add_ticket_reply(
     else:
         # Admin reply
         reply = TicketReply(
-            ticket_id=ticket.id,
-            admin_id=current_user.id,
+            ticket_id=str(ticket.id),
+            admin_id=str(current_user.id),
             content=reply_data.content,
             is_internal=reply_data.is_internal
         )

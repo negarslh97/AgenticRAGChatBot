@@ -181,13 +181,15 @@ async def search_articles(
     """Search knowledge base articles."""
     # Set visibility based on authentication
     if not current_user:
-        visibility_query = (KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC)
+        articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED,
+            KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC
+        ).to_list()
     else:
-        visibility_query = (KnowledgeBaseArticle.visibility.in_([ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER]))
-    
-    query = (KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED) & visibility_query
-    
-    articles = await KnowledgeBaseArticle.find(query).to_list()
+        articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED,
+            KnowledgeBaseArticle.visibility.in_([ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER])
+        ).to_list()
     
     # Simple text search
     search_lower = q.lower()

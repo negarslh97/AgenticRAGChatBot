@@ -99,7 +99,15 @@ async def register_admin(
     """Register a new admin user (requires admin authentication)."""
     # Verify the current admin has permission to create admins
     current_admin_role = await current_admin.get_role()
-    if not current_admin_role or Permission.MANAGE_adminS not in current_admin_role.permissions:
+    if not current_admin_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: cannot create admin users"
+        )
+
+    # Check if admin has permission to manage admins
+    permission_keys = {perm.permission_key for perm in current_admin_role.permissions}
+    if Permission.MANAGE_adminS not in permission_keys:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied: cannot create admin users"
@@ -134,7 +142,8 @@ async def register_admin(
         email=admin_data.email,
         hashed_password=get_password_hash(admin_data.password),
         full_name=admin_data.full_name,
-        role_id=role_id
+        role_id=str(role_id),
+        role_name=role.name
     )
     
     await admin.insert()

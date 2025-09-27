@@ -104,6 +104,7 @@ app.include_router(kb_router, prefix="/api/kb", tags=["🔓 Public Knowledge Bas
 # Permissions: CREATE_TICKETS, REPLY_TICKETS, VIEW_PUBLIC_KB
 app.include_router(chat_router, prefix="/api/customer/chat", tags=["👤 Customer Chat"])
 app.include_router(tickets_router, prefix="/api/customer/tickets", tags=["👤 Customer Tickets"])
+app.include_router(tickets_router, prefix="/api/admin/tickets", tags=["👨‍💼 Admin Tickets"])
 # Note: /api/kb/customer/articles requires customer authentication
 # This endpoint is part of kb_router but requires authentication
 
