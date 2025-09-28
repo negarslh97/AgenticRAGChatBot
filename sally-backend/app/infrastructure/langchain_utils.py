@@ -22,6 +22,10 @@ class MetadataOutput(BaseModel):
     suggested_category: str = Field(description="دسته‌بندی پیشنهادی")
     suggested_visibility: str = Field(description="سطح دسترسی پیشنهادی")
 
+    model_config = {
+        "protected_namespaces": ("model_",)
+    }
+
 
 class LangChainService:
     """Service for handling AI model interactions through LangChain."""
@@ -39,9 +43,11 @@ class LangChainService:
             self._models[model_name] = ChatOpenAI(
                 model_name=model_name,
                 openai_api_key=settings.openai_api_key_loaded,
-                openai_api_base=settings.openai_base_url_loaded,
+                base_url=settings.openai_base_url_loaded,
                 temperature=0.7,
                 max_tokens=500,
+                # Enable structured output capabilities
+                model_kwargs={"response_format": {"type": "json_object"}}
             )
             logger.info(f"✅ مدل {model_name} آماده استفاده است")
         else:
@@ -69,34 +75,25 @@ class LangChainService:
             logger.info(f"✅ مدل {selected_model} با موفقیت بارگذاری شد")
 
             prompt = ChatPromptTemplate.from_template("""
-                You are an expert content strategist for a knowledge base. Your task is to analyze the following article and generate structured metadata in Persian (Farsi).
+Generate metadata for this article in Persian (Farsi).
 
-                **Instructions:**
-                1. Generate a concise, professional **summary**.
-                2. Generate 3 to 5 relevant **tags**.
-                3. Suggest a **category** from the provided list.
-                4. Suggest a **visibility** level based on the content.
-                5. Your output **MUST** be a single, valid JSON object and nothing else.
+**Title:** {title}
+**Content:** {content}
 
-                **Available Options:**
-                - Categories: ["راهنمای محصول", "مشکلات فنی", "حساب کاربری و صورتحساب", "عمومی"]
-                - Visibility: ["public", "customer", "internal"]
+Respond with ONLY valid JSON:
+{{
+  "summary": "خلاصه مقاله",
+  "tags": ["تگ1", "تگ2", "تگ3"],
+  "suggested_category": "دسته‌بندی",
+  "suggested_visibility": "دسترسی"
+}}
 
-                **Article to Analyze:**
-                - Title: {title}
-                - Content: {content}
+Categories: راهنمای محصول, مشکلات فنی, حساب کاربری و صورتحساب, عمومی
+Visibility: public, customer, internal
+""")
 
-                **Required JSON Output:**
-                {{
-                "summary": "...",
-                "tags": ["...", "..."],
-                "suggested_category": "...",
-                "suggested_visibility": "..."
-                }}
-            """)
-
-            # Create the chain
-            parser = JsonOutputParser(pydantic_object=MetadataOutput)
+            # Create the chain with JSON parser
+            parser = JsonOutputParser()
             chain = prompt | model | parser
 
             # Run the chain
@@ -104,6 +101,19 @@ class LangChainService:
                 "title": title,
                 "content": content
             })
+
+            # Validate result structure manually
+            if not isinstance(result, dict):
+                raise ValueError("AI response is not a valid dictionary")
+
+            required_keys = ['summary', 'tags', 'suggested_category', 'suggested_visibility']
+            for key in required_keys:
+                if key not in result:
+                    raise ValueError(f"Missing required key: {key}")
+
+            # Ensure tags is a list
+            if not isinstance(result['tags'], list):
+                result['tags'] = [str(result['tags'])]
 
             logger.info(f"✨ فراداده تولید شد:")
             logger.info(f"📋 خلاصه: {result.get('summary', 'N/A')[:100]}...")
@@ -119,9 +129,9 @@ class LangChainService:
             logger.warning("⚠️ استفاده از فراداده پیش‌فرض")
             return {
                 "summary": f"محتوای استخراج شده از فایل: {title}",
-                "tags": ["آپلود شده", "فایل"],
-                "suggested_category": "عمومی",
-                "suggested_visibility": "internal"
+                "tags": [],
+                "suggested_category": "",
+                "suggested_visibility": ""
             }
 
     async def generate_chat_response(self, messages: List[Dict[str, str]], context: Optional[str] = None) -> str:

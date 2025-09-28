@@ -11,7 +11,7 @@ from enum import Enum
 import json
 
 from .sync_service import SyncService, MongoToGitSync
-from app.domain.entities_refactored import KnowledgeBaseArticle, Category
+from app.domain.entities_refactored import KnowledgeBaseArticle, Category, ArticleStatus
 from app.core.config import settings
 
 
@@ -32,6 +32,7 @@ class JobType(str, Enum):
     FULL_SYNC = "full_sync"
     CLEANUP = "cleanup"
     BACKUP = "backup"
+    VECTORIZE_ARTICLE = "vectorize_article"
 
 
 class SyncJob:
@@ -186,6 +187,8 @@ class JobQueue:
                 await self._process_cleanup(job)
             elif job.job_type == JobType.BACKUP:
                 await self._process_backup(job)
+            elif job.job_type == JobType.VECTORIZE_ARTICLE:
+                await self._process_vectorize_article(job)
             
             job.status = JobStatus.COMPLETED
             job.completed_at = datetime.utcnow()
@@ -289,6 +292,62 @@ class JobQueue:
         }
         job.progress = 100
 
+    async def _process_vectorize_article(self, job: SyncJob):
+        """Process article vectorization job."""
+        article_id = job.data.get('article_id')
+
+        if not article_id:
+            raise ValueError("Article ID is required for vectorization")
+
+        # Import here to avoid circular imports
+        from app.infrastructure.database_refactored import init_db
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+
+        # Ensure database is initialized
+        await init_db()
+
+        job.progress = 25
+        logger.info(f"Starting vectorization for article {article_id}")
+
+        # Get article from database
+        article = await knowledge_base_repository.get_article_by_id(article_id)
+        if not article:
+            raise ValueError(f"Article {article_id} not found")
+
+        job.progress = 50
+        logger.info(f"Article found: {article.title}")
+
+        # Check if article is published and has visibility
+        if article.status != ArticleStatus.PUBLISHED or not article.visibility:
+            logger.warning(f"Article {article_id} is not published or has no visibility, skipping vectorization")
+            job.result = {
+                'article_id': article_id,
+                'status': 'skipped',
+                'reason': 'not_published_or_no_visibility',
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            job.progress = 100
+            return
+
+        job.progress = 75
+        logger.info(f"Vectorizing article: {article.title}")
+
+        # Vectorize the article (this will sync to Weaviate)
+        # Since we're in background job, we don't need to check permissions again
+        # The article is already validated as published by SuperAdmin
+
+        # Force re-sync to Weaviate (update operation)
+        await knowledge_base_repository._sync_to_weaviate(article, "update")
+
+        job.result = {
+            'article_id': article_id,
+            'title': article.title,
+            'status': 'vectorized',
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        job.progress = 100
+        logger.info(f"Successfully vectorized article: {article.title}")
+
 
 # Global job queue instance
 job_queue = JobQueue()
@@ -333,6 +392,14 @@ async def schedule_cleanup() -> str:
 async def schedule_backup() -> str:
     """Schedule a backup job."""
     return await job_queue.add_job(JobType.BACKUP, {})
+
+
+async def schedule_vectorize_article(article_id: str) -> str:
+    """Schedule an article vectorization job."""
+    return await job_queue.add_job(
+        JobType.VECTORIZE_ARTICLE,
+        {'article_id': article_id}
+    )
 
 
 async def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:

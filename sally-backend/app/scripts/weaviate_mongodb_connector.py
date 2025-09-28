@@ -663,6 +663,225 @@ class WeaviateMongoDBConnector:
             logger.warning("⚠️ هیچ داده‌ای منتقل نشد")
             return False
 
+    async def delete_all_articles_from_mongodb(self) -> bool:
+        """حذف همه مقالات از MongoDB"""
+        try:
+            logger.info("🗑️ شروع حذف همه مقالات از MongoDB...")
+            
+            from app.domain.entities_refactored import KnowledgeBaseArticle
+            from app.infrastructure.database_refactored import init_db
+            
+            # اطمینان از initialize شدن database
+            await init_db()
+            
+            # پیدا کردن همه مقالات
+            articles = await KnowledgeBaseArticle.find_all().to_list()
+            logger.info(f"📊 تعداد مقالات برای حذف: {len(articles)}")
+            
+            if not articles:
+                logger.info("⚠️ هیچ مقاله‌ای برای حذف یافت نشد")
+                return True
+            
+            deleted_count = 0
+            for article in articles:
+                try:
+                    await article.delete()
+                    deleted_count += 1
+                    logger.info(f"✅ مقاله '{article.title}' حذف شد")
+                except Exception as e:
+                    logger.error(f"❌ خطا در حذف مقاله '{article.title}': {str(e)}")
+                    continue
+            
+            logger.info(f"✅ {deleted_count} مقاله با موفقیت از MongoDB حذف شدند")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در حذف مقالات از MongoDB: {str(e)}")
+            import traceback
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+    async def delete_articles_by_ids_from_mongodb(self, article_ids: List[str]) -> bool:
+        """حذف مقالات خاص از MongoDB بر اساس شناسه‌ها"""
+        try:
+            logger.info(f"🗑️ شروع حذف {len(article_ids)} مقاله از MongoDB...")
+            
+            from app.domain.entities_refactored import KnowledgeBaseArticle
+            from app.infrastructure.database_refactored import init_db
+            
+            # اطمینان از initialize شدن database
+            await init_db()
+            
+            deleted_count = 0
+            for article_id in article_ids:
+                try:
+                    article = await KnowledgeBaseArticle.get(article_id)
+                    if article:
+                        await article.delete()
+                        deleted_count += 1
+                        logger.info(f"✅ مقاله '{article.title}' حذف شد")
+                    else:
+                        logger.warning(f"⚠️ مقاله با شناسه {article_id} یافت نشد")
+                except Exception as e:
+                    logger.error(f"❌ خطا در حذف مقاله با شناسه {article_id}: {str(e)}")
+                    continue
+            
+            logger.info(f"✅ {deleted_count} مقاله با موفقیت از MongoDB حذف شدند")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در حذف مقالات از MongoDB: {str(e)}")
+            import traceback
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+    def delete_all_articles_from_weaviate(self) -> bool:
+        """حذف همه مقالات از Weaviate"""
+        try:
+            logger.info("🗑️ شروع حذف همه مقالات از Weaviate...")
+
+            # اتصال به Weaviate اگر برقرار نیست
+            if not self.weaviate_client:
+                if not self.connect_weaviate():
+                    logger.error("❌ اتصال به Weaviate ناموفق بود")
+                    return False
+
+            # دریافت همه مقالات برای شمارش
+            query = self.weaviate_client.query.get('KnowledgeBaseArticle').with_additional('id').with_limit(10000).do()
+            articles = query.get('data', {}).get('Get', {}).get('KnowledgeBaseArticle', [])
+            logger.info(f"📊 تعداد مقالات برای حذف: {len(articles)}")
+
+            if not articles:
+                logger.info("⚠️ هیچ مقاله‌ای برای حذف یافت نشد")
+                return True
+
+            # روش بهتر: حذف یکی یکی با استفاده از REST API
+            deleted_count = 0
+            for article in articles:
+                try:
+                    article_id = article.get('_additional', {}).get('id')
+                    if article_id:
+                        # حذف با استفاده از REST API
+                        import requests
+                        weaviate_url = settings.weaviate_url_loaded or "http://localhost:8080"
+                        response = requests.delete(f"{weaviate_url}/v1/objects/{article_id}")
+
+                        if response.status_code in [200, 204]:
+                            deleted_count += 1
+                        else:
+                            logger.warning(f"⚠️ خطا در حذف مقاله {article_id}: HTTP {response.status_code}")
+                    else:
+                        logger.warning("⚠️ مقاله بدون شناسه یافت شد")
+
+                except Exception as e:
+                    logger.warning(f"⚠️ خطا در حذف مقاله: {str(e)}")
+                    continue
+
+            logger.info(f"✅ {deleted_count} مقاله با موفقیت از Weaviate حذف شدند")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ خطا در حذف مقالات از Weaviate: {str(e)}")
+            return False
+
+    def delete_articles_by_ids_from_weaviate(self, article_ids: List[str]) -> bool:
+        """حذف مقالات خاص از Weaviate بر اساس شناسه‌ها"""
+        try:
+            logger.info(f"🗑️ شروع حذف {len(article_ids)} مقاله از Weaviate...")
+
+            # اتصال به Weaviate اگر برقرار نیست
+            if not self.weaviate_client:
+                if not self.connect_weaviate():
+                    logger.error("❌ اتصال به Weaviate ناموفق بود")
+                    return False
+
+            deleted_count = 0
+            for article_id in article_ids:
+                try:
+                    # حذف بر اساس شناسه MongoDB با استفاده از Weaviate client
+                    result = self.weaviate_client.data_object.delete(
+                        class_name='KnowledgeBaseArticle',
+                        where={
+                            'path': ['article_id'],
+                            'operator': 'Equal',
+                            'valueText': article_id
+                        }
+                    )
+                    deleted_count += 1
+                    logger.info(f"✅ مقاله با شناسه {article_id} حذف شد")
+                except Exception as e:
+                    logger.warning(f"⚠️ خطا در حذف مقاله با شناسه {article_id}: {str(e)}")
+                    continue
+
+            logger.info(f"✅ {deleted_count} مقاله با موفقیت از Weaviate حذف شدند")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ خطا در حذف مقالات از Weaviate: {str(e)}")
+            return False
+
+    async def delete_all_articles_from_both_databases(self) -> bool:
+        """حذف همه مقالات از هر دو دیتابیس (MongoDB و Weaviate)"""
+        try:
+            logger.info("🗑️ شروع حذف همه مقالات از هر دو دیتابیس...")
+            
+            # اتصال به دیتابیس‌ها
+            if not await self.connect_mongodb():
+                logger.error("❌ اتصال به MongoDB ناموفق بود")
+                return False
+                
+            if not self.connect_weaviate():
+                logger.error("❌ اتصال به Weaviate ناموفق بود")
+                return False
+            
+            # حذف از MongoDB
+            mongodb_success = await self.delete_all_articles_from_mongodb()
+            
+            # حذف از Weaviate
+            weaviate_success = self.delete_all_articles_from_weaviate()
+            
+            if mongodb_success and weaviate_success:
+                logger.info("✅ همه مقالات با موفقیت از هر دو دیتابیس حذف شدند")
+                return True
+            else:
+                logger.error("❌ حذف مقالات از یکی از دیتابیس‌ها ناموفق بود")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ خطا در حذف مقالات: {str(e)}")
+            return False
+
+    async def delete_articles_by_ids_from_both_databases(self, article_ids: List[str]) -> bool:
+        """حذف مقالات خاص از هر دو دیتابیس بر اساس شناسه‌ها"""
+        try:
+            logger.info(f"🗑️ شروع حذف {len(article_ids)} مقاله از هر دو دیتابیس...")
+            
+            # اتصال به دیتابیس‌ها
+            if not await self.connect_mongodb():
+                logger.error("❌ اتصال به MongoDB ناموفق بود")
+                return False
+                
+            if not self.connect_weaviate():
+                logger.error("❌ اتصال به Weaviate ناموفق بود")
+                return False
+            
+            # حذف از MongoDB
+            mongodb_success = await self.delete_articles_by_ids_from_mongodb(article_ids)
+            
+            # حذف از Weaviate
+            weaviate_success = self.delete_articles_by_ids_from_weaviate(article_ids)
+            
+            if mongodb_success and weaviate_success:
+                logger.info(f"✅ {len(article_ids)} مقاله با موفقیت از هر دو دیتابیس حذف شدند")
+                return True
+            else:
+                logger.error("❌ حذف مقالات از یکی از دیتابیس‌ها ناموفق بود")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ خطا در حذف مقالات: {str(e)}")
+            return False
+
     def cleanup(self):
         """پاک‌سازی اتصالات"""
         try:
@@ -685,10 +904,15 @@ async def main():
     parser.add_argument("--migrate", action="store_true", help="انتقال داده‌ها از MongoDB به Weaviate")
     parser.add_argument("--verify", action="store_true", help="بررسی وضعیت سیستم")
     parser.add_argument("--test-connection", action="store_true", help="تست اتصال به هر دو دیتابیس")
+    parser.add_argument("--delete-all", action="store_true", help="حذف همه مقالات از هر دو دیتابیس")
+    parser.add_argument("--delete-by-ids", nargs='+', help="حذف مقالات خاص بر اساس شناسه‌ها")
+    parser.add_argument("--delete-from-mongodb", action="store_true", help="حذف همه مقالات فقط از MongoDB")
+    parser.add_argument("--delete-from-weaviate", action="store_true", help="حذف همه مقالات فقط از Weaviate")
 
     args = parser.parse_args()
 
-    if not any([args.setup, args.migrate, args.verify, args.test_connection]):
+    if not any([args.setup, args.migrate, args.verify, args.test_connection, 
+                args.delete_all, args.delete_by_ids, args.delete_from_mongodb, args.delete_from_weaviate]):
         parser.print_help()
         return
 
@@ -740,6 +964,38 @@ async def main():
                 logger.info("❌ خطاها:")
                 for error in result["errors"]:
                     logger.info(f"  - {error}")
+
+        elif args.delete_all:
+            logger.info("🗑️ حذف همه مقالات از هر دو دیتابیس...")
+            success = await connector.delete_all_articles_from_both_databases()
+            if success:
+                logger.info("🎉 همه مقالات با موفقیت حذف شدند!")
+            else:
+                logger.error("💥 حذف مقالات ناموفق بود")
+
+        elif args.delete_by_ids:
+            logger.info(f"🗑️ حذف مقالات با شناسه‌ها: {args.delete_by_ids}")
+            success = await connector.delete_articles_by_ids_from_both_databases(args.delete_by_ids)
+            if success:
+                logger.info("🎉 مقالات انتخابی با موفقیت حذف شدند!")
+            else:
+                logger.error("💥 حذف مقالات انتخابی ناموفق بود")
+
+        elif args.delete_from_mongodb:
+            logger.info("🗑️ حذف همه مقالات از MongoDB...")
+            success = await connector.delete_all_articles_from_mongodb()
+            if success:
+                logger.info("🎉 همه مقالات از MongoDB حذف شدند!")
+            else:
+                logger.error("💥 حذف مقالات از MongoDB ناموفق بود")
+
+        elif args.delete_from_weaviate:
+            logger.info("🗑️ حذف همه مقالات از Weaviate...")
+            success = connector.delete_all_articles_from_weaviate()
+            if success:
+                logger.info("🎉 همه مقالات از Weaviate حذف شدند!")
+            else:
+                logger.error("💥 حذف مقالات از Weaviate ناموفق بود")
 
     finally:
         connector.cleanup()

@@ -261,6 +261,27 @@ async def startup_event():
         await default_admin.insert()
         logger.info(f"Created default super Admin: {settings.default_SuperAdmin_email}")
 
+    # Start background job processor
+    from app.docs_as_code.background_jobs import start_background_jobs
+    await start_background_jobs()
+    logger.info("Background job processor started")
+
+    logger.info("Application startup completed!")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on shutdown."""
+    logger.info("Shutting down the application...")
+
+    # Stop background job processor
+    from app.docs_as_code.background_jobs import stop_background_jobs
+    await stop_background_jobs()
+    logger.info("Background job processor stopped")
+
+    logger.info("Application shutdown completed!")
+
+
 @app.get("/")
 async def root():
     return {

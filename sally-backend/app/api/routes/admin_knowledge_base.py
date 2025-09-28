@@ -28,6 +28,7 @@ from app.docs_as_code.sync_service import MongoToGitSync
 from app.docs_as_code.config import get_default_config
 from app.docs_as_code.git_manager import GitManager
 from app.docs_as_code.monitoring import get_system_stats
+from app.infrastructure.knowledge_base_service import knowledge_base_service
 
 router = APIRouter()
 
@@ -197,11 +198,6 @@ async def get_or_create_tags(tag_names: List[str]) -> List[ArticleTag]:
     return article_tags
 
 @router.post("/articles", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED, tags=["Knowledge Base Management"])
-async def create_article_admin(
-    article_data: ArticleCreate,
-    current_admin: Admin = Depends(get_current_admin)
-):
-    """Create KB article - Admin+ only (CREATE_KB_ARTICLES permission)"""
 async def create_article(
     article_data: ArticleCreate,
     current_user: Admin = Depends(get_current_admin)
@@ -211,76 +207,50 @@ async def create_article(
     Accessible by admin and SuperAdmin.
     Only SuperAdmin can create published articles directly.
     """
-    # Generate HTML from markdown if not provided
-    content_html = article_data.content_html
-    if not content_html:
-        content_html = markdown.markdown(article_data.content_markdown)
-
-    # Handle category
-    category = None
-    if article_data.category_id:
-        cat = await Category.get(article_data.category_id)
-        if cat:
-            category = ArticleCategory(id=str(cat.id), name=cat.name, slug=cat.slug)
-
-    # Handle tags
-    tags = await get_or_create_tags(article_data.tag_names)
-
-    # Check permissions for publishing
-    if article_data.status == ArticleStatus.PUBLISHED and current_user.role_name != "SuperAdmin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only SuperAdmin can publish articles directly. Create as draft and use publish endpoint."
+    try:
+        # Use the service to create article
+        article = await knowledge_base_service.create_article_from_text(
+            title=article_data.title,
+            content=article_data.content_markdown,
+            author=current_user,
+            category_id=article_data.category_id,
+            tag_names=article_data.tag_names or [],
+            is_markdown=True,
+            generate_summary=bool(article_data.summary),  # Generate if not provided
+            auto_publish=(article_data.status == ArticleStatus.PUBLISHED)
         )
 
-    # Set published_at and publisher if status is PUBLISHED
-    published_at = None
-    publisher = None
-    if article_data.status == ArticleStatus.PUBLISHED:
-        published_at = datetime.utcnow()
-        publisher = current_user
-        # Require visibility for published articles
-        if not article_data.visibility:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Visibility is required when publishing an article"
+        # Override status and visibility if explicitly set in request
+        if article_data.status and article_data.status != article.status:
+            updates = {"status": article_data.status}
+            if article_data.visibility:
+                updates["visibility"] = article_data.visibility
+            article = await knowledge_base_service.repository.update_article(
+                str(article.id), updates, str(current_user.id)
             )
 
-    new_article = KnowledgeBaseArticle(
-        title=article_data.title,
-        content_markdown=article_data.content_markdown,
-        content_html=content_html,
-        summary=article_data.summary,
-        category=category,
-        tags=tags,
-        author_id=str(current_user.id),
-        status=article_data.status or ArticleStatus.DRAFT,
-        visibility=article_data.visibility,
-        published_at=published_at,
-        publisher_id=str(publisher.id) if publisher else None
-    )
-    await new_article.insert()
-    new_article.id = str(new_article.id)
+        return ArticleResponse(
+            id=str(article.id),
+            title=article.title,
+            content_markdown=article.content_markdown,
+            content_html=article.content_html,
+            summary=article.summary,
+            status=article.status,
+            visibility=article.visibility,
+            author_id=article.author_id,
+            category=article.category.model_dump() if article.category else None,
+            tags=[tag.model_dump() for tag in article.tags],
+            version=article.version,
+            created_at=article.created_at.isoformat() if article.created_at else None,
+            updated_at=article.updated_at.isoformat() if article.updated_at else None,
+            published_at=article.published_at.isoformat() if article.published_at else None
+        )
 
-    # Sync to Git repository (disabled - empty repository)
-    print(f"Article {new_article.id} created successfully (Git sync disabled - empty repository)")
-
-    return ArticleResponse(
-        id=str(new_article.id),
-        title=new_article.title,
-        content_markdown=new_article.content_markdown,
-        content_html=new_article.content_html,
-        summary=new_article.summary,
-        status=new_article.status,
-        visibility=new_article.visibility,
-        author_id=new_article.author_id,
-        category=new_article.category.model_dump() if new_article.category else None,
-        tags=[tag.model_dump() for tag in new_article.tags],
-        version=new_article.version,
-        created_at=new_article.created_at.isoformat() if new_article.created_at else None,
-        updated_at=new_article.updated_at.isoformat() if new_article.updated_at else None,
-        published_at=new_article.published_at.isoformat() if new_article.published_at else None
-    )
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except Exception as e:
+        print(f"Error creating article: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error creating article: {str(e)}")
 
 @router.post("/articles/upload", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED, tags=["Knowledge Base Management"])
 async def upload_kb_file(
@@ -435,8 +405,17 @@ async def publish_article(
     await article.save()
     article.id = str(article.id)
 
+    # Schedule vectorization job for the published article
+    from app.docs_as_code.background_jobs import schedule_vectorize_article
+    try:
+        job_id = await schedule_vectorize_article(article_id)
+        print(f"Article {article_id} published successfully. Vectorization job scheduled: {job_id}")
+    except Exception as e:
+        print(f"Warning: Failed to schedule vectorization job for article {article_id}: {str(e)}")
+        # Don't fail the publish operation if job scheduling fails
+
     # Sync to Git repository (disabled - empty repository)
-    print(f"Article {article_id} updated successfully (Git sync disabled - empty repository)")
+    print(f"Article {article_id} published successfully (Git sync disabled - empty repository)")
 
     return ArticleResponse(
         id=str(article.id),
@@ -627,32 +606,38 @@ async def delete_article(
     current_user: Admin = Depends(get_current_admin_with_permission(Permission.DELETE_ARTICLES))
 ):
     """
-    Delete an article.
+    Delete an article from both MongoDB and Weaviate.
     Accessible only by SuperAdmin.
     """
-    article = await KnowledgeBaseArticle.get(article_id)
-    if not article:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
-    
-    await article.delete()
-    
-    # Sync deletion to Git repository
     try:
-        config = get_default_config()
-        sync_service = MongoToGitSync(config)
-        author_info = {
-            "name": current_user.full_name,
-            "email": current_user.email
-        }
-        # For deletion, we need to handle it differently - remove the Markdown file
-        # This would require additional logic in the sync service
-        # For now, we'll just log that deletion sync is not fully implemented
-        print(f"Article {article_id} deleted - Git sync for deletions not yet implemented")
+        # استفاده از سرویس برای حذف از هر دو دیتابیس
+        success = await knowledge_base_service.delete_article(article_id, current_user)
+
+        if not success:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+        # Sync deletion to Git repository
+        try:
+            config = get_default_config()
+            sync_service = MongoToGitSync(config)
+            author_info = {
+                "name": current_user.full_name,
+                "email": current_user.email
+            }
+            # For deletion, we need to handle it differently - remove the Markdown file
+            # This would require additional logic in the sync service
+            # For now, we'll just log that deletion sync is not fully implemented
+            print(f"Article {article_id} deleted from both databases - Git sync for deletions not yet implemented")
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Git sync failed for article deletion {article_id}: {str(e)}")
+
+        return None
+
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except Exception as e:
-        # Log error but don't fail the request
-        print(f"Git sync failed for article deletion {article_id}: {str(e)}")
-    
-    return None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete article: {str(e)}")
 
 @router.get("/articles/{article_id}/history", response_model=List[ArticleHistoryItem], tags=["Knowledge Base Management"])
 async def get_article_history(
