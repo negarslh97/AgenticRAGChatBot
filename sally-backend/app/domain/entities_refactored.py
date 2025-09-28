@@ -25,11 +25,31 @@ class ArticleVisibility(str, Enum):
     CUSTOMER = "customer"
     INTERNAL = "internal"
 
+    @classmethod
+    def _missing_(cls, value):
+        # Handle case-insensitive matching for existing data
+        if isinstance(value, str):
+            value_lower = value.lower()
+            for member in cls:
+                if member.value == value_lower:
+                    return member
+        return super()._missing_(value)
+
 
 class ArticleStatus(str, Enum):
     DRAFT = "draft"
     PUBLISHED = "published"
     ARCHIVED = "archived"
+
+    @classmethod
+    def _missing_(cls, value):
+        # Handle case-insensitive matching for existing data
+        if isinstance(value, str):
+            value_lower = value.lower()
+            for member in cls:
+                if member.value == value_lower:
+                    return member
+        return super()._missing_(value)
 
 
 class PermissionDetail(BaseModel):

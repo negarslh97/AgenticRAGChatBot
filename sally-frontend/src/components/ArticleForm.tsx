@@ -23,12 +23,13 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
     summary: article?.summary || "",
     category_id: article?.category?.id || "",
     tag_names: article?.tags?.map(tag => tag.name).join(", ") || "",
-    status: article?.status || "draft",
-    visibility: article?.visibility || ""
+    status: article?.status?.toLowerCase() || "draft",
+    visibility: article?.visibility || "public"
   })
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
+  const [markdownConverting, setMarkdownConverting] = useState(false)
 
   useEffect(() => {
     loadCategories()
@@ -101,6 +102,39 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
       toast.error(error.message || "خطا در تولید متادیتای هوش مصنوعی")
     } finally {
       setAiLoading(false)
+    }
+  }
+
+  const handleConvertToMarkdown = async () => {
+    if (!formData.content_markdown.trim()) {
+      toast.error("لطفاً ابتدا محتوایی وارد کنید")
+      return
+    }
+
+    setMarkdownConverting(true)
+    try {
+      const result = await adminService.convertTextToMarkdown(
+        formData.title || "متن بدون عنوان",
+        formData.content_markdown
+      )
+
+      if (result.success) {
+        setFormData(prev => ({
+          ...prev,
+          content_markdown: result.markdown_content
+        }))
+        toast.success(`متن با موفقیت به Markdown تبدیل شد! (${result.original_length} → ${result.markdown_length} کاراکتر)\n💡 به تب "ویرایش" بروید تا محتوای Markdown را ببینید`)
+      } else {
+        toast.error("خطا در تبدیل متن به Markdown")
+      }
+    } catch (error: any) {
+      if (error.response?.status === 403) {
+        toast.error("شما دسترسی لازم برای انتشار مقالات را ندارید. فقط ادمین ارشد می‌تواند مقالات را منتشر کند.")
+      } else {
+        toast.error(error.message || "خطا در تبدیل متن به Markdown")
+      }
+    } finally {
+      setMarkdownConverting(false)
     }
   }
 
@@ -178,7 +212,7 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
               <label className="block text-sm font-medium mb-1">سطح دسترسی *</label>
               <select
                 value={formData.visibility}
-                onChange={(e) => setFormData(prev => ({ ...prev, visibility: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, visibility: e.target.value as "public" | "customer" | "internal" }))}
                 className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">انتخاب کنید...</option>
@@ -198,12 +232,36 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
               markdownContent={formData.content_markdown}
               htmlContent={article?.content_html}
               onMarkdownChange={(content) => setFormData(prev => ({ ...prev, content_markdown: content }))}
-              placeholder="محتوای مقاله را وارد کنید..."
+              placeholder="محتوای مقاله را وارد کنید یا متن ساده وارد کرده و دکمه 'تبدیل به Markdown' را کلیک کنید..."
             />
+            <p className="text-xs text-gray-500 mt-1">
+              💡 نکته: می‌توانید متن ساده وارد کرده و با کلیک روی دکمه "🤖 تبدیل به Markdown" آن را به فرمت ساختاریافته تبدیل کنید
+            </p>
           </div>
 
-          {/* AI Metadata Generation Button */}
-          <div className="flex justify-center mb-4">
+          {/* AI Actions */}
+          <div className="flex justify-center gap-4 mb-4">
+            <Button
+              type="button"
+              onClick={handleConvertToMarkdown}
+              disabled={markdownConverting || !formData.content_markdown.trim()}
+              variant="outline"
+              className="flex items-center gap-2 bg-gradient-to-r from-blue-50 to-cyan-50 hover:from-blue-100 hover:to-cyan-100 border-blue-200"
+            >
+              {markdownConverting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  در حال تبدیل...
+                </>
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 0h10m-10 0v16a2 2 0 002 2h6a2 2 0 002-2V4" />
+                  </svg>
+                  🤖 تبدیل به Markdown
+                </>
+              )}
+            </Button>
             <Button
               type="button"
               onClick={handleGenerateMetadata}
@@ -212,7 +270,7 @@ const ArticleForm: React.FC<ArticleFormProps> = ({ article, onSave, onCancel }) 
               className="flex items-center gap-2 bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 border-purple-200"
             >
               <Sparkles className="h-4 w-4 text-purple-600" />
-              {aiLoading ? "در حال تولید..." : "تولید با هوش مصنوعی ✨"}
+              {aiLoading ? "در حال تولید..." : "تولید متادیتا ✨"}
             </Button>
           </div>
 

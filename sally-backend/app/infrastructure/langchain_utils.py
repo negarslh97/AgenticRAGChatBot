@@ -141,6 +141,66 @@ Visibility: public, customer, internal
                 "suggested_visibility": ""
             }
 
+    async def convert_text_to_markdown(self, title: str, content: str) -> str:
+        """
+        Convert plain text to structured Markdown using AI.
+
+        Args:
+            title: Article title
+            content: Plain text content
+
+        Returns:
+            Formatted Markdown content
+        """
+        try:
+            selected_model = settings.rag_model_loaded
+            logger.info(f"🔄 تبدیل متن به Markdown با مدل: {selected_model}")
+            logger.info(f"📝 عنوان: {title[:100]}...")
+            logger.info(f"📊 طول محتوا: {len(content)} کاراکتر")
+
+            model = self._get_model(selected_model, force_json=False)
+            logger.info(f"✅ مدل {selected_model} برای تبدیل Markdown بارگذاری شد")
+
+            prompt = ChatPromptTemplate.from_template("""
+شما یک متخصص تبدیل متن به فرمت Markdown هستید. متن ساده زیر را به فرمت Markdown تبدیل کنید:
+
+**عنوان مقاله:** {title}
+
+**محتوای متن:**
+{content}
+
+**دستورالعمل‌ها:**
+1. عنوان اصلی را با # مشخص کنید
+2. زیرعنوان‌ها را با ##، ###، #### مشخص کنید
+3. فهرست‌ها را با - یا 1. مشخص کنید
+4. متن مهم را با **bold** یا *italic* مشخص کنید
+5. کدها را با ``` مشخص کنید
+6. جداول را با فرمت Markdown ایجاد کنید
+7. لینک‌ها را با [متن](URL) مشخص کنید
+8. نقل قول‌ها را با > مشخص کنید
+
+**فقط محتوای Markdown را برگردانید، بدون توضیح اضافی:**
+""")
+
+            # Create the chain
+            chain = prompt | model
+
+            # Run the chain
+            result = await chain.ainvoke({
+                "title": title,
+                "content": content
+            })
+
+            markdown_content = result.content.strip()
+            logger.info(f"✅ متن با موفقیت به Markdown تبدیل شد - طول: {len(markdown_content)} کاراکتر")
+            
+            return markdown_content
+
+        except Exception as e:
+            logger.error(f"❌ خطا در تبدیل متن به Markdown: {str(e)}")
+            # Return original content with basic title formatting if AI conversion fails
+            return f"# {title}\n\n{content}"
+
     async def generate_chat_response(self, messages: List[Dict[str, str]], context: Optional[str] = None) -> str:
         """
         Generate a chat response using AI.

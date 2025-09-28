@@ -20,7 +20,7 @@ export interface Article {
   summary?: string
   category?: ArticleCategory
   tags: ArticleTag[]
-  status: "DRAFT" | "PUBLISHED" | "ARCHIVED"
+  status: "draft" | "published" | "archived"
   visibility?: "public" | "customer" | "internal" | null
   author_id: string
   version: number

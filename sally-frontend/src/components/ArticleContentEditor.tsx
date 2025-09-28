@@ -21,7 +21,7 @@ const ArticleContentEditor: React.FC<ArticleContentEditorProps> = ({
   disabled = false
 }) => {
   const [content, setContent] = useState(markdownContent)
-  const [activeTab, setActiveTab] = useState("preview")
+  const [activeTab, setActiveTab] = useState("edit")
 
   // Auto-switch to preview tab if HTML content exists and we're currently on edit tab
   useEffect(() => {
@@ -71,6 +71,11 @@ const ArticleContentEditor: React.FC<ArticleContentEditorProps> = ({
                 <Eye className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                 <p>محتوایی برای پیش‌نمایش وجود ندارد</p>
                 <p className="text-sm mt-2">از تب "ویرایش" برای اضافه کردن محتوا استفاده کنید</p>
+                {content && content.trim() && (
+                  <p className="text-sm mt-2 text-blue-600">
+                    💡 محتوای Markdown آماده است! به تب "ویرایش" بروید تا آن را ببینید
+                  </p>
+                )}
               </div>
             )}
           </div>

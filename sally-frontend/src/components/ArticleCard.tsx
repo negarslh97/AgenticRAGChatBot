@@ -34,7 +34,7 @@ const ArticleCard: React.FC<ArticleCardProps> = ({ article, isadminView = false 
         </div>
         {isadminView && (
           <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(article.status)}`}>
-            {article.status.toUpperCase()}
+            {article.status === "published" ? "منتشر شده" : article.status === "draft" ? "پیش‌نویس" : "بایگانی شده"}
           </span>
         )}
       </div>

@@ -171,6 +171,33 @@ export const adminService = {
     }
   },
 
+  /**
+   * تبدیل متن ساده به Markdown با هوش مصنوعی
+   */
+  async convertTextToMarkdown(title: string, content: string): Promise<{
+    success: boolean;
+    markdown_content: string;
+    original_length: number;
+    markdown_length: number;
+  }> {
+    try {
+      const response = await api.post<{
+        success: boolean;
+        markdown_content: string;
+        original_length: number;
+        markdown_length: number;
+      }>("/api/super-admin/kb/convert-to-markdown", {
+        title,
+        content,
+      });
+
+      return response.data;
+    } catch (error) {
+      console.error("Error converting text to markdown:", error);
+      throw new Error("خطا در تبدیل متن به Markdown");
+    }
+  },
+
   // ============================================================================
   // Ticket Management Functions
   // ============================================================================
@@ -225,11 +252,11 @@ export const adminService = {
    */
   getArticleStatusText(status: string): string {
     switch (status) {
-      case "PUBLISHED":
+      case "published":
         return "منتشر شده";
-      case "DRAFT":
+      case "draft":
         return "پیش‌نویس";
-      case "ARCHIVED":
+      case "archived":
         return "بایگانی شده";
       default:
         return status;

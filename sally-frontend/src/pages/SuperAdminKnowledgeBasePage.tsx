@@ -242,8 +242,8 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                       </TableCell>
                       <TableCell>{article.category?.name || "-"}</TableCell>
                       <TableCell>
-                        <Badge variant={article.status === "PUBLISHED" ? "default" : "secondary"}>
-                          {article.status === "PUBLISHED" ? "منتشر شده" : "پیش‌نویس"}
+                        <Badge variant={article.status === "published" ? "default" : "secondary"}>
+                          {article.status === "published" ? "منتشر شده" : "پیش‌نویس"}
                         </Badge>
                       </TableCell>
                       <TableCell>{new Date(article.created_at).toLocaleDateString("fa-IR")}</TableCell>
@@ -256,7 +256,7 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                          {article.status === "DRAFT" && (
+                          {article.status === "draft" && (
                             <Button
                               size="sm"
                               variant="outline"

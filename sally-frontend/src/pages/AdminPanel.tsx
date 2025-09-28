@@ -74,7 +74,7 @@ const AdminPanel: React.FC = () => {
     }
   }
 
-  const updateArticleStatus = async (articleId: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED") => {
+  const updateArticleStatus = async (articleId: string, status: "draft" | "published" | "archived") => {
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/${articleId}/status`, {
         method: "PATCH",
@@ -175,6 +175,24 @@ const AdminPanel: React.FC = () => {
     }
   }
 
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case "draft": return "پیش‌نویس"
+      case "published": return "منتشر شده"
+      case "archived": return "بایگانی شده"
+      default: return status
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "draft": return "bg-yellow-100 text-yellow-800"
+      case "published": return "bg-green-100 text-green-800"
+      case "archived": return "bg-gray-100 text-gray-800"
+      default: return "bg-gray-100 text-gray-800"
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -231,9 +249,9 @@ const AdminPanel: React.FC = () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">همه مقالات</option>
-                    <option value="DRAFT">پیش‌نویس</option>
-                    <option value="PUBLISHED">منتشر شده</option>
-                    <option value="ARCHIVED">بایگانی شده</option>
+                    <option value="draft">پیش‌نویس</option>
+                    <option value="published">منتشر شده</option>
+                    <option value="archived">بایگانی شده</option>
                   </select>
                 </div>
 
@@ -247,13 +265,13 @@ const AdminPanel: React.FC = () => {
                       نمایش همه
                     </button>
                     <button
-                      onClick={() => setSelectedStatus("DRAFT")}
+                      onClick={() => setSelectedStatus("draft")}
                       className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
                     >
                       پیش‌نویس‌ها
                     </button>
                     <button
-                      onClick={() => setSelectedStatus("PUBLISHED")}
+                      onClick={() => setSelectedStatus("published")}
                       className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
                     >
                       منتشر شده‌ها
@@ -315,15 +333,8 @@ const AdminPanel: React.FC = () => {
                           )}
                           
                           <div className="flex flex-wrap items-center gap-2 mt-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              article.status === "PUBLISHED"
-                                ? "bg-green-100 text-green-800"
-                                : article.status === "DRAFT"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}>
-                              {article.status === "PUBLISHED" ? "منتشر شده" :
-                               article.status === "DRAFT" ? "پیش‌نویس" : "بایگانی شده"}
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(article.status)}`}>
+                              {getStatusLabel(article.status)}
                             </span>
                             
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -345,7 +356,7 @@ const AdminPanel: React.FC = () => {
                         </div>
 
                         <div className="flex items-center space-x-2 ml-4">
-                          {article.status === "DRAFT" && user?.role === "SuperAdmin" && (
+                          {article.status === "draft" && user?.role === "SuperAdmin" && (
                             <button
                               onClick={() => openPublishModal(article)}
                               className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
@@ -355,9 +366,9 @@ const AdminPanel: React.FC = () => {
                             </button>
                           )}
                           
-                          {article.status === "PUBLISHED" && user?.role === "SuperAdmin" && (
+                          {article.status === "published" && user?.role === "SuperAdmin" && (
                             <button
-                              onClick={() => updateArticleStatus(article.id, "DRAFT")}
+                              onClick={() => updateArticleStatus(article.id, "draft")}
                               className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700"
                               title="بازگشت به پیش‌نویس"
                             >
@@ -368,16 +379,16 @@ const AdminPanel: React.FC = () => {
                           <button
                             onClick={() => updateArticleStatus(
                               article.id,
-                              article.status === "ARCHIVED" ? "DRAFT" : "ARCHIVED"
+                              article.status === "archived" ? "draft" : "archived"
                             )}
                             className={`px-3 py-1 text-sm rounded ${
-                              article.status === "ARCHIVED"
+                              article.status === "archived"
                                 ? "bg-blue-600 text-white hover:bg-blue-700"
                                 : "bg-gray-600 text-white hover:bg-gray-700"
                             }`}
-                            title={article.status === "ARCHIVED" ? "بازگرداندن" : "بایگانی"}
+                            title={article.status === "archived" ? "بازگرداندن" : "بایگانی"}
                           >
-                            {article.status === "ARCHIVED" ? "بازگرداندن" : "بایگانی"}
+                            {article.status === "archived" ? "بازگرداندن" : "بایگانی"}
                           </button>
 
                           <button

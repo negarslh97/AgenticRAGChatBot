@@ -800,3 +800,46 @@ async def upload_and_convert_file(
         suggested_tags=ai_metadata.get("tags", []) if ai_metadata else ["آپلود شده", file_extension[1:]],
         suggested_category=ai_metadata.get("suggested_category") if ai_metadata else None
     )
+
+
+@router.post("/convert-to-markdown", tags=["Knowledge Base Management"])
+async def convert_text_to_markdown(
+    request: dict,
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    Convert plain text to structured Markdown using AI.
+    Accessible by SuperAdmin and Admin with KB management permission.
+    """
+    try:
+        title = request.get("title", "")
+        content = request.get("content", "")
+        
+        if not content:
+            raise HTTPException(status_code=400, detail="محتوا نمی‌تواند خالی باشد")
+        
+        print(f"🔄 شروع تبدیل متن به Markdown - عنوان: {title[:50]}...")
+        print(f"📊 طول محتوا: {len(content)} کاراکتر")
+        
+        # Use LangChain service to convert text to markdown
+        from app.infrastructure.langchain_utils import langchain_service
+        
+        markdown_content = await langchain_service.convert_text_to_markdown(title, content)
+        
+        print(f"✅ تبدیل به Markdown کامل شد - طول خروجی: {len(markdown_content)} کاراکتر")
+        
+        return {
+            "success": True,
+            "markdown_content": markdown_content,
+            "original_length": len(content),
+            "markdown_length": len(markdown_content)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ خطا در تبدیل متن به Markdown: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"خطا در تبدیل متن به Markdown: {str(e)}"
+        )

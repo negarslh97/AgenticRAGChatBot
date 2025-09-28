@@ -22,6 +22,7 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
   })
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [convertingToMarkdown, setConvertingToMarkdown] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -105,6 +106,40 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
     fileInputRef.current?.click()
   }
 
+  const handleConvertToMarkdown = async () => {
+    if (!formData.content_markdown.trim()) {
+      toast.error("لطفاً ابتدا محتوایی وارد کنید")
+      return
+    }
+
+    setConvertingToMarkdown(true)
+    try {
+      const { adminService } = await import("../services/adminService")
+      const result = await adminService.convertTextToMarkdown(
+        formData.title || "متن بدون عنوان",
+        formData.content_markdown
+      )
+
+      if (result.success) {
+        setFormData(prev => ({
+          ...prev,
+          content_markdown: result.markdown_content
+        }))
+        toast.success(`متن با موفقیت به Markdown تبدیل شد! (${result.original_length} → ${result.markdown_length} کاراکتر)\n💡 به تب "ویرایش" بروید تا محتوای Markdown را ببینید`)
+      } else {
+        toast.error("خطا در تبدیل متن به Markdown")
+      }
+    } catch (error: any) {
+      if (error.response?.status === 403) {
+        toast.error("شما دسترسی لازم برای انتشار مقالات را ندارید. فقط ادمین ارشد می‌تواند مقالات را منتشر کند.")
+      } else {
+        toast.error(error.message || "خطا در تبدیل متن به Markdown")
+      }
+    } finally {
+      setConvertingToMarkdown(false)
+    }
+  }
+
   if (!user || (user.role !== "SuperAdmin" && user.role !== "Admin")) {
     return (
       <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
@@ -171,9 +206,34 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-foreground mb-1">
-            محتوای مقاله (Markdown) *
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium text-foreground">
+              محتوای مقاله (Markdown) *
+            </label>
+            <button
+              type="button"
+              onClick={handleConvertToMarkdown}
+              disabled={convertingToMarkdown || !formData.content_markdown.trim()}
+              className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {convertingToMarkdown ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-blue-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  در حال تبدیل...
+                </>
+              ) : (
+                <>
+                  <svg className="mr-1 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 0h10m-10 0v16a2 2 0 002 2h6a2 2 0 002-2V4" />
+                  </svg>
+                  🤖 تبدیل به Markdown
+                </>
+              )}
+            </button>
+          </div>
           <textarea
             name="content_markdown"
             value={formData.content_markdown}
@@ -181,10 +241,10 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
             rows={15}
             required
             className="input-field font-mono text-sm"
-            placeholder="محتوای markdown مقاله را وارد کنید"
+            placeholder="محتوای markdown مقاله را وارد کنید یا متن ساده وارد کرده و دکمه 'تبدیل به Markdown' را کلیک کنید"
           />
           <p className="text-xs text-gray-500 mt-1">
-            از Markdown برای فرمت‌بندی استفاده کنید. پیش‌نمایش در زمان انتشار نمایش داده می‌شود.
+            💡 نکته: می‌توانید متن ساده وارد کرده و با کلیک روی دکمه "🤖 تبدیل به Markdown" آن را به فرمت ساختاریافته تبدیل کنید
           </p>
         </div>
 
@@ -235,9 +295,9 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
               className="input-field"
             >
               <option value="">انتخاب کنید...</option>
-              <option value="public">عمومی</option>
-              <option value="customer">مشتری</option>
-              <option value="internal">داخلی (فقط ادمین‌ها)</option>
+              <option value="PUBLIC">عمومی</option>
+              <option value="CUSTOMER">مشتری</option>
+              <option value="INTERNAL">داخلی (فقط ادمین‌ها)</option>
             </select>
             <p className="text-xs text-gray-500 mt-1">
               تعیین کنید مقاله برای چه کسانی قابل مشاهده باشد.
