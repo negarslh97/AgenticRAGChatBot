@@ -74,7 +74,10 @@ const SuperAdminUploadPage: React.FC = () => {
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0])
+      const file = e.target.files[0]
+      // نمایش اندازه فایل در زمان انتخاب
+      console.log(`فایل انتخاب شد: ${file.name} - ${getFileSizeDisplay(file.size)}`)
+      handleFileSelect(file)
     }
   }
 
@@ -157,6 +160,24 @@ const SuperAdminUploadPage: React.FC = () => {
     if (fileType.includes('csv')) return 'CSV'
     if (fileType.includes('text')) return 'متن'
     return 'نامشخص'
+  }
+
+  const getFileSizeDisplay = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes'
+
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+
+    const size = parseFloat((bytes / Math.pow(k, i)).toFixed(2))
+
+    // اگر اندازه کمتر از 1 مگابایت است، از KB استفاده کن
+    if (i === 0) return `${bytes} Bytes`
+    if (i === 1) return `${size} KB`
+    if (i === 2) return `${size} MB`
+    if (i === 3) return `${size} GB`
+
+    return `${size} ${sizes[i]}`
   }
 
   if (authLoading) {
@@ -252,13 +273,39 @@ const SuperAdminUploadPage: React.FC = () => {
                   {selectedFile.name}
                 </h3>
                 <p className="text-gray-500 mb-2">
-                  {getFileTypeName(selectedFile.type)} • {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                  {getFileTypeName(selectedFile.type)} • {getFileSizeDisplay(selectedFile.size)}
                 </p>
+                <div className={`text-xs mb-2 p-2 rounded ${
+                  selectedFile.size > 10 * 1024 * 1024
+                    ? 'bg-red-50 text-red-600 border border-red-200'
+                    : 'bg-green-50 text-green-600 border border-green-200'
+                }`}>
+                  {selectedFile.size > 10 * 1024 * 1024 ? (
+                    <>
+                      ⚠️ اندازه فایل ({getFileSizeDisplay(selectedFile.size)}) بیشتر از حد مجاز (۱۰ مگابایت) است
+                      <br />
+                      <span className="text-xs">لطفاً فایل کوچکتری انتخاب کنید</span>
+                    </>
+                  ) : (
+                    <>
+                      ✅ اندازه فایل مجاز: {getFileSizeDisplay(selectedFile.size)}
+                      <br />
+                      📏 حداکثر مجاز: {getFileSizeDisplay(10 * 1024 * 1024)}
+                    </>
+                  )}
+                </div>
                 <div className="flex gap-2 justify-center">
                   <Button
                     onClick={handleUpload}
-                    disabled={uploading}
+                    disabled={uploading || selectedFile.size > 10 * 1024 * 1024}
                     className="flex items-center gap-2"
+                    title={
+                      selectedFile.size > 10 * 1024 * 1024
+                        ? `اندازه فایل ${getFileSizeDisplay(selectedFile.size)} بیشتر از حد مجاز است`
+                        : uploading
+                        ? 'در حال آپلود...'
+                        : 'تبدیل فایل'
+                    }
                   >
                     {uploading ? (
                       <>

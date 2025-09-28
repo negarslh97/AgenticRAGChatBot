@@ -261,9 +261,22 @@ const SuperAdminAddArticlePage: React.FC = () => {
                     <option value="CUSTOMER">مشتری</option>
                     <option value="INTERNAL">داخلی (فقط ادمین‌ها)</option>
                   </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    تعیین کنید مقاله برای چه کسانی قابل مشاهده باشد.
-                  </p>
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-gray-500">
+                      تعیین کنید مقاله برای چه کسانی قابل مشاهده باشد:
+                    </p>
+                    <div className="text-xs text-gray-600 space-y-1">
+                      {["public", "customer", "internal"].map((vis) => {
+                        const badge = adminService.getVisibilityBadge(vis);
+                        return (
+                          <div key={vis} className="flex items-center">
+                            <span className="mr-2">{badge.icon}</span>
+                            <span className={`${badge.color} font-medium`}>{badge.text}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
 

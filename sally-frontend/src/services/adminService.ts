@@ -274,9 +274,113 @@ export const adminService = {
         return "مشتریان";
       case "internal":
         return "داخلی";
-      default:
+      case null:
+      case undefined:
+      case "":
         return "تعیین نشده";
+      default:
+        return visibility || "نامشخص";
     }
+  },
+
+  /**
+   * دریافت رنگ و آیکون برای visibility
+   */
+  getVisibilityBadge(visibility: string | null | undefined): { text: string; color: string; bgColor: string; icon: string } {
+    const text = this.getVisibilityText(visibility);
+
+    switch (visibility) {
+      case "public":
+        return {
+          text,
+          color: "text-green-700",
+          bgColor: "bg-green-100",
+          icon: "🌐"
+        };
+      case "customer":
+        return {
+          text,
+          color: "text-blue-700",
+          bgColor: "bg-blue-100",
+          icon: "👥"
+        };
+      case "internal":
+        return {
+          text,
+          color: "text-purple-700",
+          bgColor: "bg-purple-100",
+          icon: "🔒"
+        };
+      default:
+        return {
+          text,
+          color: "text-gray-700",
+          bgColor: "bg-gray-100",
+          icon: "❓"
+        };
+    }
+  },
+
+  /**
+   * دریافت رنگ و آیکون برای وضعیت مقاله
+   */
+  getStatusBadge(status: string): { text: string; color: string; bgColor: string; icon: string } {
+    const text = this.getStatusText(status);
+
+    switch (status) {
+      case "published":
+        return {
+          text,
+          color: "text-green-700",
+          bgColor: "bg-green-100",
+          icon: "✅"
+        };
+      case "draft":
+        return {
+          text,
+          color: "text-yellow-700",
+          bgColor: "bg-yellow-100",
+          icon: "📝"
+        };
+      case "archived":
+        return {
+          text,
+          color: "text-red-700",
+          bgColor: "bg-red-100",
+          icon: "📦"
+        };
+      default:
+        return {
+          text,
+          color: "text-gray-700",
+          bgColor: "bg-gray-100",
+          icon: "❓"
+        };
+    }
+  },
+
+  /**
+   * دریافت متن وضعیت مقاله
+   */
+  getStatusText(status: string): string {
+    switch (status) {
+      case "published":
+        return "منتشر شده";
+      case "draft":
+        return "پیش‌نویس";
+      case "archived":
+        return "بایگانی شده";
+      default:
+        return status || "نامشخص";
+    }
+  },
+
+  /**
+   * دریافت کلاس‌های CSS برای وضعیت مقاله
+   */
+  getStatusClasses(status: string): string {
+    const badge = this.getStatusBadge(status);
+    return `${badge.bgColor} ${badge.color}`;
   },
 
   /**

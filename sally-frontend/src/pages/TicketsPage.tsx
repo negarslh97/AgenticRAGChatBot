@@ -217,7 +217,15 @@ const TicketsPage: React.FC = () => {
                         <h3 className="text-lg font-medium text-gray-900">
                           {ticket.title}
                         </h3>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(ticket.status)}`}>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${(() => {
+                          const colors = {
+                            open: "bg-blue-100 text-blue-800",
+                            in_progress: "bg-yellow-100 text-yellow-800",
+                            resolved: "bg-green-100 text-green-800",
+                            closed: "bg-gray-100 text-gray-800",
+                          };
+                          return colors[ticket.status as keyof typeof colors] || "bg-gray-100 text-gray-800";
+                        })()}`}>
                           {ticket.status === "open" && "باز"}
                           {ticket.status === "in_progress" && "در حال پردازش"}
                           {ticket.status === "resolved" && "حل شده"}

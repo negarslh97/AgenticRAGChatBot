@@ -3,6 +3,7 @@
 import type React from "react"
 import { Link } from "react-router-dom"
 import type { Article } from "../services/knowledgeBaseService"
+import { adminService } from "../services/adminService"
 
 interface ArticleCardProps {
   article: Article
@@ -10,14 +11,6 @@ interface ArticleCardProps {
 }
 
 const ArticleCard: React.FC<ArticleCardProps> = ({ article, isadminView = false }) => {
-  const getStatusColor = (status: string) => {
-    const colors = {
-      draft: "bg-gray-100 text-gray-800",
-      published: "bg-green-100 text-green-800",
-      archived: "bg-red-100 text-red-800",
-    }
-    return colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"
-  }
 
   const linkTo = isadminView ? `/api/super-admin/kb/articles/${article.id}` : `/api/kb/articles/${article.id}`
 
@@ -33,9 +26,33 @@ const ArticleCard: React.FC<ArticleCardProps> = ({ article, isadminView = false 
           {article.summary && <p className="text-gray-600 text-sm mb-3 line-clamp-2">{article.summary}</p>}
         </div>
         {isadminView && (
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(article.status)}`}>
-            {article.status === "published" ? "منتشر شده" : article.status === "draft" ? "پیش‌نویس" : "بایگانی شده"}
-          </span>
+          <>
+            {(() => {
+              const badge = adminService.getStatusBadge(article.status);
+              return (
+                <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                  <span className="mr-1">{badge.icon}</span>
+                  {badge.text}
+                </span>
+              );
+            })()}
+            {article.visibility && (
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${(() => {
+                const badge = adminService.getVisibilityBadge(article.visibility);
+                return `${badge.bgColor} ${badge.color}`;
+              })()}`}>
+                {(() => {
+                  const badge = adminService.getVisibilityBadge(article.visibility);
+                  return (
+                    <>
+                      <span className="mr-1">{badge.icon}</span>
+                      {badge.text}
+                    </>
+                  );
+                })()}
+              </span>
+            )}
+          </>
         )}
       </div>
 

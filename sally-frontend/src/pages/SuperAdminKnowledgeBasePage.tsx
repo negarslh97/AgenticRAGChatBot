@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
+import { adminService } from "../services/adminService"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table"
@@ -225,6 +226,7 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                     <TableHead>عنوان</TableHead>
                     <TableHead>دسته‌بندی</TableHead>
                     <TableHead>وضعیت</TableHead>
+                    <TableHead>سطح دسترسی</TableHead>
                     <TableHead>تاریخ ایجاد</TableHead>
                     <TableHead>عملیات</TableHead>
                   </TableRow>
@@ -242,9 +244,26 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                       </TableCell>
                       <TableCell>{article.category?.name || "-"}</TableCell>
                       <TableCell>
-                        <Badge variant={article.status === "published" ? "default" : "secondary"}>
-                          {article.status === "published" ? "منتشر شده" : "پیش‌نویس"}
-                        </Badge>
+                        {(() => {
+                          const badge = adminService.getStatusBadge(article.status);
+                          return (
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                              <span className="mr-1">{badge.icon}</span>
+                              {badge.text}
+                            </span>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const badge = adminService.getVisibilityBadge(article.visibility);
+                          return (
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                              <span className="mr-1">{badge.icon}</span>
+                              {badge.text}
+                            </span>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>{new Date(article.created_at).toLocaleDateString("fa-IR")}</TableCell>
                       <TableCell>

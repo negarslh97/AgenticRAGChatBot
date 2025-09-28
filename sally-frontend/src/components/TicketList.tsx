@@ -133,7 +133,15 @@ const TicketList: React.FC<TicketListProps> = ({ isadminView = false }) => {
                   <p className="text-gray-600 mb-3 line-clamp-2">{ticket.description}</p>
 
                   <div className="flex items-center space-x-4 text-sm">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(ticket.status)}`}>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${(() => {
+                      const colors = {
+                        open: "bg-blue-100 text-blue-800",
+                        in_progress: "bg-yellow-100 text-yellow-800",
+                        resolved: "bg-green-100 text-green-800",
+                        closed: "bg-gray-100 text-gray-800",
+                      };
+                      return colors[ticket.status as keyof typeof colors] || "bg-gray-100 text-gray-800";
+                    })()}`}>
                       {ticket.status.replace("_", " ").toUpperCase()}
                     </span>
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(ticket.priority)}`}>

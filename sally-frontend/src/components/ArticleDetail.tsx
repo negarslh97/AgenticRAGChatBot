@@ -65,14 +65,6 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
     }
   }
 
-  const getStatusColor = (status: string) => {
-    const colors = {
-      DRAFT: "bg-gray-100 text-gray-800",
-      PUBLISHED: "bg-green-100 text-green-800",
-      ARCHIVED: "bg-red-100 text-red-800",
-    }
-    return colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"
-  }
 
   if (loading) {
     return (
@@ -111,9 +103,17 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
 
             <div className="flex items-center space-x-4 mb-4">
               {isadminView && article.status && (
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(article.status)}`}>
-                  {article.status.toUpperCase()}
-                </span>
+                <>
+                  {(() => {
+                    const badge = adminService.getStatusBadge(article.status);
+                    return (
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${badge.bgColor} ${badge.color}`}>
+                        <span className="mr-1">{badge.icon}</span>
+                        {badge.text}
+                      </span>
+                    );
+                  })()}
+                </>
               )}
 
               {article.tags && article.tags.length > 0 && (

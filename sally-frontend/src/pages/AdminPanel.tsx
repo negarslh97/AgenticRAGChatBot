@@ -6,6 +6,7 @@ import AdminArticleForm from "../components/AdminArticleForm"
 import AdminFileUpload from "../components/AdminFileUpload"
 import { toast } from "react-hot-toast"
 import { type Article } from "../services/knowledgeBaseService"
+import { adminService } from "../services/adminService"
 
 const AdminPanel: React.FC = () => {
   const { user } = useAuth()
@@ -166,14 +167,6 @@ const AdminPanel: React.FC = () => {
     ? articles.filter(article => article.status === selectedStatus)
     : articles
 
-  const getVisibilityLabel = (visibility: string | null | undefined) => {
-    switch (visibility) {
-      case "public": return "عمومی"
-      case "customer": return "مشتریان"
-      case "internal": return "داخلی"
-      default: return "تعیین نشده"
-    }
-  }
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -184,14 +177,6 @@ const AdminPanel: React.FC = () => {
     }
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "draft": return "bg-yellow-100 text-yellow-800"
-      case "published": return "bg-green-100 text-green-800"
-      case "archived": return "bg-gray-100 text-gray-800"
-      default: return "bg-gray-100 text-gray-800"
-    }
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -333,21 +318,25 @@ const AdminPanel: React.FC = () => {
                           )}
                           
                           <div className="flex flex-wrap items-center gap-2 mt-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(article.status)}`}>
-                              {getStatusLabel(article.status)}
-                            </span>
+                            {(() => {
+                              const badge = adminService.getStatusBadge(article.status);
+                              return (
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                                  <span className="mr-1">{badge.icon}</span>
+                                  {badge.text}
+                                </span>
+                              );
+                            })()}
                             
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              article.visibility === "public"
-                                ? "bg-blue-100 text-blue-800"
-                                : article.visibility === "customer"
-                                ? "bg-purple-100 text-purple-800"
-                                : article.visibility === "internal"
-                                ? "bg-indigo-100 text-indigo-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}>
-                              {getVisibilityLabel(article.visibility)}
-                            </span>
+                            {(() => {
+                              const badge = adminService.getVisibilityBadge(article.visibility);
+                              return (
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                                  <span className="mr-1">{badge.icon}</span>
+                                  {badge.text}
+                                </span>
+                              );
+                            })()}
                             
                             <span className="text-xs text-gray-500">
                               نسخه {article.version}
