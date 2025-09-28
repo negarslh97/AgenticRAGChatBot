@@ -89,8 +89,10 @@ class Settings(BaseSettings):
     # App settings
     app_name: str = "Sally Customer Support"
     debug: bool = True
-    
-    class Config:
-        env_file = ".env"
+
+    model_config = {
+        "protected_namespaces": ("settings_",),
+        "env_file": ".env"
+    }
 
 settings = Settings()

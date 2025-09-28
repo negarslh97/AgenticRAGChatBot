@@ -13,7 +13,7 @@ services:
       - PERSISTENCE_DATA_PATH=/var/lib/weaviate
       - DEFAULT_VECTORIZER_MODULE=text2vec-openai
       - ENABLE_MODULES=text2vec-openai,generative-openai
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=${Embedder_API_KEY}
     volumes:
       - weaviate_data:/var/lib/weaviate
 
