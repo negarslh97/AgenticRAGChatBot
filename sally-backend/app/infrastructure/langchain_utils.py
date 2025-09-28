@@ -33,26 +33,33 @@ class LangChainService:
     def __init__(self):
         self._models = {}
 
-    def _get_model(self, model_name: str) -> ChatOpenAI:
+    def _get_model(self, model_name: str, force_json: bool = False) -> ChatOpenAI:
         """Get or create a ChatOpenAI model instance."""
-        if model_name not in self._models:
+        cache_key = f"{model_name}_{'json' if force_json else 'text'}"
+        
+        if cache_key not in self._models:
             logger.info(f"🤖 بارگذاری مدل: {model_name}")
             logger.info(f"🔑 API Key تنظیم شده: {'بله' if settings.openai_api_key_loaded else 'خیر'}")
             logger.info(f"🌐 Base URL: {settings.openai_base_url_loaded or 'پیش‌فرض OpenAI'}")
 
-            self._models[model_name] = ChatOpenAI(
+            model_kwargs = {}
+            if force_json:
+                # Only use JSON format for metadata generation
+                model_kwargs["response_format"] = {"type": "json_object"}
+                logger.info("📋 حالت JSON فعال شد")
+
+            self._models[cache_key] = ChatOpenAI(
                 model_name=model_name,
                 openai_api_key=settings.openai_api_key_loaded,
                 base_url=settings.openai_base_url_loaded,
                 temperature=0.7,
                 max_tokens=500,
-                # Enable structured output capabilities
-                model_kwargs={"response_format": {"type": "json_object"}}
+                model_kwargs=model_kwargs
             )
             logger.info(f"✅ مدل {model_name} آماده استفاده است")
         else:
-            logger.debug(f"♻️ استفاده از مدل کش شده: {model_name}")
-        return self._models[model_name]
+            logger.debug(f"♻️ استفاده از مدل کش شده: {cache_key}")
+        return self._models[cache_key]
 
     async def generate_metadata(self, title: str, content: str) -> Dict[str, Any]:
         """
@@ -71,7 +78,7 @@ class LangChainService:
             logger.info(f"📝 عنوان مقاله: {title[:100]}...")
             logger.info(f"📊 طول محتوا: {len(content)} کاراکتر")
 
-            model = self._get_model(selected_model)
+            model = self._get_model(selected_model, force_json=True)
             logger.info(f"✅ مدل {selected_model} با موفقیت بارگذاری شد")
 
             prompt = ChatPromptTemplate.from_template("""
@@ -146,7 +153,7 @@ Visibility: public, customer, internal
             AI response string
         """
         try:
-            model = self._get_model(settings.chat_model_loaded)
+            model = self._get_model(settings.chat_model_loaded, force_json=False)
 
             # Create prompt for chat
             system_message = "You are a helpful customer support assistant. Answer questions in Persian (Farsi)."
@@ -188,7 +195,7 @@ Visibility: public, customer, internal
             AI response string
         """
         try:
-            model = self._get_model(settings.rag_model_loaded)
+            model = self._get_model(settings.rag_model_loaded, force_json=False)
 
             prompt = ChatPromptTemplate.from_template("""
                 Based on the following context, answer the user's question in Persian (Farsi).

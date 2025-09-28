@@ -16,7 +16,8 @@ import {
   Crown,
   ChevronDown,
   ChevronRight,
-  FileQuestion
+  FileQuestion,
+  MessageCircle
 } from 'lucide-react'
 
 const Sidebar: React.FC = () => {
@@ -41,6 +42,11 @@ const Sidebar: React.FC = () => {
       name: 'داشبورد',
       href: '/super-admin',
       icon: LayoutDashboard
+    },
+    {
+      name: 'چت با Sally',
+      href: '/super-admin/chat',
+      icon: MessageCircle
     },
     {
       name: 'مدیریت کاربران',

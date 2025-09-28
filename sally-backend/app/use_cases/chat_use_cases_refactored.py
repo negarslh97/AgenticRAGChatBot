@@ -75,6 +75,166 @@ class ChatUseCases:
             return {"title": "New Conversation", "tags": [], "error": str(e)}
 
     @staticmethod
+    async def send_admin_message(
+        content: str,
+        admin: Admin,
+        conversation_id: Optional[str] = None,
+        rag_type: str = "simple"
+    ) -> Dict[str, Any]:
+        """Process an admin chat message with RAG type selection."""
+        
+        # Create or get conversation
+        if conversation_id:
+            try:
+                from bson import ObjectId
+                conversation = await Conversation.get(ObjectId(conversation_id))
+                if not conversation:
+                    raise ValueError("Conversation not found")
+            except Exception as e:
+                raise ValueError(f"Error retrieving conversation: {str(e)}")
+        else:
+            # Create new conversation for admin
+            conversation = Conversation(
+                customer_id=None,  # Admin conversations don't have customer_id
+                admin_id=str(admin.id),
+                title=content[:50] + "..." if len(content) > 50 else content,
+                tags=[f"admin-{rag_type}-rag"],
+                guest_session_id=None
+            )
+            await conversation.insert()
+            logger.info(f"Created new admin conversation: {conversation.id}")
+
+        # Save user message
+        user_message = Message(
+            conversation_id=str(conversation.id),
+            content=content,
+            sender_type="admin",
+            sender_id=str(admin.id),
+            is_failed=False,
+            failure_reason=None,
+            metadata={
+                "rag_type": rag_type,
+                "admin_email": admin.email,
+                "admin_name": admin.full_name
+            }
+        )
+        await user_message.insert()
+        logger.info(f"Saved admin message: {user_message.id}")
+
+        # Prepare context for RAG service
+        context = {
+            "user_id": str(admin.id),
+            "user_type": "Admin",
+            "conversation_id": str(conversation.id),
+            "rag_type": rag_type
+        }
+
+        # Get appropriate RAG service based on type
+        if rag_type == "simple":
+            from app.infrastructure.rag_service import SimpleRAGService
+            rag_service = SimpleRAGService()
+        else:  # agentic
+            from app.infrastructure.rag_service import AgenticRAGService
+            rag_service = AgenticRAGService()
+
+        # Generate AI response
+        ai_message = None
+        try:
+            rag_response = await rag_service.generate_response(content, context)
+            ai_content = rag_response["response"]
+            sources = rag_response.get("sources", [])
+            confidence = rag_response.get("confidence", 0.5)
+            suggested_actions = rag_response.get("suggested_actions", [])
+
+            # Create rich metadata
+            rich_metadata = {
+                "sources": sources,
+                "confidence": confidence,
+                "suggested_actions": suggested_actions,
+                "rag_type": rag_type,
+                "model_name": settings.rag_model_loaded,
+                "provider": "OpenAI",
+                "api_base_url": settings.openai_base_url_loaded,
+                "temperature": 0.7,
+                "max_tokens": 1000,
+                "response_time": None,
+                "token_usage": {
+                    "prompt_tokens": None,
+                    "completion_tokens": None,
+                    "total_tokens": None
+                },
+                "processing_details": {
+                    "retrieval_method": "agentic_rag" if rag_type == "agentic" else "simple_rag",
+                    "knowledge_base_used": bool(sources),
+                    "fallback_used": False
+                },
+                "timestamp": datetime.utcnow().isoformat(),
+                "admin_test_mode": True
+            }
+
+            # Save AI response
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=ai_content,
+                sender_type="ai",
+                sender_id=None,
+                is_failed=False,
+                failure_reason=None,
+                metadata=rich_metadata
+            )
+            await ai_message.insert()
+            logger.info(f"Saved AI message with ID: {ai_message.id}")
+
+            return {
+                "conversation_id": str(conversation.id),
+                "message": ai_content,
+                "sources": sources,
+                "confidence": confidence,
+                "suggested_actions": suggested_actions,
+                "message_id": str(ai_message.id),
+                "metadata": {
+                    "rag_type": rag_type,
+                    "model_name": rich_metadata["model_name"],
+                    "provider": rich_metadata["provider"],
+                    "token_usage": rich_metadata["token_usage"]
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating AI response: {e}")
+            
+            # Save failed AI message
+            error_message = f"خطا در تولید پاسخ: {str(e)}"
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=error_message,
+                sender_type="ai",
+                sender_id=None,
+                is_failed=True,
+                failure_reason=str(e),
+                metadata={
+                    "rag_type": rag_type,
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "admin_test_mode": True
+                }
+            )
+            await ai_message.insert()
+
+            return {
+                "conversation_id": str(conversation.id),
+                "message": error_message,
+                "sources": [],
+                "confidence": 0.0,
+                "suggested_actions": ["contact_support"],
+                "message_id": str(ai_message.id),
+                "metadata": {
+                    "rag_type": rag_type,
+                    "error": str(e)
+                }
+            }
+
+    @staticmethod
     async def send_message(
         content: str,
         user: Optional[Union[Customer, Admin]] = None,
@@ -191,9 +351,9 @@ class ChatUseCases:
                 "confidence": confidence,
                 "suggested_actions": suggested_actions,
                 "rag_type": "agentic" if user else "simple",
-                "model_name": settings.openai_model_loaded or "gpt-3.5-turbo",
+                "model_name": settings.openai_model_loaded,
                 "provider": "OpenAI",
-                "api_base_url": settings.openai_base_url_loaded or "https://api.openai.com/v1",
+                "api_base_url": settings.openai_base_url_loaded,
                 "temperature": 0.7,  # Default temperature
                 "max_tokens": 1000,  # Default max tokens
                 "response_time": None,  # Could be measured
@@ -260,9 +420,9 @@ class ChatUseCases:
                 "error_message": str(e),
                 "fallback": True,
                 "rag_type": "failed",
-                "model_name": settings.openai_model_loaded or "unknown",
+                "model_name": settings.openai_model_loaded,
                 "provider": "OpenAI",
-                "api_base_url": settings.openai_base_url_loaded or "https://api.openai.com/v1",
+                "api_base_url": settings.openai_base_url_loaded,
                 "temperature": 0.7,
                 "max_tokens": 1000,
                 "response_time": None,
@@ -365,6 +525,24 @@ class ChatUseCases:
         """Get customer's conversation list."""
         conversations = await Conversation.find(
             Conversation.customer_id == str(customer.id)
+        ).sort(-Conversation.updated_at).to_list()
+        
+        return [
+            {
+                "id": str(conv.id),
+                "title": conv.title,
+                "tags": conv.tags,
+                "created_at": conv.created_at.isoformat(),
+                "updated_at": conv.updated_at.isoformat()
+            }
+            for conv in conversations
+        ]
+
+    @staticmethod
+    async def get_admin_conversations(admin: Admin) -> List[Dict[str, Any]]:
+        """Get admin's conversation list."""
+        conversations = await Conversation.find(
+            Conversation.admin_id == str(admin.id)
         ).sort(-Conversation.updated_at).to_list()
         
         return [

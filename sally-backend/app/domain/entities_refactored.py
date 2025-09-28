@@ -105,8 +105,9 @@ class GuestSession(Document):
 
 
 class Conversation(Document):
-    """Conversation can belong to either a customer or a guest session."""
+    """Conversation can belong to either a customer, admin, or a guest session."""
     customer_id: Optional[str] = None
+    admin_id: Optional[str] = None  # For admin conversations
     guest_session_id: Optional[str] = None
     title: Optional[str] = None  # AI-generated title for the conversation
     tags: List[str] = []  # AI-generated tags for categorizing the conversation

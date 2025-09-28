@@ -40,6 +40,16 @@ export interface ChatResponse {
   confidence: number
   suggested_actions: string[]
   message_id: string
+  metadata?: {
+    rag_type?: 'simple' | 'agentic'
+    model_name?: string
+    provider?: string
+    token_usage?: {
+      prompt_tokens?: number
+      completion_tokens?: number
+      total_tokens?: number
+    }
+  }
 }
 
 export interface Conversation {
@@ -69,9 +79,31 @@ export const chatService = {
     }
   },
 
+  async sendAdminMessage(content: string, conversationId?: string, ragType: 'simple' | 'agentic' = 'simple'): Promise<ChatResponse> {
+    // Admin-specific message sending with RAG type selection
+    const requestData = {
+      content,
+      conversation_id: conversationId,
+      rag_type: ragType,
+    }
+    
+    try {
+      const response = await api.post("/api/admin/message", requestData)
+      return response.data
+    } catch (error: any) {
+      console.error("Admin chat request failed:", error)
+      console.error("Error response:", error.response)
+      throw error
+    }
+  },
+
   async getConversations(): Promise<Conversation[]> {
     const response = await api.get("/api/conversations")
     return response.data.conversations
+  },
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    await api.delete(`/api/conversations/${conversationId}`)
   },
 
   async updateConversationTitle(conversationId: string, title: string): Promise<void> {

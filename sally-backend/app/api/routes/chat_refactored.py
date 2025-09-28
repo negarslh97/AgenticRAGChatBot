@@ -10,6 +10,9 @@ from app.core.permissions import get_current_customer, get_optional_customer, ge
 from app.use_cases.chat_use_cases_refactored import ChatUseCases
 import json
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -18,6 +21,15 @@ class ChatMessage(BaseModel):
     content: str
     conversation_id: Optional[str] = None
     guest_session_id: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class AdminChatMessage(BaseModel):
+    content: str
+    conversation_id: Optional[str] = None
+    rag_type: str = "simple"  # "simple" or "agentic"
     
     class Config:
         from_attributes = True
@@ -72,17 +84,63 @@ async def send_message(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.post("/admin/message", response_model=ChatResponse)
+async def send_admin_message(
+    request: Request,
+    message: AdminChatMessage,
+    current_admin: Admin = Depends(get_optional_admin)
+):
+    """Send a chat message as admin with RAG type selection."""
+    
+    if not current_admin:
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+    
+    try:
+        # Log message for monitoring
+        logger.info(f"Admin chat message received - Admin: {current_admin.email}, RAG type: {message.rag_type}, Content length: {len(message.content)}, Conversation ID: {message.conversation_id}")
+        
+        # Validate RAG type
+        if message.rag_type not in ["simple", "agentic"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple' or 'agentic'")
+        
+        response = await ChatUseCases.send_admin_message(
+            content=message.content,
+            admin=current_admin,
+            conversation_id=message.conversation_id,
+            rag_type=message.rag_type
+        )
+        
+        return ChatResponse(**response)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        logger.error(f"Unexpected error in send_admin_message: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/conversations")
 async def get_conversations(
     current_customer: Optional[Customer] = Depends(get_optional_customer),
     current_admin: Optional[Admin] = Depends(get_optional_admin)
 ):
     """Get conversations - authenticated users only"""
-    """Get customer's conversation history."""
     try:
-        conversations = await ChatUseCases.get_user_conversations(current_customer)
+        # Determine user type and get appropriate conversations
+        if current_customer:
+            conversations = await ChatUseCases.get_user_conversations(current_customer)
+        elif current_admin:
+            conversations = await ChatUseCases.get_admin_conversations(current_admin)
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
         return {"conversations": conversations}
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
+        logger.error(f"Error getting conversations: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -263,15 +321,15 @@ async def get_conversation_messages(
 ):
     """Get messages from a conversation."""
     try:
+        # Determine user type and ID for access control
+        user_type = "Customer" if current_customer else ("Admin" if current_admin else "Guest")
+        user_id = str(current_customer.id) if current_customer else (str(current_admin.id) if current_admin else None)
+        
         logger.info(f"Getting conversation history - Conversation ID: {conversation_id}, User type: {user_type}")
         
         # Validate guest session ID for guests
         if not current_customer and not current_admin and not guest_session_id:
             raise HTTPException(status_code=400, detail="guest_session_id is required for guest users")
-        
-        # Determine user type and ID for access control
-        user_type = "Customer" if current_customer else ("Admin" if current_admin else "Guest")
-        user_id = str(current_customer.id) if current_customer else (str(current_admin.id) if current_admin else None)
         
         messages = await ChatUseCases.get_conversation_history(
             conversation_id, 

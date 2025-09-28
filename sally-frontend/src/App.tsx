@@ -25,6 +25,7 @@ const SuperAdminDashboard = lazy(() => import("./pages/SuperAdminDashboard"))
 const SuperAdminKnowledgeBasePage = lazy(() => import("./pages/SuperAdminKnowledgeBasePage"))
 const SuperAdminAddArticlePage = lazy(() => import("./pages/SuperAdminAddArticlePage"))
 const SuperAdminUploadPage = lazy(() => import("./pages/SuperAdminUploadPage"))
+const SuperAdminChatPage = lazy(() => import("./pages/SuperAdminChatPage"))
 const ArticleEditPage = lazy(() => import("./pages/ArticleEditPage"))
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage"))
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"))
@@ -131,6 +132,7 @@ const App: React.FC = () => {
               }
             >
               <Route index element={<SuperAdminDashboard />} />
+              <Route path="chat" element={<SuperAdminChatPage />} />
               <Route path="users" element={<UserManagementPage />} />
               <Route path="admin/users" element={<AdminUsersPage />} />
               <Route path="customer/users" element={<CustomerUsersPage />} />

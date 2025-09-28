@@ -24,12 +24,15 @@ class RAGService(ABC):
     async def retrieve_relevant_documents(self, query: str, is_public_only: bool = True) -> List[Dict[str, Any]]:
         """Retrieve relevant documents from knowledge base."""
         # Build query for articles
-        article_query = KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED
-
         if is_public_only:
-            article_query = article_query & (KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC)
-        
-        articles = await KnowledgeBaseArticle.find(article_query).to_list()
+            articles = await KnowledgeBaseArticle.find(
+                KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED,
+                KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC
+            ).to_list()
+        else:
+            articles = await KnowledgeBaseArticle.find(
+                KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED
+            ).to_list()
         
         # Simple keyword-based retrieval (in production, use vector embeddings)
         query_lower = query.lower()
@@ -68,24 +71,46 @@ class SimpleRAGService(RAGService):
     """Simple RAG for guest users - uses public knowledge base only."""
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Generate response using direct OpenAI for guests (no RAG)."""
+        """Generate response using Simple RAG with public knowledge base."""
 
-        logger.info(f"SimpleRAGService: Generating response for query: '{query}' (guest mode)")
+        logger.info(f"SimpleRAGService: Generating response for query: '{query}' with RAG")
 
-        # Always use OpenAI directly for chat
+        # Try to retrieve relevant documents from public knowledge base
+        relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=True)
+        logger.info(f"SimpleRAGService: Found {len(relevant_docs)} relevant documents for query '{query[:50]}...'")
+
+        if relevant_docs and settings.openai_api_key_loaded:
+            # Use RAG with context from knowledge base
+            try:
+                context_text = "\n\n".join([
+                    f"Document: {doc['title']}\nContent: {doc['content']}"
+                    for doc in relevant_docs[:3]
+                ])
+                
+                rag_response = await self._generate_openai_response(query, context_text)
+                logger.info(f"SimpleRAGService: RAG API success - Response preview: '{rag_response[:100]}...'")
+                return {
+                    "response": rag_response,
+                    "sources": [{"title": doc["title"], "id": doc["id"]} for doc in relevant_docs[:3]],
+                    "confidence": 0.9
+                }
+            except Exception as e:
+                logger.error(f"SimpleRAGService: RAG API error for query '{query[:50]}...': {str(e)}")
+
+        # Fallback to direct OpenAI if no documents found or RAG fails
         if settings.openai_api_key_loaded:
             try:
                 direct_response = await self._generate_direct_openai_response(query, {})
-                logger.info(f"SimpleRAGService: API success - Response preview: '{direct_response[:100]}...'")
+                logger.info(f"SimpleRAGService: Direct API success - Response preview: '{direct_response[:100]}...'")
                 return {
                     "response": direct_response,
                     "sources": [],
-                    "confidence": 0.8
+                    "confidence": 0.7
                 }
             except Exception as e:
                 logger.error(f"SimpleRAGService: Direct OpenAI API error for query '{query[:50]}...': {str(e)}")
 
-        # Fallback response if OpenAI fails
+        # Final fallback response if all fails
         fallback_msg = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید."
         logger.warning(f"SimpleRAGService: Using fallback response for query '{query}': '{fallback_msg}'")
         return {
