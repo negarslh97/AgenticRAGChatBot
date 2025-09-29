@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from app.api.dependencies import get_current_admin
-from app.domain.entities_refactored import Admin, KnowledgeBaseArticle, ArticleStatus, ArticleTag
+from app.domain.entities import Admin, KnowledgeBaseArticle, ArticleStatus, ArticleTag
 import os
 import uuid
 from pathlib import Path
@@ -30,7 +30,7 @@ async def generate_metadata_from_ai(title: str, content: str):
 
 async def get_or_create_tags(tag_names):
     """Get or create tags and return ArticleTag objects."""
-    from app.domain.entities_refactored import Tag
+    from app.domain.entities import Tag
     article_tags = []
     for tag_name in tag_names:
         # Check if tag exists

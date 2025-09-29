@@ -11,7 +11,7 @@ from enum import Enum
 import json
 
 from .sync_service import SyncService, MongoToGitSync
-from app.domain.entities_refactored import KnowledgeBaseArticle, Category, ArticleStatus
+from app.domain.entities import KnowledgeBaseArticle, Category, ArticleStatus
 from app.core.config import settings
 
 
@@ -300,7 +300,7 @@ class JobQueue:
             raise ValueError("Article ID is required for vectorization")
 
         # Import here to avoid circular imports
-        from app.infrastructure.database_refactored import init_db
+        from app.infrastructure.database.mongodb import init_db
         from app.infrastructure.knowledge_base_repository import knowledge_base_repository
 
         # Ensure database is initialized

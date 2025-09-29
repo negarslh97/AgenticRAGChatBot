@@ -317,7 +317,7 @@ class MonitoringService:
     async def _check_database_health(self) -> Dict[str, Any]:
         """Check database connectivity."""
         try:
-            from app.infrastructure.database_refactored import init_beanie
+            from app.infrastructure.database.mongodb import init_beanie
             from motor.motor_asyncio import AsyncIOMotorClient
             
             # Try to connect to database

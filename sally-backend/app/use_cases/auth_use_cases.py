@@ -1,5 +1,5 @@
 from typing import Optional
-from app.domain.entities_refactored import Role
+from app.domain.entities import Role
 from app.core.security import verify_password, get_password_hash
 
 

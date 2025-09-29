@@ -60,7 +60,7 @@ class TestAdminCreationPermissions:
     @pytest.mark.asyncio
     async def test_super_admin_can_create_admin(self, client: AsyncClient, super_admin_user, super_admin_token, auth_headers, faker):
         """Test that SuperAdmins can create new admins."""
-        from app.domain.entities_refactored import Role
+        from app.domain.entities import Role
 
         # Get Admin role
         admin_role = await Role.find_one({"name": "Admin"})
@@ -86,7 +86,7 @@ class TestAdminCreationPermissions:
     @pytest.mark.asyncio
     async def test_regular_admin_cannot_create_admin(self, client: AsyncClient, admin_user, admin_token, auth_headers, faker):
         """Test that regular admins cannot create new admins."""
-        from app.domain.entities_refactored import Role
+        from app.domain.entities import Role
 
         # Get Admin role
         admin_role = await Role.find_one({"name": "Admin"})
@@ -108,7 +108,7 @@ class TestAdminCreationPermissions:
     @pytest.mark.asyncio
     async def test_super_admin_can_create_super_admin(self, client: AsyncClient, super_admin_user, super_admin_token, auth_headers, faker):
         """Test that SuperAdmins can create other SuperAdmins."""
-        from app.domain.entities_refactored import Role
+        from app.domain.entities import Role
 
         # Get SuperAdmin role
         super_admin_role = await Role.find_one({"name": "SuperAdmin"})
@@ -152,7 +152,7 @@ class TestAdminUpdatePermissions:
     @pytest.mark.asyncio
     async def test_super_admin_can_change_admin_role(self, client: AsyncClient, super_admin_user, super_admin_token, auth_headers, admin_user, faker):
         """Test that SuperAdmins can change admin roles."""
-        from app.domain.entities_refactored import Role
+        from app.domain.entities import Role
 
         # Get SuperAdmin role
         super_admin_role = await Role.find_one({"name": "SuperAdmin"})

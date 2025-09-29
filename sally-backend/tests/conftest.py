@@ -11,10 +11,10 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from faker import Faker
 
-from app.infrastructure.database_refactored import init_db
+from app.infrastructure.database.mongodb import init_db
 from app.core.permissions import create_default_roles
 from app.core.config import settings
-from app.domain.entities_refactored import (
+from app.domain.entities import (
     Admin, Customer, Role, Ticket, TicketReply, KnowledgeBaseArticle,
     Category, Tag, GuestSession, Conversation, Message, ActivityLog, Feedback
 )
@@ -207,7 +207,7 @@ async def test_category(faker):
 @pytest_asyncio.fixture
 async def test_article(test_category, admin_user, faker):
     """Create a test knowledge base article."""
-    from app.domain.entities_refactored import ArticleStatus, ArticleVisibility, ArticleCategory
+    from app.domain.entities import ArticleStatus, ArticleVisibility, ArticleCategory
 
     article = KnowledgeBaseArticle(
         title=faker.sentence(),

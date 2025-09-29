@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
     embedder_api_key: Optional[str] = None
+    embedder_openai_base_url: Optional[str] = None
+    # Ollama Configuration for local embeddings fallback
+    ollama_url: Optional[str] = None
+    ollama_embedding_model: Optional[str] = None
 
     # Docs-as-Code Git Configuration
     kb_git_repo_url: Optional[str] = None
@@ -85,6 +89,21 @@ class Settings(BaseSettings):
     def embedder_api_key_loaded(self) -> Optional[str]:
         import os
         return self.embedder_api_key or os.getenv("Embedder_API_KEY")
+
+    @property
+    def embedder_openai_base_url_loaded(self) -> Optional[str]:
+        import os
+        return self.embedder_openai_base_url or os.getenv("Embedder_OPENAI_BASE_URL")
+
+    @property
+    def ollama_url_loaded(self) -> Optional[str]:
+        import os
+        return self.ollama_url or os.getenv("OLLAMA_URL")
+
+    @property
+    def ollama_embedding_model_loaded(self) -> Optional[str]:
+        import os
+        return self.ollama_embedding_model or os.getenv("OLLAMA_EMBEDDING_MODEL")
 
     # App settings
     app_name: str = "Sally Customer Support"

@@ -19,7 +19,7 @@ try:
 except ImportError:
     TEXT_EXTRACTION_AVAILABLE = False
 
-from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus, Admin, ArticleVisibility, AdminRole, ArticleCategory, ArticleTag, Category, Tag
+from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, Admin, ArticleVisibility, AdminRole, ArticleCategory, ArticleTag, Category, Tag
 import markdown  # For markdown to HTML conversion
 from app.api.dependencies import get_current_admin
 from app.core.permissions import get_current_admin_with_permission, Permission
@@ -814,32 +814,102 @@ async def convert_text_to_markdown(
     try:
         title = request.get("title", "")
         content = request.get("content", "")
-        
+
         if not content:
             raise HTTPException(status_code=400, detail="محتوا نمی‌تواند خالی باشد")
-        
+
         print(f"🔄 شروع تبدیل متن به Markdown - عنوان: {title[:50]}...")
         print(f"📊 طول محتوا: {len(content)} کاراکتر")
-        
+
         # Use LangChain service to convert text to markdown
         from app.infrastructure.langchain_utils import langchain_service
-        
+
         markdown_content = await langchain_service.convert_text_to_markdown(title, content)
-        
+
         print(f"✅ تبدیل به Markdown کامل شد - طول خروجی: {len(markdown_content)} کاراکتر")
-        
+
         return {
             "success": True,
             "markdown_content": markdown_content,
             "original_length": len(content),
             "markdown_length": len(markdown_content)
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ خطا در تبدیل متن به Markdown: {str(e)}")
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"خطا در تبدیل متن به Markdown: {str(e)}"
+        )
+
+
+@router.get("/articles/structure/{article_id}", tags=["Knowledge Base Management"])
+async def get_article_structure(
+    article_id: str,
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_PUBLIC_KB))
+):
+    """
+    استخراج ساختار درختی از محتوای Markdown مقاله برای پیمایش
+
+    Args:
+        article_id: شناسه مقاله
+
+    Returns:
+        ساختار درختی شامل هدرها و لینک‌ها
+    """
+    try:
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+
+        structure = await knowledge_base_repository.extract_markdown_structure(article_id)
+
+        if "error" in structure:
+            raise HTTPException(status_code=404, detail=structure["error"])
+
+        return {
+            "success": True,
+            "structure": structure
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ خطا در دریافت ساختار مقاله {article_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"خطا در دریافت ساختار مقاله: {str(e)}"
+        )
+
+
+@router.get("/articles/structures", tags=["Knowledge Base Management"])
+async def get_articles_with_structures(
+    limit: int = 50,
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_PUBLIC_KB))
+):
+    """
+    دریافت لیست مقالات با ساختار درختی آن‌ها
+
+    Args:
+        limit: حداکثر تعداد مقالات
+
+    Returns:
+        لیست مقالات با ساختار درختی
+    """
+    try:
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+
+        articles_with_structure = await knowledge_base_repository.get_articles_with_structure(limit)
+
+        return {
+            "success": True,
+            "articles": articles_with_structure,
+            "total": len(articles_with_structure)
+        }
+
+    except Exception as e:
+        logger.error(f"❌ خطا در دریافت مقالات با ساختار: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"خطا در دریافت مقالات با ساختار: {str(e)}"
         )

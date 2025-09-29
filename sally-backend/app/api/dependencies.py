@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from typing import Optional, Union
 from app.core.permissions import get_optional_auth_header, get_admin_from_token, get_current_customer_from_token
-from app.domain.entities_refactored import Admin, Customer
+from app.domain.entities import Admin, Customer
 
 
 async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Union[Admin, Customer]:

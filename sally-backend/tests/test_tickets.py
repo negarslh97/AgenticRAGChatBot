@@ -88,7 +88,7 @@ class TestTicketReplies:
     async def test_customer_cannot_reply_to_other_ticket(self, client: AsyncClient, customer_user, customer_token, auth_headers, faker):
         """Test that a customer cannot reply to tickets they don't own."""
         # Create another customer and their ticket
-        from app.domain.entities_refactored import Customer, Ticket
+        from app.domain.entities import Customer, Ticket
 
         other_customer = Customer(
             email=faker.email(),
@@ -194,7 +194,7 @@ class TestTicketViewing:
     async def test_customer_cannot_view_other_ticket(self, client: AsyncClient, customer_user, customer_token, auth_headers, faker):
         """Test that customers cannot view tickets they don't own."""
         # Create another customer and their ticket
-        from app.domain.entities_refactored import Customer, Ticket
+        from app.domain.entities import Customer, Ticket
 
         other_customer = Customer(
             email=faker.email(),
@@ -260,7 +260,7 @@ class TestTicketRepliesViewing:
     async def test_customer_cannot_view_internal_replies(self, client: AsyncClient, customer_user, customer_token, auth_headers, test_ticket, admin_user, faker):
         """Test that customers cannot see internal replies."""
         # First create an internal reply as admin
-        from app.domain.entities_refactored import TicketReply
+        from app.domain.entities import TicketReply
 
         internal_reply = TicketReply(
             ticket_id=str(test_ticket.id),
@@ -295,7 +295,7 @@ class TestTicketRepliesViewing:
     async def test_admin_can_view_all_replies(self, client: AsyncClient, admin_user, admin_token, auth_headers, test_ticket, faker):
         """Test that admins can view all replies including internal ones."""
         # Create replies as before
-        from app.domain.entities_refactored import TicketReply
+        from app.domain.entities import TicketReply
 
         internal_reply = TicketReply(
             ticket_id=str(test_ticket.id),

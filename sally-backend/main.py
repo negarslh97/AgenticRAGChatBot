@@ -61,9 +61,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from app.core.config import settings
-from app.infrastructure.database_refactored import init_db
+from app.infrastructure.database.mongodb import init_db
 import logging
 import os
+import warnings
+
+# Suppress specific deprecation warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*general_plain_validator_function.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*with_info_plain_validator_function.*")
 
 # فایل‌های جدیدی که باید بسازید یا جایگزین کنید
 from app.api.routes.auth_refactored import router as auth_router
@@ -72,7 +77,7 @@ from app.api.routes.tickets_refactored import router as tickets_router
 from app.api.routes.admin_refactored import router as admin_router
 # روترهای موجود که نیازی به تغییر بزرگ ندارند
 from app.api.routes.knowledge_base import router as kb_router
-from app.api.routes.admin_knowledge_base import router as admin_kb_router
+from app.api.routes.super_admin_knowledge_base import router as admin_kb_router
 from app.api.routes.upload import router as upload_router
 
 # تنظیمات لاگ‌گیری برای نمایش بهتر اطلاعات
@@ -219,7 +224,7 @@ async def startup_event():
     await init_db()
 
     # Log existing roles in database for debugging
-    from app.domain.entities_refactored import Role
+    from app.domain.entities import Role
     existing_roles = await Role.find_all().to_list()
     logger.info(f"DEBUG: Existing roles in database before create_default_roles: {[role.name for role in existing_roles]}")
 
@@ -232,7 +237,7 @@ async def startup_event():
     logger.info(f"DEBUG: Roles in database after create_default_roles: {[role.name for role in roles_after]}")
 
     # ساخت ادمین پیش‌فرض در صورتی که هیچ ادمینی وجود نداشته باشد
-    from app.domain.entities_refactored import Admin, Role
+    from app.domain.entities import Admin, Role
     from app.core.security import get_password_hash
 
     admin_count = await Admin.find_all().count()
@@ -273,6 +278,11 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup resources on shutdown."""
     logger.info("Shutting down the application...")
+
+    # Close MongoDB client
+    from app.infrastructure.database.mongodb import close_mongo_client
+    await close_mongo_client()
+    logger.info("MongoDB client closed")
 
     # Stop background job processor
     from app.docs_as_code.background_jobs import stop_background_jobs

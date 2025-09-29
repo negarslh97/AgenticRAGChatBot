@@ -7,7 +7,7 @@ import openai
 import json
 
 # --- وارد کردن مدل‌های دیتابیس ---
-from app.domain.entities_refactored import (
+from app.domain.entities import (
     Admin, Customer, Role, KnowledgeBaseArticle, ArticleStatus,
     Ticket, ActivityLog, PermissionDetail, ArticleCategory, ArticleTag, Category, Tag
 )
@@ -670,18 +670,18 @@ async def get_dashboard_stats(current_admin: Admin = Depends(get_current_admin_w
         total_customers = await Customer.find_all().count()
 
         # Count tickets by status
-        from app.domain.entities_refactored import Ticket, TicketStatus
+        from app.domain.entities import Ticket, TicketStatus
         open_tickets = await Ticket.find(Ticket.status == TicketStatus.OPEN).count()
         in_progress_tickets = await Ticket.find(Ticket.status == TicketStatus.IN_PROGRESS).count()
         resolved_tickets = await Ticket.find(Ticket.status == TicketStatus.RESOLVED).count()
 
         # Count knowledge base articles by status
-        from app.domain.entities_refactored import KnowledgeBaseArticle, ArticleStatus
+        from app.domain.entities import KnowledgeBaseArticle, ArticleStatus
         published_articles = await KnowledgeBaseArticle.find(KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED).count()
         draft_articles = await KnowledgeBaseArticle.find(KnowledgeBaseArticle.status == ArticleStatus.DRAFT).count()
 
         # Count total activity logs
-        from app.domain.entities_refactored import ActivityLog
+        from app.domain.entities import ActivityLog
         total_logs = await ActivityLog.find_all().count()
 
         return {

@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPExce
 from typing import Optional, List, Union
 from pydantic import BaseModel
 from bson import ObjectId
-from app.domain.entities_refactored import (
+from app.domain.entities import (
     Customer, Admin, Conversation, Message, GuestSession, UnansweredQuestion,
     MessageRating
 )

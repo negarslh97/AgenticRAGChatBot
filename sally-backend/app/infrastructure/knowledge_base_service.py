@@ -11,7 +11,7 @@ import logging
 import markdown
 import re
 
-from app.domain.entities_refactored import (
+from app.domain.entities import (
     KnowledgeBaseArticle, ArticleStatus, ArticleVisibility,
     Category, Tag, Admin, Customer, Role
 )

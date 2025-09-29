@@ -7,7 +7,7 @@ import logging
 from typing import List, Optional, Union
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials
-from app.domain.entities_refactored import Admin, Customer, Role, PermissionDetail
+from app.domain.entities import Admin, Customer, Role, PermissionDetail
 from app.core.security import verify_token
 
 logger = logging.getLogger(__name__)
@@ -147,8 +147,7 @@ async def create_default_roles():
 async def get_admin_from_token(token: str) -> Optional[Admin]:
     """Extract admin from JWT token, returns None if invalid or inactive."""
     logger.info(f"==== GET ADMIN FROM TOKEN START ====")
-    logger.info(f"Token received: {token[:20]}...")
-    
+    logger.info(f"Token received: {token[:8]}...")
     try:
         payload = verify_token(token)
         logger.info(f"Token payload verified: {payload}")
@@ -215,8 +214,7 @@ def get_current_admin_with_permission(permission: str):
 async def get_current_customer_from_token(token: str) -> Optional[Customer]:
     """Extract customer from JWT token, returns None if invalid or inactive."""
     logger.info(f"==== GET CUSTOMER FROM TOKEN START ====")
-    logger.info(f"Token received: {token[:20]}...")
-    
+    logger.info(f"Token received: {token[:8]}...")
     try:
         payload = verify_token(token)
         logger.info(f"Token payload verified: {payload}")

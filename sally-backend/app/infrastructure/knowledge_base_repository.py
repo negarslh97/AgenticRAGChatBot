@@ -10,7 +10,7 @@ from datetime import datetime
 from bson import ObjectId
 import logging
 
-from app.domain.entities_refactored import (
+from app.domain.entities import (
     KnowledgeBaseArticle, ArticleStatus, ArticleVisibility,
     Category, Tag, ArticleCategory, ArticleTag, Admin
 )
@@ -33,7 +33,7 @@ class KnowledgeBaseRepository:
 
         try:
             import weaviate
-            from app.scripts.weaviate_mongodb_connector import WeaviateMongoDBConnector
+            from app.infrastructure.database.weaviate import WeaviateMongoDBConnector
 
             connector = WeaviateMongoDBConnector()
             await connector.connect_mongodb()
@@ -531,7 +531,7 @@ class KnowledgeBaseRepository:
 
                 article_data = {
                     "title": article.title,
-                    "content": article.content_html or article.content_markdown or "",
+                    "content": article.content_markdown or article.content_html or "",  # ✅ اولویت به Markdown
                     "summary": article.summary or "",
                     "tags": tags_list,
                     "category": article.category.name if article.category else "عمومی",
@@ -542,39 +542,26 @@ class KnowledgeBaseRepository:
                     "article_id": str(article.id)
                 }
 
-                # تنظیم API key در محیط و ارسال مستقیم با requests
-                import os
-                import requests
-                embedder_api_key = settings.embedder_api_key_loaded
-
-                if embedder_api_key:
-                    os.environ['OPENAI_APIKEY'] = embedder_api_key
-
-                    # استفاده از requests برای ارسال مستقیم با header
-                    weaviate_url = settings.weaviate_url_loaded or "http://localhost:8080"
-                    headers = {'X-OpenAI-Api-Key': embedder_api_key}
-
+                # استفاده از vectorizer config - ابتدا OpenAI، سپس fallback محلی
+                try:
+                    # ابتدا سعی می‌کنیم با OpenAI vectorizer
+                    self.weaviate_client.data_object.create(
+                        data_object=article_data,
+                        class_name="KnowledgeBaseArticle"
+                    )
+                    logger.info(f"🔄 مقاله '{article.title}' با OpenAI vectorizer همگام‌سازی شد")
+                except Exception as e:
+                    logger.warning(f"⚠️ OpenAI vectorizer شکست خورد، استفاده از fallback محلی: {str(e)}")
                     try:
-                        response = requests.post(
-                            f"{weaviate_url}/v1/objects",
-                            json={
-                                "class": "KnowledgeBaseArticle",
-                                "properties": article_data
-                            },
-                            headers=headers
+                        # استفاده از fallback محلی
+                        self.weaviate_client.data_object.create(
+                            data_object=article_data,
+                            class_name="KnowledgeBaseArticleLocal"
                         )
-                        response.raise_for_status()
-                        logger.info(f"🔄 مقاله '{article.title}' در Weaviate همگام‌سازی شد")
-                        return
-                    except Exception as e:
-                        logger.error(f"❌ خطا در sync با requests: {str(e)}")
-
-                # Fallback to client method
-                self.weaviate_client.data_object.create(
-                    data_object=article_data,
-                    class_name="KnowledgeBaseArticle"
-                )
-                logger.info(f"🔄 مقاله '{article.title}' در Weaviate همگام‌سازی شد")
+                        logger.info(f"🔄 مقاله '{article.title}' با local vectorizer همگام‌سازی شد")
+                    except Exception as local_e:
+                        logger.error(f"❌ هر دو vectorizer شکست خوردند: OpenAI={str(e)}, Local={str(local_e)}")
+                        raise local_e
 
         except Exception as e:
             logger.error(f"❌ خطا در همگام‌سازی با Weaviate: {str(e)}")
@@ -608,6 +595,92 @@ class KnowledgeBaseRepository:
         except Exception as e:
             logger.error(f"❌ خطا در دریافت آمار: {str(e)}")
             return {}
+
+
+    # =============== MARKDOWN STRUCTURE EXTRACTION ===============
+
+    async def extract_markdown_structure(self, article_id: str) -> Dict[str, Any]:
+        """
+        استخراج ساختار درختی از محتوای Markdown برای پیمایش
+
+        Args:
+            article_id: شناسه مقاله
+
+        Returns:
+            ساختار درختی شامل هدرها و لینک‌ها
+        """
+        try:
+            article = await KnowledgeBaseArticle.get(article_id)
+            if not article or not article.content_markdown:
+                return {"error": "Article not found or no markdown content"}
+
+            import re
+
+            # استخراج هدرها (از # تا ######)
+            headers = []
+            lines = article.content_markdown.split('\n')
+
+            for i, line in enumerate(lines):
+                # پیدا کردن هدرها
+                header_match = re.match(r'^(#{1,6})\s+(.+)$', line.strip())
+                if header_match:
+                    level = len(header_match.group(1))  # تعداد # ها
+                    title = header_match.group(2).strip()
+
+                    # ایجاد anchor (برای لینک دادن)
+                    anchor = re.sub(r'[^\w\s-]', '', title.lower())  # حذف کاراکترهای خاص
+                    anchor = re.sub(r'[\s_-]+', '-', anchor).strip('-')  # تبدیل به kebab-case
+
+                    headers.append({
+                        "level": level,
+                        "title": title,
+                        "anchor": anchor,
+                        "line_number": i + 1
+                    })
+
+            return {
+                "article_id": str(article.id),
+                "article_title": article.title,
+                "headers": headers,
+                "total_headers": len(headers)
+            }
+
+        except Exception as e:
+            logger.error(f"❌ خطا در استخراج ساختار Markdown: {str(e)}")
+            return {"error": str(e)}
+
+    async def get_articles_with_structure(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        دریافت لیست مقالات با ساختار درختی آن‌ها
+
+        Args:
+            limit: حداکثر تعداد مقالات
+
+        Returns:
+            لیست مقالات با ساختار درختی
+        """
+        try:
+            articles = await self.get_articles(limit=limit)
+
+            result = []
+            for article in articles:
+                structure = await self.extract_markdown_structure(str(article.id))
+                if "error" not in structure:
+                    result.append({
+                        "article": {
+                            "id": str(article.id),
+                            "title": article.title,
+                            "summary": article.summary,
+                            "category": article.category.name if article.category else "عمومی"
+                        },
+                        "structure": structure
+                    })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ خطا در دریافت مقالات با ساختار: {str(e)}")
+            return []
 
 
 # Singleton instance

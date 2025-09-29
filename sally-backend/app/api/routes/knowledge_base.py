@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from pydantic import BaseModel
-from app.domain.entities_refactored import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility, ArticleCategory, ArticleTag, Customer
+from app.domain.entities import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility, ArticleCategory, ArticleTag, Customer
 from fastapi import HTTPException, status
 from app.api.dependencies import get_optional_user, get_current_user, get_current_customer
-from app.domain.entities_refactored import Role
+from app.domain.entities import Role
 
 router = APIRouter()
 
@@ -277,3 +277,45 @@ async def resolve_article_conflict(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resolving conflict: {str(e)}")
+
+
+@router.get("/articles/{article_id}/structure", tags=["Public Knowledge Base"])
+async def get_public_article_structure(
+    article_id: str
+):
+    """
+    استخراج ساختار درختی از محتوای Markdown مقاله عمومی برای پیمایش
+
+    Args:
+        article_id: شناسه مقاله
+
+    Returns:
+        ساختار درختی شامل هدرها و لینک‌ها
+    """
+    try:
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+
+        structure = await knowledge_base_repository.extract_markdown_structure(article_id)
+
+        if "error" in structure:
+            raise HTTPException(status_code=404, detail=structure["error"])
+
+        # بررسی اینکه مقاله عمومی است
+        from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility
+        article = await KnowledgeBaseArticle.get(article_id)
+        if not article or article.status != ArticleStatus.PUBLISHED or article.visibility != ArticleVisibility.PUBLIC:
+            raise HTTPException(status_code=404, detail="Article not found or not public")
+
+        return {
+            "success": True,
+            "structure": structure
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ خطا در دریافت ساختار مقاله عمومی {article_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"خطا در دریافت ساختار مقاله: {str(e)}"
+        )

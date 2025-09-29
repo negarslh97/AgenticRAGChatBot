@@ -13,7 +13,7 @@ from .config import DocsAsCodeConfig
 from .git_manager import GitManager
 from .markdown_processor import MarkdownProcessor, CategoryProcessor
 from .file_converter import FileConverter
-from app.domain.entities_refactored import KnowledgeBaseArticle, Category, ArticleStatus, ArticleVisibility
+from app.domain.entities import KnowledgeBaseArticle, Category, ArticleStatus, ArticleVisibility
 
 
 logger = logging.getLogger(__name__)

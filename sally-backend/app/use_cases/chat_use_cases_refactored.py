@@ -3,7 +3,7 @@ import uuid
 import logging
 from datetime import datetime
 
-from app.domain.entities_refactored import (
+from app.domain.entities import (
     Conversation, Message, Customer, Admin, GuestSession, UnansweredQuestion,
     MessageRating
 )

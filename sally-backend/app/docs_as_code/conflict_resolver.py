@@ -9,7 +9,7 @@ import hashlib
 from pathlib import Path
 
 from .markdown_processor import MarkdownProcessor
-from app.domain.entities_refactored import KnowledgeBaseArticle, Category
+from app.domain.entities import KnowledgeBaseArticle, Category
 from bson import ObjectId
 
 

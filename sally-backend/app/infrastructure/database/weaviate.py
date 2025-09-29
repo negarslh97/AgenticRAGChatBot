@@ -139,7 +139,7 @@ class WeaviateMongoDBConnector:
 
                     # دریافت تنظیمات vectorizer
                     vectorizer_config = class_info.get("vectorizerConfig", {})
-                    model = vectorizer_config.get("model", "text-embedding-ada-002")  # default
+                    model = vectorizer_config.get("model", settings.embedder_openai_base_url_loaded)  # default
                     provider = "OpenAI"
 
                     # بررسی ابعاد vector (از طریق بررسی یک object موجود یا استفاده از default)
@@ -177,6 +177,17 @@ class WeaviateMongoDBConnector:
         try:
             logger.info("🏗️ ایجاد schema های Weaviate...")
 
+            # تنظیم API key در vectorizer config
+            vectorizer_config = {}
+            embedder_api_key = settings.embedder_api_key_loaded
+            if embedder_api_key:
+                vectorizer_config = {
+                    "model": "text-embedding-ada-002",
+                    "modelVersion": "002",
+                    "type": "text",
+                    "baseURL": settings.embedder_openai_base_url_loaded
+                }
+
             # تعریف کلاس KnowledgeBaseArticle
             article_class = {
                 "class": "KnowledgeBaseArticle",
@@ -189,6 +200,7 @@ class WeaviateMongoDBConnector:
                     "efConstruction": 128,
                     "maxConnections": 64
                 },
+                "vectorizerConfig": vectorizer_config,
                 "properties": [
                     {
                         "name": "title",
@@ -255,6 +267,8 @@ class WeaviateMongoDBConnector:
             ticket_class = {
                 "class": "SupportTicket",
                 "description": "تیکت‌های پشتیبانی مشتری (بدون vectorization)",
+                # Explicitly disable vectorizer
+                "vectorizer": "none",
                 "vectorIndexType": "hnsw",
                 "vectorIndexConfig": {
                     "distance": "cosine",
@@ -331,6 +345,93 @@ class WeaviateMongoDBConnector:
                 else:
                     raise e
 
+            # تعریف کلاس KnowledgeBaseArticleLocal برای fallback محلی
+            local_article_class = {
+                "class": "KnowledgeBaseArticleLocal",
+                "description": "مقالات پایگاه دانش با vectorizer محلی (fallback)",
+                "vectorizer": "text2vec-ollama",
+                "vectorIndexType": "hnsw",
+                "vectorIndexConfig": {
+                    "distance": "cosine",
+                    "ef": -1,
+                    "efConstruction": 128,
+                    "maxConnections": 64
+                },
+                "vectorizerConfig": {
+                    "model": settings.ollama_embedding_model_loaded,
+                    "apiEndpoint": settings.ollama_url_loaded
+                },
+                "properties": [
+                    {
+                        "name": "title",
+                        "dataType": ["text"],
+                        "description": "عنوان مقاله",
+                        "indexInverted": True
+                    },
+                    {
+                        "name": "content",
+                        "dataType": ["text"],
+                        "description": "محتوای مقاله",
+                        "indexInverted": True
+                    },
+                    {
+                        "name": "summary",
+                        "dataType": ["text"],
+                        "description": "خلاصه مقاله",
+                        "indexInverted": True
+                    },
+                    {
+                        "name": "tags",
+                        "dataType": ["text[]"],
+                        "description": "تگ‌های مقاله",
+                        "indexInverted": True
+                    },
+                    {
+                        "name": "category",
+                        "dataType": ["text"],
+                        "description": "دسته‌بندی مقاله",
+                        "indexInverted": True
+                    },
+                    {
+                        "name": "visibility",
+                        "dataType": ["text"],
+                        "description": "سطح دسترسی مقاله",
+                        "indexInverted": True
+                    },
+                    {
+                        "name": "status",
+                        "dataType": ["text"],
+                        "description": "وضعیت مقاله",
+                        "indexInverted": True
+                    },
+                    {
+                        "name": "created_at",
+                        "dataType": ["date"],
+                        "description": "تاریخ ایجاد"
+                    },
+                    {
+                        "name": "updated_at",
+                        "dataType": ["date"],
+                        "description": "تاریخ بروزرسانی"
+                    },
+                    {
+                        "name": "article_id",
+                        "dataType": ["text"],
+                        "description": "شناسه مقاله در MongoDB",
+                        "indexInverted": True
+                    }
+                ]
+            }
+
+            try:
+                self.weaviate_client.schema.create_class(local_article_class)
+                logger.info("✅ کلاس KnowledgeBaseArticleLocal (fallback محلی) ایجاد شد")
+            except Exception as e:
+                if "already exists" in str(e):
+                    logger.info("ℹ️ کلاس KnowledgeBaseArticleLocal قبلاً ایجاد شده")
+                else:
+                    logger.warning(f"⚠️ کلاس KnowledgeBaseArticleLocal ایجاد نشد: {str(e)}")
+
             return True
 
         except Exception as e:
@@ -342,8 +443,8 @@ class WeaviateMongoDBConnector:
         try:
             logger.info("📚 شروع انتقال مقالات پایگاه دانش...")
 
-            from app.domain.entities_refactored import KnowledgeBaseArticle
-            from app.infrastructure.database_refactored import init_db
+            from app.domain.entities import KnowledgeBaseArticle
+            from app.infrastructure.database.mongodb import init_db
 
             # اطمینان از initialize شدن database
             await init_db()
@@ -381,12 +482,22 @@ class WeaviateMongoDBConnector:
                     if article.updated_at:
                         updated_at_rfc3339 = article.updated_at.isoformat() + "Z"
 
+                    # Handle category - extract name if it's an ArticleCategory object
+                    category_name = "عمومی"
+                    if article.category:
+                        if hasattr(article.category, 'name'):
+                            category_name = article.category.name
+                        elif isinstance(article.category, str):
+                            category_name = article.category
+                        else:
+                            category_name = str(article.category)
+
                     article_data = {
                         "title": article.title,
-                        "content": article.content_html or article.content_markdown or "",
+                        "content": article.content_markdown or article.content_html or "",  # ✅ اولویت به Markdown
                         "summary": article.summary or "",
                         "tags": tags_list,
-                        "category": article.category or "عمومی",
+                        "category": category_name,
                         "visibility": article.visibility.value if hasattr(article.visibility, 'value') else str(article.visibility),
                         "status": article.status.value if hasattr(article.status, 'value') else str(article.status),
                         "created_at": created_at_rfc3339,
@@ -394,27 +505,26 @@ class WeaviateMongoDBConnector:
                         "article_id": str(article.id)
                     }
 
-                    # اضافه کردن به Weaviate با تنظیم header
-                    import requests
-                    embedder_api_key = settings.embedder_api_key_loaded
-
-                    headers = {}
-                    if embedder_api_key:
-                        headers['X-OpenAI-Api-Key'] = embedder_api_key
-
-                    # استفاده از requests برای ارسال مستقیم با header
-                    weaviate_url = settings.weaviate_url_loaded or "http://localhost:8080"
-                    response = requests.post(
-                        f"{weaviate_url}/v1/objects",
-                        json={
-                            "class": "KnowledgeBaseArticle",
-                            "properties": article_data
-                        },
-                        headers=headers
-                    )
-
-                    if response.status_code not in [200, 201]:
-                        raise Exception(f"HTTP {response.status_code}: {response.text}")
+                    # اضافه کردن به Weaviate - استفاده از vectorizer config
+                    try:
+                        # ابتدا سعی می‌کنیم با OpenAI vectorizer
+                        self.weaviate_client.data_object.create(
+                            data_object=article_data,
+                            class_name="KnowledgeBaseArticle"
+                        )
+                        logger.info(f"✅ مقاله '{article.title}' با OpenAI vectorizer ذخیره شد")
+                    except Exception as e:
+                        logger.warning(f"⚠️ OpenAI vectorizer شکست خورد، استفاده از fallback محلی: {str(e)}")
+                        try:
+                            # استفاده از fallback محلی
+                            self.weaviate_client.data_object.create(
+                                data_object=article_data,
+                                class_name="KnowledgeBaseArticleLocal"
+                            )
+                            logger.info(f"✅ مقاله '{article.title}' با local vectorizer ذخیره شد")
+                        except Exception as local_e:
+                            logger.error(f"❌ هر دو vectorizer شکست خوردند: OpenAI={str(e)}, Local={str(local_e)}")
+                            raise local_e
 
                     migrated_count += 1
 
@@ -440,8 +550,8 @@ class WeaviateMongoDBConnector:
         try:
             logger.info("🎫 شروع انتقال تیکت‌ها...")
 
-            from app.domain.entities_refactored import Ticket
-            from app.infrastructure.database_refactored import init_db
+            from app.domain.entities import Ticket
+            from app.infrastructure.database.mongodb import init_db
 
             # اطمینان از initialize شدن database
             await init_db()
@@ -600,6 +710,193 @@ class WeaviateMongoDBConnector:
 
         return result
 
+    async def display_article_content(self, article_id: str = None, limit: int = 5) -> bool:
+        """نمایش محتوای مقالات ذخیره شده"""
+        try:
+            logger.info("📖 شروع نمایش محتوای مقالات...")
+
+            from app.domain.entities import KnowledgeBaseArticle
+            from app.infrastructure.database.mongodb import init_db
+
+            # اطمینان از initialize شدن database
+            await init_db()
+
+            if article_id:
+                # نمایش محتوای یک مقاله خاص
+                from bson import ObjectId
+                try:
+                    article = await KnowledgeBaseArticle.get(ObjectId(article_id))
+                except:
+                    # اگر ObjectId نامعتبر بود، سعی کنیم با string پیدا کنیم
+                    article = await KnowledgeBaseArticle.find_one(KnowledgeBaseArticle.id == article_id)
+                if not article:
+                    logger.error(f"❌ مقاله با شناسه {article_id} یافت نشد")
+                    return False
+
+                print(f"\n{'='*80}")
+                print(f"📄 عنوان: {article.title}")
+                print(f"🆔 شناسه: {article.id}")
+                print(f"📊 وضعیت: {article.status.value}")
+                print(f"👁️  سطح دسترسی: {article.visibility.value}")
+                print(f"📅 تاریخ ایجاد: {article.created_at}")
+                print(f"📅 تاریخ بروزرسانی: {article.updated_at}")
+                print(f"📝 نویسنده: {article.author_id}")
+                print(f"📋 خلاصه: {article.summary or 'بدون خلاصه'}")
+                print(f"🏷️  تگ‌ها: {[tag.name for tag in article.tags] if article.tags else 'بدون تگ'}")
+
+                print(f"\n{'📝 محتوای Markdown:'}")
+                print("-" * 50)
+                # نمایش بخشی از محتوای Markdown
+                content_preview = article.content_markdown[:500] + "..." if len(article.content_markdown) > 500 else article.content_markdown
+                print(content_preview)
+
+                print(f"\n{'🌐 محتوای HTML:'}")
+                print("-" * 50)
+                # نمایش بخشی از محتوای HTML
+                html_preview = article.content_html[:500] + "..." if len(article.content_html) > 500 else article.content_html
+                print(html_preview)
+
+                print(f"{'='*80}")
+
+            else:
+                # نمایش لیست مقالات با اطلاعات خلاصه
+                articles = await KnowledgeBaseArticle.find_all().limit(limit).to_list()
+                logger.info(f"📊 تعداد مقالات یافت شده: {len(articles)}")
+
+                if not articles:
+                    logger.info("⚠️ هیچ مقاله‌ای یافت نشد")
+                    return True
+
+                print(f"\n{'📚 لیست مقالات (آخرین ' + str(limit) + ' مقاله):'}")
+                print('='*100)
+                print('🆔 شناسه'.ljust(25) + '📄 عنوان'.ljust(40) + '📊 وضعیت'.ljust(12) + '👁️ دسترسی'.ljust(10) + '📅 ایجاد'.ljust(12))
+                print('-'*100)
+
+                for i, article in enumerate(articles, 1):
+                    status = article.status.value[:10] if hasattr(article.status, 'value') else str(article.status)[:10]
+                    visibility = article.visibility.value[:8] if hasattr(article.visibility, 'value') else str(article.visibility)[:8]
+                    created_date = article.created_at.strftime("%Y-%m-%d") if article.created_at else "نامشخص"
+
+                    print(f"{str(i):<3} {str(article.id):<25} {article.title[:38]:<40} {status:<12} {visibility:<10} {created_date:<12}")
+
+                print('='*100)
+
+                # آمار کلی
+                total_articles = await KnowledgeBaseArticle.find_all().count()
+                published_articles = await KnowledgeBaseArticle.find(
+                    KnowledgeBaseArticle.status == "published"
+                ).count()
+
+                print("\n📊 آمار کلی:")
+                print(f"   • تعداد کل مقالات: {total_articles}")
+                print(f"   • تعداد مقالات منتشر شده: {published_articles}")
+                print(f"   • تعداد مقالات پیش‌نویس: {total_articles - published_articles}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ خطا در نمایش محتوای مقالات: {str(e)}")
+            import traceback
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            return False
+
+    def display_weaviate_objects(self, class_name: str = "KnowledgeBaseArticle", limit: int = 5) -> bool:
+        """نمایش اشیاء ذخیره شده در Weaviate"""
+        try:
+            logger.info(f"🔍 نمایش اشیاء کلاس {class_name} در Weaviate...")
+
+            if not self.weaviate_client:
+                if not self.connect_weaviate():
+                    logger.error("❌ اتصال به Weaviate ناموفق بود")
+                    return False
+
+            # دریافت اشیاء از Weaviate
+            query = self.weaviate_client.query.get(class_name, ["title", "content", "status", "article_id"]).with_limit(limit).do()
+            objects = query.get('data', {}).get('Get', {}).get(class_name, [])
+
+            if not objects:
+                logger.info(f"⚠️ هیچ شیئی از کلاس {class_name} یافت نشد")
+                return True
+
+            print(f"\n🔍 اشیاء ذخیره شده در Weaviate (کلاس: {class_name}):")
+            print('='*120)
+            print('🆔 Weaviate'.ljust(25) + '🆔 MongoDB'.ljust(25) + '📄 عنوان'.ljust(30) + '📊 وضعیت'.ljust(10))
+            print('-'*120)
+
+            for obj in objects:
+                weaviate_id = obj.get('_additional', {}).get('id', 'نامشخص')
+                mongo_id = obj.get('article_id', 'نامشخص')
+                title = obj.get('title', 'بدون عنوان')[:28]
+                status = obj.get('status', 'نامشخص')[:8]
+
+                print(f"{weaviate_id[:23]:<25} {mongo_id[:23]:<25} {title:<30} {status:<10}")
+
+            print('='*120)
+
+            # نمایش آمار
+            try:
+                count_result = self.weaviate_client.query.aggregate(class_name).with_meta_count().do()
+                total_count = count_result["data"]["Aggregate"][class_name][0]["meta"]["count"]
+                print(f"📊 تعداد کل اشیاء در Weaviate: {total_count}")
+            except Exception as e:
+                logger.warning(f"⚠️ نمی‌توان آمار را دریافت کرد: {str(e)}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ خطا در نمایش اشیاء Weaviate: {str(e)}")
+            return False
+
+    def display_file_uploads(self) -> bool:
+        """نمایش فایل‌های آپلود شده"""
+        try:
+            logger.info("📁 نمایش فایل‌های آپلود شده...")
+
+            uploads_dir = Path(__file__).parent.parent.parent / "uploads"
+            if not uploads_dir.exists():
+                logger.warning("⚠️ پوشه uploads یافت نشد")
+                return False
+
+            files = list(uploads_dir.glob("*"))  # همه فایل‌ها را نمایش می‌دهیم
+
+            if not files:
+                logger.info("⚠️ هیچ فایلی یافت نشد")
+                return True
+
+            print(f"\n📁 فایل‌های آپلود شده:")
+            print('='*80)
+            print('📄 نام فایل'.ljust(40) + '📊 اندازه (بایت)'.ljust(15) + '📅 تاریخ ایجاد'.ljust(20))
+            print('-'*80)
+
+            for file_path in files:
+                file_size = file_path.stat().st_size
+                created_time = file_path.stat().st_mtime
+                from datetime import datetime
+                created_date = datetime.fromtimestamp(created_time).strftime("%Y-%m-%d %H:%M")
+
+                print(f"{file_path.name:<40} {file_size:<15} {created_date:<20}")
+
+            print('='*80)
+            print(f"📊 تعداد کل فایل‌ها: {len(files)}")
+
+            # نمایش محتوای یک فایل نمونه
+            if files:
+                print(f"\n📝 محتوای فایل نمونه:")
+                print('-'*50)
+                try:
+                    with open(files[0], 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        preview = content[:300] + "..." if len(content) > 300 else content
+                    print(preview)
+                except Exception as e:
+                    print(f"⚠️ خطا در خواندن فایل: {str(e)}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ خطا در نمایش فایل‌های آپلود شده: {str(e)}")
+            return False
+
     async def setup_and_verify(self) -> bool:
         """راه‌اندازی کامل و بررسی"""
         logger.info("🚀 شروع راه‌اندازی سیستم...")
@@ -668,8 +965,8 @@ class WeaviateMongoDBConnector:
         try:
             logger.info("🗑️ شروع حذف همه مقالات از MongoDB...")
             
-            from app.domain.entities_refactored import KnowledgeBaseArticle
-            from app.infrastructure.database_refactored import init_db
+            from app.domain.entities import KnowledgeBaseArticle
+            from app.infrastructure.database.mongodb import init_db
             
             # اطمینان از initialize شدن database
             await init_db()
@@ -706,8 +1003,8 @@ class WeaviateMongoDBConnector:
         try:
             logger.info(f"🗑️ شروع حذف {len(article_ids)} مقاله از MongoDB...")
             
-            from app.domain.entities_refactored import KnowledgeBaseArticle
-            from app.infrastructure.database_refactored import init_db
+            from app.domain.entities import KnowledgeBaseArticle
+            from app.infrastructure.database.mongodb import init_db
             
             # اطمینان از initialize شدن database
             await init_db()
@@ -904,6 +1201,10 @@ async def main():
     parser.add_argument("--migrate", action="store_true", help="انتقال داده‌ها از MongoDB به Weaviate")
     parser.add_argument("--verify", action="store_true", help="بررسی وضعیت سیستم")
     parser.add_argument("--test-connection", action="store_true", help="تست اتصال به هر دو دیتابیس")
+    parser.add_argument("--display-articles", action="store_true", help="نمایش محتوای مقالات ذخیره شده")
+    parser.add_argument("--display-article", metavar="ARTICLE_ID", help="نمایش محتوای یک مقاله خاص")
+    parser.add_argument("--display-weaviate", metavar="CLASS_NAME", nargs='?', const="KnowledgeBaseArticle", help="نمایش اشیاء ذخیره شده در Weaviate")
+    parser.add_argument("--display-files", action="store_true", help="نمایش فایل‌های آپلود شده")
     parser.add_argument("--delete-all", action="store_true", help="حذف همه مقالات از هر دو دیتابیس")
     parser.add_argument("--delete-by-ids", nargs='+', help="حذف مقالات خاص بر اساس شناسه‌ها")
     parser.add_argument("--delete-from-mongodb", action="store_true", help="حذف همه مقالات فقط از MongoDB")
@@ -911,7 +1212,8 @@ async def main():
 
     args = parser.parse_args()
 
-    if not any([args.setup, args.migrate, args.verify, args.test_connection, 
+    if not any([args.setup, args.migrate, args.verify, args.test_connection,
+                args.display_articles, args.display_article, args.display_weaviate, args.display_files,
                 args.delete_all, args.delete_by_ids, args.delete_from_mongodb, args.delete_from_weaviate]):
         parser.print_help()
         return
@@ -996,6 +1298,38 @@ async def main():
                 logger.info("🎉 همه مقالات از Weaviate حذف شدند!")
             else:
                 logger.error("💥 حذف مقالات از Weaviate ناموفق بود")
+
+        elif args.display_articles:
+            logger.info("📖 نمایش محتوای مقالات...")
+            success = await connector.display_article_content(limit=10)
+            if success:
+                logger.info("✅ نمایش مقالات تکمیل شد!")
+            else:
+                logger.error("💥 نمایش مقالات ناموفق بود")
+
+        elif args.display_article:
+            logger.info(f"📖 نمایش محتوای مقاله {args.display_article}...")
+            success = await connector.display_article_content(article_id=args.display_article)
+            if success:
+                logger.info("✅ نمایش مقاله تکمیل شد!")
+            else:
+                logger.error("💥 نمایش مقاله ناموفق بود")
+
+        elif args.display_weaviate:
+            logger.info(f"🔍 نمایش اشیاء Weaviate (کلاس: {args.display_weaviate})...")
+            success = connector.display_weaviate_objects(class_name=args.display_weaviate, limit=10)
+            if success:
+                logger.info("✅ نمایش اشیاء Weaviate تکمیل شد!")
+            else:
+                logger.error("💥 نمایش اشیاء Weaviate ناموفق بود")
+
+        elif args.display_files:
+            logger.info("📁 نمایش فایل‌های آپلود شده...")
+            success = connector.display_file_uploads()
+            if success:
+                logger.info("✅ نمایش فایل‌ها تکمیل شد!")
+            else:
+                logger.error("💥 نمایش فایل‌ها ناموفق بود")
 
     finally:
         connector.cleanup()

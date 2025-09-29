@@ -3,7 +3,7 @@ Tests for knowledge base functionality.
 """
 import pytest
 from httpx import AsyncClient
-from app.domain.entities_refactored import ArticleStatus, ArticleVisibility
+from app.domain.entities import ArticleStatus, ArticleVisibility
 
 
 class TestPublicKnowledgeBaseAccess:

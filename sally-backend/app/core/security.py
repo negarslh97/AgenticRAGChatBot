@@ -35,11 +35,11 @@ def verify_token(token: str) -> dict:
     """Verify and decode JWT token."""
     import logging
     logger = logging.getLogger(__name__)
-    
+
     logger.info(f"==== JWT TOKEN VERIFICATION START ====")
-    logger.info(f"Token received: {token[:20]}...")
+    logger.info(f"Token received: {token[:8]}...")
     logger.info(f"Using algorithm: {settings.jwt_algorithm}")
-    
+
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
         logger.info(f"JWT verification successful")

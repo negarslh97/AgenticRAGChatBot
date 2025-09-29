@@ -6,7 +6,7 @@ from bson import ObjectId
 from typing import Union
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.config import settings
-from app.domain.entities_refactored import Admin, Customer, Role, ActivityLog
+from app.domain.entities import Admin, Customer, Role, ActivityLog
 from app.core.permissions import get_current_admin, get_current_customer, get_optional_auth_header
 from app.core.permissions import get_admin_from_token, get_current_customer_from_token, Permission
 import logging

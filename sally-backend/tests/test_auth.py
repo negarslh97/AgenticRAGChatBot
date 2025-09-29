@@ -64,7 +64,7 @@ class TestAdminRegistration:
     @pytest.mark.asyncio
     async def test_admin_registration_by_super_admin(self, client: AsyncClient, faker, super_admin_token, auth_headers):
         """Test admin registration by super admin succeeds."""
-        from app.domain.entities_refactored import Role
+        from app.domain.entities import Role
 
         # Get Admin role
         admin_role = await Role.find_one({"name": "Admin"})
@@ -90,7 +90,7 @@ class TestAdminRegistration:
     @pytest.mark.asyncio
     async def test_admin_registration_by_regular_admin_fails(self, client: AsyncClient, faker, admin_token, auth_headers):
         """Test admin registration by regular admin fails."""
-        from app.domain.entities_refactored import Role
+        from app.domain.entities import Role
 
         # Get Admin role
         admin_role = await Role.find_one({"name": "Admin"})
@@ -112,7 +112,7 @@ class TestAdminRegistration:
     @pytest.mark.asyncio
     async def test_admin_registration_duplicate_email(self, client: AsyncClient, faker, super_admin_token, auth_headers):
         """Test admin registration fails with duplicate email."""
-        from app.domain.entities_refactored import Role
+        from app.domain.entities import Role
 
         # Get Admin role
         admin_role = await Role.find_one({"name": "Admin"})

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from bson import ObjectId
 from fastapi.security import HTTPAuthorizationCredentials
-from app.domain.entities_refactored import (
+from app.domain.entities import (
     Ticket, TicketReply, TicketStatus, Customer, Admin, ActivityLog
 )
 from app.core.permissions import get_current_customer, get_current_admin, get_current_admin_with_permission
