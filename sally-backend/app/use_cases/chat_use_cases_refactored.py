@@ -1,6 +1,7 @@
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, AsyncGenerator
 import uuid
 import logging
+import asyncio
 from datetime import datetime
 
 from app.domain.entities import (
@@ -9,8 +10,9 @@ from app.domain.entities import (
 )
 from app.infrastructure.rag_service import get_rag_service
 from app.core.config import settings
+from app.core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Debug logging for ChatPage RTL issues
 logger.info("=== CHATPAGE RTL DEBUG LOG ===")
@@ -461,6 +463,225 @@ class ChatUseCases:
                 "message_id": str(ai_message.id),
                 "is_failed": True,
                 "failure_reason": str(e)
+            }
+    
+    @staticmethod
+    async def send_message_stream(
+        content: str,
+        user: Optional[Union[Customer, Admin]] = None,
+        user_type: str = "guest",
+        conversation_id: Optional[str] = None,
+        guest_session_id: Optional[str] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Process a chat message and stream AI response in real-time.
+        
+        Yields:
+            Dict containing streaming events with types: 'init', 'chunk', 'sources', 'done', 'error'
+        """
+        
+        logger.info(f"🌊 Starting streaming chat for {user_type}")
+        
+        # Create or get conversation (same as send_message)
+        if conversation_id:
+            try:
+                from bson import ObjectId
+                conversation = await Conversation.get(ObjectId(conversation_id))
+                if not conversation:
+                    yield {"type": "error", "message": "Conversation not found"}
+                    return
+            except Exception as e:
+                yield {"type": "error", "message": f"Error retrieving conversation: {str(e)}"}
+                return
+        else:
+            # Create new conversation
+            if user and user_type in ["Customer", "Admin"]:
+                conversation = Conversation(
+                    customer_id=str(user.id) if user_type == "Customer" else None,
+                    guest_session_id=None,
+                    title=content[:50] + "..." if len(content) > 50 else content
+                )
+                try:
+                    await conversation.insert()
+                    logger.info(f"✅ Created conversation: {conversation.id}")
+                except Exception as e:
+                    yield {"type": "error", "message": f"Error creating conversation: {str(e)}"}
+                    return
+            elif guest_session_id:
+                # Check for existing guest conversation
+                existing_conversation = await Conversation.find_one(
+                    Conversation.guest_session_id == guest_session_id
+                )
+                if existing_conversation:
+                    conversation = existing_conversation
+                else:
+                    conversation = Conversation(
+                        customer_id=None,
+                        guest_session_id=guest_session_id,
+                        title=content[:50] + "..." if len(content) > 50 else content
+                    )
+                    await conversation.insert()
+            else:
+                yield {"type": "error", "message": "No user or guest session provided"}
+                return
+        
+        # Determine sender type
+        if user and user_type == "Customer":
+            sender_type = "Customer"
+            sender_id = str(user.id)
+        elif user and user_type == "Admin":
+            admin_doc = await Admin.get(user.id)
+            if admin_doc and admin_doc.role_name == "SuperAdmin":
+                sender_type = "SuperAdmin"
+            else:
+                sender_type = "Admin"
+            sender_id = str(user.id)
+        else:
+            sender_type = "Guest"
+            sender_id = None
+        
+        # Save user message
+        user_message = Message(
+            conversation_id=str(conversation.id),
+            content=content,
+            sender_type=sender_type,
+            sender_id=sender_id,
+            metadata={
+                "user_type": user_type,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+        await user_message.insert()
+        logger.info(f"💾 Saved user message: {user_message.id}")
+        
+        # Send initial event
+        yield {
+            "type": "init",
+            "conversation_id": str(conversation.id),
+            "message_id": str(user_message.id)
+        }
+        
+        # Get RAG service
+        rag_service = get_rag_service(user)
+        
+        # Prepare context
+        context = {}
+        if user:
+            context = {
+                "user_id": str(user.id),
+                "user_type": user_type,
+                "conversation_id": str(conversation.id)
+            }
+        
+        # Stream AI response
+        full_response = ""
+        sources = []
+        confidence = 0.5
+
+        try:
+            # Retrieve relevant documents first
+            logger.info("📚 Retrieving documents...")
+            relevant_docs = await rag_service.retrieve_relevant_documents(
+                content,
+                is_public_only=(not user)
+            )
+
+            # DEBUG: چک کردن منابع پیدا شده
+            logger.info(f"🔍 DEBUG: Found {len(relevant_docs)} documents from Weaviate")
+            for i, doc in enumerate(relevant_docs[:3]):
+                logger.info(f"   Doc {i+1}: ID={doc.get('id')}, Title='{doc.get('title', '')[:50]}...'")
+            
+            if relevant_docs:
+                sources = rag_service._format_sources_markdown(relevant_docs[:3])
+                confidence = 0.9
+                
+                # Send sources event
+                yield {
+                    "type": "sources",
+                    "sources": sources,
+                    "confidence": confidence
+                }
+                
+                # Build context
+                context_text = "\n\n".join([
+                    f"Document: {doc['title']}\nContent: {doc['content']}"
+                    for doc in relevant_docs[:3]
+                ])
+                
+                # Stream RAG response (chunks are already split word-by-word in langchain_utils)
+                logger.info("🤖 Streaming STRICT RAG response...")
+                from app.infrastructure.langchain_utils import langchain_service
+                
+                async for chunk in langchain_service.generate_rag_response_stream(content, context_text):
+                    full_response += chunk
+                    # chunks قبلاً در langchain_utils به کلمات تقسیم شده‌اند
+                    yield {
+                        "type": "chunk",
+                        "content": chunk
+                    }
+            else:
+                # STRICT MODE: اگر سندی نیست، از LLM استفاده نمی‌کنیم
+                logger.warning("❌ No documents found - STRICT MODE: Not using general LLM knowledge")
+                full_response = "متأسفانه اطلاعات مربوط به سوال شما در پایگاه دانش موجود نیست. لطفاً سوال خود را واضح‌تر بیان کنید یا با تیم پشتیبانی تماس بگیرید."
+                
+                yield {
+                    "type": "chunk",
+                    "content": full_response
+                }
+                
+                confidence = 0.0
+            
+            # Save AI message
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=full_response,
+                sender_type="ai",
+                sender_id=None,
+                is_failed=False,
+                metadata={
+                    "sources": sources,
+                    "confidence": confidence,
+                    "rag_type": "agentic" if user else "simple",
+                    "streaming": True,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+            await ai_message.insert()
+            
+            # Send completion event
+            yield {
+                "type": "complete",
+                "message_id": str(ai_message.id),
+                "full_response": full_response,
+                "confidence": confidence
+            }
+            
+            logger.info(f"✅ Streaming completed successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Streaming error: {e}", exc_info=True)
+            
+            # Save failed AI message
+            error_message = f"خطا در تولید پاسخ: {str(e)}"
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=error_message,
+                sender_type="ai",
+                sender_id=None,
+                is_failed=True,
+                failure_reason=str(e),
+                metadata={
+                    "streaming": True,
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+            await ai_message.insert()
+            
+            yield {
+                "type": "error",
+                "message": str(e),
+                "message_id": str(ai_message.id)
             }
     
     @staticmethod

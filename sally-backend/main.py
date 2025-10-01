@@ -133,6 +133,25 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*general_plain_validator_function.*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*with_info_plain_validator_function.*")
 
+# Initialize advanced logging system
+from app.core.logging_config import setup_logging, get_logger
+setup_logging(
+    app_name="sallybot",
+    log_level="INFO",
+    log_dir="logs",
+    enable_json=False,  # Set to True for production
+    enable_console=True,
+    enable_file=True
+)
+logger = get_logger(__name__)
+
+# Import logging middleware
+from app.api.middleware.logging_middleware import (
+    RequestLoggingMiddleware,
+    PerformanceMonitoringMiddleware,
+    ErrorLoggingMiddleware
+)
+
 # فایل‌های جدیدی که باید بسازید یا جایگزین کنید
 from app.api.routes.auth_refactored import router as auth_router
 from app.api.routes.chat_refactored import router as chat_router
@@ -142,10 +161,6 @@ from app.api.routes.admin_refactored import router as admin_router
 from app.api.routes.knowledge_base import router as kb_router
 from app.api.routes.super_admin_knowledge_base import router as admin_kb_router
 from app.api.routes.upload import router as upload_router
-
-# تنظیمات لاگ‌گیری برای نمایش بهتر اطلاعات
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Sally Chat Bot API",
@@ -161,6 +176,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add logging and monitoring middleware
+app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(PerformanceMonitoringMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
+logger.info("🚀 Middleware stack configured")
+logger.info(f"📊 Logging to: logs/")
+logger.info(f"🔧 Environment: {'Production' if not settings.debug else 'Development'}")
 
 # Include routers with consistent prefixes based on RBAC permissions
 

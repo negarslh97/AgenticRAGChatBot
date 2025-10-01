@@ -1,4 +1,5 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from typing import Optional, List, Union
 from pydantic import BaseModel, ConfigDict
 from bson import ObjectId
@@ -6,13 +7,21 @@ from app.domain.entities import (
     Customer, Admin, Conversation, Message, GuestSession, UnansweredQuestion,
     MessageRating
 )
-from app.core.permissions import get_current_customer, get_optional_customer, get_optional_admin
+from app.core.permissions import get_current_customer, get_optional_customer, get_optional_admin, get_current_admin
 from app.use_cases.chat_use_cases_refactored import ChatUseCases
 import json
 from datetime import datetime
 import logging
+import asyncio
 
-logger = logging.getLogger(__name__)
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# Wrapper dependency for async get_current_admin
+async def get_admin_dependency() -> Admin:
+    """Wrapper dependency for get_current_admin"""
+    return await get_current_admin()
 
 router = APIRouter()
 
@@ -350,6 +359,205 @@ async def get_conversation_messages(
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         logger.error(f"Unexpected error in chat API: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/create-sample-articles")
+async def create_sample_articles(
+    current_admin: Admin = Depends(get_admin_dependency)
+):
+    """Create sample articles for testing RAG functionality"""
+    try:
+        from app.infrastructure.database.mongodb import init_db, get_mongo_client
+        from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility
+
+        if get_mongo_client() is None:
+            await init_db()
+
+        # Check existing articles
+        existing = await KnowledgeBaseArticle.find().to_list()
+
+        if existing:
+            return {
+                "message": f"Already have {len(existing)} articles in MongoDB",
+                "articles": [{"id": str(a.id), "title": a.title} for a in existing]
+            }
+
+        # Create sample articles
+        sample_articles = [
+            {
+                "title": "Database Design",
+                "content_markdown": """# Database Design
+
+Database design is one of the most important steps in software development.
+
+## Design Stages
+
+1. **Requirements Analysis** - Identify entities and relationships
+2. **Conceptual Modeling** - Design ERD
+3. **Logical Modeling** - Convert to tables
+4. **Physical Modeling** - Implement in DBMS
+
+## Important Notes
+
+- Use appropriate foreign keys
+- Define proper constraints
+- Optimize for performance""",
+                "summary": "Complete guide to database design including analysis, modeling and implementation",
+                "status": ArticleStatus.PUBLISHED,
+                "visibility": ArticleVisibility.PUBLIC
+            },
+            {
+                "title": "Web Development",
+                "content_markdown": """# Web Development
+
+Web development includes both frontend and backend design.
+
+## Main Technologies
+
+### Frontend
+- HTML/CSS/JavaScript
+- React, Vue, Angular
+- Responsive Design
+
+### Backend
+- Node.js, Python, PHP
+- RESTful APIs
+- Database Management""",
+                "summary": "Introduction to web development technologies including frontend and backend",
+                "status": ArticleStatus.PUBLISHED,
+                "visibility": ArticleVisibility.PUBLIC
+            },
+            {
+                "title": "Machine Learning with Python",
+                "content_markdown": """# Machine Learning with Python
+
+Python is the best language for machine learning.
+
+## Important Libraries
+
+- **Scikit-learn** - Basic ML tools
+- **TensorFlow** - Deep neural networks
+- **PyTorch** - Research and production
+- **Pandas** - Data analysis
+- **NumPy** - Numerical computations""",
+                "summary": "Guide to machine learning with Python and introduction to important libraries",
+                "status": ArticleStatus.PUBLISHED,
+                "visibility": ArticleVisibility.PUBLIC
+            }
+        ]
+
+        created_articles = []
+        for article_data in sample_articles:
+            article = KnowledgeBaseArticle(
+                title=article_data["title"],
+                content_markdown=article_data["content_markdown"],
+                content_html=f"<h1>{article_data['title']}</h1><p>{article_data['content_markdown'].replace('#', '').replace('##', '')}</p>",
+                summary=article_data["summary"],
+                status=article_data["status"],
+                visibility=article_data["visibility"],
+                author_id=str(current_admin.id),
+            )
+
+            await article.insert()
+            created_articles.append({
+                "id": str(article.id),
+                "title": article.title
+            })
+
+        return {
+            "message": f"Created {len(created_articles)} sample articles",
+            "articles": created_articles
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating sample articles: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/message/stream")
+async def send_message_stream(
+    request: Request,
+    message: ChatMessage,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """
+    Send a chat message and get AI response as a stream (Server-Sent Events).
+    این endpoint پاسخ را به صورت تدریجی و لحظه‌ای ارسال می‌کند.
+    """
+    
+    # Determine user type
+    current_user = current_customer or current_admin
+    user_type = "Customer" if current_customer else ("Admin" if current_admin else "guest")
+    
+    try:
+        logger.info(
+            f"🌊 Streaming chat message received",
+            extra={
+                'extra_data': {
+                    'user_type': user_type,
+                    'content_length': len(message.content),
+                    'conversation_id': message.conversation_id
+                }
+            }
+        )
+        
+        # Validate guest session ID for guests
+        if not current_user and not message.guest_session_id:
+            raise HTTPException(status_code=400, detail="guest_session_id is required for guest users")
+        
+        async def generate_stream():
+            """Generator function for streaming response"""
+            try:
+                # استفاده از streaming use case
+                chunk_count = 0
+                async for event_data in ChatUseCases.send_message_stream(
+                    content=message.content,
+                    user=current_user,
+                    user_type=user_type,
+                    conversation_id=message.conversation_id,
+                    guest_session_id=message.guest_session_id
+                ):
+                    chunk_count += 1
+                    # 🔥 DEBUG: Log each chunk
+                    if event_data.get('type') == 'chunk':
+                        logger.info(f"📤 Sending chunk #{chunk_count}: {len(event_data.get('content', ''))} chars")
+                    
+                    # ارسال داده به فرمت Server-Sent Events (SSE)
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    # Force flush به client
+                    await asyncio.sleep(0.01)  # کمی تاخیر برای اطمینان از flush شدن
+                
+                logger.info(f"✅ Stream completed: {chunk_count} total events sent")
+                # ارسال پیام پایان
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Streaming error: {e}", exc_info=True)
+                error_data = {
+                    'type': 'error',
+                    'message': str(e)
+                }
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+        
+        # Return streaming response با SSE headers
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # برای nginx
+            }
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in streaming: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

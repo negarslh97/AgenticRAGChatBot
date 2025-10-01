@@ -36,6 +36,13 @@ interface Message {
     model_name?: string;
     provider?: string;
     confidence?: number;
+    sources?: Array<{
+      id: string;
+      title: string;
+      score: number;
+      category?: string;
+      tags?: string[];
+    }>;
     token_usage?: {
       prompt_tokens?: number;
       completion_tokens?: number;
@@ -56,6 +63,21 @@ const Chat: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Helper: Dedupe sources by ID (backend should already do this, but double-check)
+  const dedupeSourcesById = (sources?: any[]) => {
+    if (!sources) return [] as any[];
+    const seen = new Set<string>();
+    const unique: any[] = [];
+    for (const s of sources) {
+      const id = s?.id?.toString?.() || '';
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        unique.push(s);
+      }
+    }
+    return unique;
+  };
 
   // 1. Fetch conversation list on mount
   useEffect(() => {
@@ -114,7 +136,7 @@ const Chat: React.FC = () => {
   };
 
 
-  // 5. Refactored "Send Message" handler
+  // 5. Streaming "Send Message" handler
   const handleSendMessage = async () => {
     if (!newMessage.trim() || isLoading) return;
 
@@ -147,45 +169,109 @@ const Chat: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const response = await chatService.sendMessage(
-        newMessage,
-        selectedConversation?.id === 'new-chat' ? undefined : selectedConversation?.id || undefined
-      );
-      
-      const assistantMessage: Message = {
-        id: response.message_id,
-        content: response.message,
-        role: 'assistant',
-        timestamp: new Date(),
-      };
+      // Add a streaming assistant placeholder
+      const assistantTempId = `ai-temp-${Date.now()}`;
+      const addAssistantPlaceholder = () => setSelectedConversation(prev => ({
+        ...prev!,
+        messages: [...(prev?.messages || []), {
+          id: assistantTempId,
+          content: '',
+          role: 'assistant',
+          timestamp: new Date(),
+          metadata: { sources: [] }
+        } as Message]
+      } as Conversation));
 
-      // If it was a new chat, update the conversation list and the selected conversation
-      if (!selectedConversation || selectedConversation.id === 'new-chat') {
-        const newConvFromServer: ApiConversation = {
-          id: response.conversation_id,
-          title: newMessage.slice(0, 30),
-          tags: [],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        setConversations(prev => [newConvFromServer, ...prev]);
-        setSelectedConversation({
-            ...newConvFromServer,
-            messages: [optimisticUserMessage, assistantMessage]
-        });
-      } 
-      else {
-        // Otherwise, just add the new message
-        setSelectedConversation(prev => ({
-          ...prev!,
-          messages: [...prev!.messages, assistantMessage],
-        }));
-      }
+      addAssistantPlaceholder();
+
+      const currentConvId = selectedConversation?.id === 'new-chat' ? undefined : selectedConversation?.id;
+
+      await chatService.sendMessageStream(
+        optimisticUserMessage.content,
+        currentConvId,
+        undefined,
+        (evt: any) => {
+          if (!evt || !selectedConversation) return;
+
+          if (evt.type === 'init') {
+            // Set conversation id if it was a new chat and add to list
+            if (!currentConvId && evt.conversation_id) {
+              const newConv: ApiConversation = {
+                id: evt.conversation_id,
+                title: optimisticUserMessage.content.slice(0, 30),
+                tags: [],
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              };
+              setConversations(prev => [newConv, ...prev]);
+              setSelectedConversation(prev => prev ? ({ ...prev, id: evt.conversation_id }) : prev);
+            }
+          }
+
+          if (evt.type === 'sources') {
+            const unique = dedupeSourcesById(evt.sources);
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                metadata: {
+                  ...(m.metadata || {}),
+                  sources: unique
+                }
+              }) : m);
+              return next;
+            });
+          }
+
+          if (evt.type === 'chunk') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                content: (m.content || '') + (evt.content || '')
+              }) : m);
+              return next;
+            });
+          }
+
+          if (evt.type === 'complete') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                id: evt.message_id || assistantTempId,
+                content: evt.full_response || m.content || '',
+                metadata: {
+                  ...(m.metadata || {}),
+                  confidence: evt.confidence
+                }
+              }) : m);
+              return next;
+            });
+            setIsLoading(false);
+          }
+
+          if (evt.type === 'error') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                is_failed: true,
+                failure_reason: evt.message
+              }) : m);
+              return next;
+            });
+            setIsLoading(false);
+          }
+        }
+      );
 
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // Optional: Add logic to remove the optimistic message on error
-    } finally {
+      console.error('Failed to send message (stream):', error);
       setIsLoading(false);
     }
   };
@@ -292,19 +378,47 @@ const Chat: React.FC = () => {
                   <div className={`max-w-[70%]`}>
                     <div className={`p-4 rounded-lg shadow-sm ${message.role === 'user' ? 'bg-white text-slate-800' : message.is_failed ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-blue-600 text-white'}`}>
                       <p className="text-right whitespace-pre-wrap">{message.content}</p>
+                      {/* 🔥 Streaming indicator */}
+                      {message.role === 'assistant' && !message.content && isLoading && (
+                        <div className="flex items-center gap-2 text-white/70">
+                          <div className="animate-pulse">در حال نوشتن</div>
+                          <div className="flex gap-1">
+                            <div className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                            <div className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                            <div className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                          </div>
+                        </div>
+                      )}
                       {message.is_failed && message.failure_reason && (
                         <p className="text-xs text-red-600 mt-2 text-right">
                           خطا: {message.failure_reason}
                         </p>
                       )}
                       {message.metadata && message.role === 'assistant' && (
-                        <div className="mt-2 text-xs opacity-75 text-left">
-                          {message.metadata.model_name && (
-                            <span>مدل: {message.metadata.model_name}</span>
+                        <div className="mt-2 space-y-2">
+                          {/* Sources section - simplified display */}
+                          {message.metadata.sources && message.metadata.sources.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-white/20">
+                              <p className="text-xs font-medium opacity-90 mb-2">📚 منابع:</p>
+                              <div className="space-y-1">
+                                {message.metadata.sources.map((source: any, index: number) => (
+                                  <div key={source.id || index} className="text-xs opacity-80">
+                                    {index + 1}. {source.title}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           )}
-                          {message.metadata.confidence && (
-                            <span className="mr-2">دقت: {Math.round(message.metadata.confidence * 100)}%</span>
-                          )}
+
+                          {/* Model info */}
+                          <div className="text-xs opacity-75 text-left">
+                            {message.metadata.model_name && (
+                              <span>مدل: {message.metadata.model_name}</span>
+                            )}
+                            {message.metadata.confidence && (
+                              <span className="mr-2">دقت: {Math.round(message.metadata.confidence * 100)}%</span>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

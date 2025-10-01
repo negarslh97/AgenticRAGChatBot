@@ -22,19 +22,164 @@ class RAGService(ABC):
         pass
     
     async def retrieve_relevant_documents(self, query: str, is_public_only: bool = True) -> List[Dict[str, Any]]:
-        """Retrieve relevant documents from knowledge base using Weaviate vector search."""
-        logger.info("🔍 Starting document retrieval process")
+        """Retrieve relevant documents using Weaviate vector search, enriched with MongoDB metadata."""
+        logger.info("🔍 Starting hybrid document retrieval process")
         logger.info(f"📊 Search scope: {'Public only' if is_public_only else 'All documents'}")
-        
+        logger.info("🔗 Using Weaviate for vector search + MongoDB for metadata enrichment...")
+
         try:
-            logger.info("🚀 Attempting Weaviate vector search...")
-            # Try to use Weaviate for vector search first
-            return await self._retrieve_from_weaviate(query, is_public_only)
+            # Use Weaviate for vector search to find relevant documents
+            weaviate_results = await self._retrieve_from_weaviate(query, is_public_only)
+
+            if weaviate_results:
+                logger.info(f"✅ Found {len(weaviate_results)} documents via Weaviate")
+                # Enrich results with MongoDB metadata
+                return await self._enrich_with_mongodb_metadata(weaviate_results, is_public_only)
+            else:
+                logger.warning("❌ No results from Weaviate, falling back to MongoDB keyword search...")
+                # Fallback to MongoDB if Weaviate fails
+                return await self._retrieve_from_mongodb(query, is_public_only)
+
         except Exception as e:
-            logger.warning(f"❌ Weaviate search failed: {e}")
-            logger.info("🔄 Falling back to MongoDB search...")
-            # Fallback to MongoDB-based search
+            logger.error(f"❌ Hybrid search failed: {e}")
+            logger.info("🔄 Falling back to MongoDB keyword search...")
             return await self._retrieve_from_mongodb(query, is_public_only)
+
+    async def _enrich_with_mongodb_metadata(self, weaviate_results: List[Dict[str, Any]], is_public_only: bool = True) -> List[Dict[str, Any]]:
+        """
+        Enrich Weaviate results with MongoDB metadata (OPTIONAL).
+        اگر article در MongoDB نبود، از داده‌های Weaviate استفاده می‌کنیم.
+        """
+        logger.info("🗄️ Enriching Weaviate results with MongoDB metadata...")
+
+        # Initialize database connection
+        from app.infrastructure.database.mongodb import init_db, get_mongo_client
+        from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility
+
+        if get_mongo_client() is None:
+            await init_db()
+
+        enriched_docs = []
+
+        for weaviate_doc in weaviate_results:
+            try:
+                article_id = weaviate_doc.get("id")
+                if not article_id:
+                    logger.warning(f"⚠️ Skipping document without article_id: {weaviate_doc}")
+                    # حتی بدون article_id، از داده Weaviate استفاده می‌کنیم
+                    enriched_docs.append({
+                        "id": weaviate_doc.get("node_id", "unknown"),
+                        "title": weaviate_doc.get("title", "Untitled"),
+                        "content": weaviate_doc.get("content", ""),
+                        "summary": "",
+                        "score": weaviate_doc.get("score", 0.5),
+                        "source": "weaviate_only",
+                        "path": weaviate_doc.get("path", ""),
+                        "node_id": weaviate_doc.get("node_id", ""),
+                        "url": None,
+                        "tags": [],
+                        "category": None
+                    })
+                    continue
+
+                # Try to fetch full article from MongoDB
+                article = None
+                try:
+                    article = await KnowledgeBaseArticle.get(article_id)
+                except Exception as e:
+                    logger.debug(f"Could not fetch article {article_id} from MongoDB: {e}")
+
+                if article:
+                    # Apply visibility filter if needed
+                    if is_public_only and article.visibility != ArticleVisibility.PUBLIC:
+                        logger.info(f"🔒 Skipping non-public article: {article_id}")
+                        continue
+
+                    # Create enriched document with MongoDB metadata
+                    enriched_doc = {
+                        "id": str(article.id),
+                        "title": article.title,
+                        "content": article.content_markdown[:1000],  # Use Markdown content
+                        "summary": article.summary,
+                        "score": weaviate_doc.get("score", 0.5),
+                        "source": "hybrid",
+                        "path": weaviate_doc.get("path", ""),
+                        "node_id": weaviate_doc.get("node_id", ""),
+                        "url": getattr(article, 'url', None),
+                        "tags": [tag.name for tag in getattr(article, 'tags', [])] if hasattr(article, 'tags') else [],
+                        "category": getattr(article, 'category', {}).name if hasattr(article, 'category') and article.category else None
+                    }
+                    logger.info(f"✅ Enriched with MongoDB: '{article.title[:50]}...' (Score: {enriched_doc['score']:.3f})")
+                else:
+                    # Article not in MongoDB - use Weaviate data directly
+                    logger.debug(f"📄 Using Weaviate data for {article_id} (not found in MongoDB)")
+                    enriched_doc = {
+                        "id": article_id,
+                        "title": weaviate_doc.get("title", "Untitled"),
+                        "content": weaviate_doc.get("content", ""),
+                        "summary": "",
+                        "score": weaviate_doc.get("score", 0.5),
+                        "source": "weaviate_only",
+                        "path": weaviate_doc.get("path", ""),
+                        "node_id": weaviate_doc.get("node_id", ""),
+                        "url": None,
+                        "tags": [],
+                        "category": None
+                    }
+                    logger.info(f"✅ Using Weaviate data: '{enriched_doc['title'][:50]}...' (Score: {enriched_doc['score']:.3f})")
+
+                enriched_docs.append(enriched_doc)
+
+            except Exception as e:
+                logger.error(f"❌ Error processing document {weaviate_doc.get('id')}: {e}")
+                # حتی با خطا، سعی می‌کنیم از داده Weaviate استفاده کنیم
+                try:
+                    enriched_docs.append({
+                        "id": weaviate_doc.get("id", weaviate_doc.get("node_id", "unknown")),
+                        "title": weaviate_doc.get("title", "Untitled"),
+                        "content": weaviate_doc.get("content", ""),
+                        "summary": "",
+                        "score": weaviate_doc.get("score", 0.5),
+                        "source": "weaviate_fallback",
+                        "path": weaviate_doc.get("path", ""),
+                        "node_id": weaviate_doc.get("node_id", ""),
+                        "url": None,
+                        "tags": [],
+                        "category": None
+                    })
+                except Exception as fallback_error:
+                    logger.error(f"❌ Even fallback failed: {fallback_error}")
+                    continue
+
+        logger.info(f"✅ Enrichment completed: {len(enriched_docs)} documents ready (from {len(weaviate_results)} Weaviate results)")
+        return enriched_docs
+
+    def _format_sources_markdown(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Format sources as markdown with rich MongoDB metadata - with deduplication by ID."""
+        formatted_sources = []
+        seen_ids = set()  # برای جلوگیری از تکرار منابع
+
+        for i, doc in enumerate(documents, 1):
+            # چک کردن ID تکراری
+            doc_id = str(doc.get("id", ""))
+            if doc_id in seen_ids:
+                logger.debug(f"⏭️ Skipping duplicate source: {doc_id}")
+                continue
+            
+            seen_ids.add(doc_id)
+            
+            # Create simple source without markdown formatting
+            formatted_sources.append({
+                "id": doc_id,
+                "title": doc.get("title", "بدون عنوان"),
+                "score": doc.get("score", 0),
+                "category": doc.get("category"),
+                "tags": doc.get("tags", []),
+                "url": doc.get("url")
+            })
+
+        logger.info(f"📋 Formatted {len(formatted_sources)} unique sources (from {len(documents)} documents)")
+        return formatted_sources
 
     async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True) -> List[Dict[str, Any]]:
         """Retrieve documents using Weaviate vector search with Client-Side Vectorization."""
@@ -268,24 +413,42 @@ class RAGService(ABC):
 
 
 class SimpleRAGService(RAGService):
-    """Simple RAG for guest users - uses public knowledge base only."""
+    """Simple RAG for guest users - uses public knowledge base only - STRICT MODE."""
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Generate response using Simple RAG with public knowledge base."""
+        """
+        Generate response using Simple RAG with public knowledge base.
+        STRICT MODE: فقط بر اساس documents موجود پاسخ می‌دهد.
+        """
 
         import time
         start_time = time.time()
 
         logger.info("=" * 60)
-        logger.info("🤖 SimpleRAGService: Starting RAG operation")
+        logger.info("🤖 SimpleRAGService: Starting STRICT RAG operation")
         logger.info(f"📝 Query: '{query[:100]}{'...' if len(query) > 100 else ''}'")
         logger.info(f"🔒 Access Level: Public documents only")
         logger.info(f"🧠 LLM Model: {settings.rag_model_loaded}")
+        logger.info(f"⚠️  STRICT MODE: Only knowledge base answers")
         logger.info("=" * 60)
 
         # Try to retrieve relevant documents from public knowledge base
         relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=True)
         logger.info(f"📚 Retrieved {len(relevant_docs)} relevant documents")
+
+        # اگر هیچ سندی پیدا نشد، پاسخ مناسب برگردان
+        if not relevant_docs:
+            logger.warning("❌ No relevant documents found in knowledge base")
+            no_docs_response = "متأسفانه اطلاعات مربوط به سوال شما در پایگاه دانش من موجود نیست. لطفاً سوال خود را واضح‌تر بیان کنید یا با تیم پشتیبانی تماس بگیرید."
+            
+            total_time = time.time() - start_time
+            logger.info(f"⏱️  Total time: {total_time:.3f}s")
+            
+            return {
+                "response": no_docs_response,
+                "sources": [],
+                "confidence": 0.0
+            }
 
         if relevant_docs and settings.openai_api_key_loaded:
             logger.info(f"🔑 OpenAI API key: {'✅ Set' if settings.openai_api_key_loaded else '❌ Not Set'}")
@@ -309,37 +472,28 @@ class SimpleRAGService(RAGService):
 
                 return {
                     "response": rag_response,
-                    "sources": [{"title": doc["title"], "id": doc["id"]} for doc in relevant_docs[:3]],
+                    "sources": self._format_sources_markdown(relevant_docs[:3]),
                     "confidence": 0.9
                 }
             except Exception as e:
                 logger.error(f"❌ RAG response generation failed: {str(e)}")
-                logger.info("🔄 Falling back to direct OpenAI response...")
-
-        # Fallback to direct OpenAI if no documents found or RAG fails
-        if settings.openai_api_key_loaded:
-            try:
-                direct_response = await self._generate_direct_openai_response(query, {})
-                logger.info(f"SimpleRAGService: Direct API success - Response preview: '{direct_response[:100]}...'")
+                # در STRICT MODE، اگر خطا رخ داد، پیام خطا برمی‌گردانیم نه پاسخ عمومی
                 total_rag_time = time.time() - start_time
                 logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
                 return {
-                    "response": direct_response,
+                    "response": "متأسفانه در پردازش اطلاعات پایگاه دانش خطایی رخ داد. لطفاً دوباره تلاش کنید.",
                     "sources": [],
-                    "confidence": 0.7
+                    "confidence": 0.0
                 }
-            except Exception as e:
-                logger.error(f"SimpleRAGService: Direct OpenAI API error for query '{query[:50]}...': {str(e)}")
 
-        # Final fallback response if all fails
-        fallback_msg = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید."
-        logger.warning(f"SimpleRAGService: Using fallback response for query '{query}': '{fallback_msg}'")
+        # اگر API key نداریم
+        logger.error("❌ OpenAI API key not configured")
         total_rag_time = time.time() - start_time
         logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
         return {
-            "response": fallback_msg,
+            "response": "متأسفانه سرویس هوش مصنوعی در حال حاضر در دسترس نیست.",
             "sources": [],
-            "confidence": 0.1
+            "confidence": 0.0
         }
     
     async def _generate_openai_response(self, query: str, context: str) -> str:
@@ -377,10 +531,13 @@ class SimpleRAGService(RAGService):
 
 
 class AgenticRAGService(RAGService):
-    """Agentic RAG for authenticated customers - uses full knowledge base and customer context."""
+    """Agentic RAG for authenticated customers - STRICT MODE - uses full knowledge base only."""
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Generate response using RAG with fallback to OpenAI for customers."""
+        """
+        Generate response using RAG for authenticated customers.
+        STRICT MODE: فقط بر اساس documents موجود پاسخ می‌دهد.
+        """
 
         import time
         start_time = time.time()
@@ -389,16 +546,32 @@ class AgenticRAGService(RAGService):
         user_id = user_context.get("user_id")
 
         logger.info("=" * 60)
-        logger.info("🧠 AgenticRAGService: Starting advanced RAG operation")
+        logger.info("🧠 AgenticRAGService: Starting STRICT advanced RAG operation")
         logger.info(f"📝 Query: '{query[:100]}{'...' if len(query) > 100 else ''}'")
         logger.info(f"👤 User ID: {user_id if user_id else 'Anonymous'}")
         logger.info(f"🔓 Access Level: Full knowledge base")
         logger.info(f"🧠 LLM Model: {settings.rag_model_loaded}")
+        logger.info(f"⚠️  STRICT MODE: Only knowledge base answers")
         logger.info("=" * 60)
 
         # Try to retrieve relevant documents from knowledge base
         relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=False)
         logger.info(f"📚 Retrieved {len(relevant_docs)} relevant documents")
+        
+        # اگر هیچ سندی پیدا نشد، پاسخ مناسب برگردان
+        if not relevant_docs:
+            logger.warning("❌ No relevant documents found in knowledge base")
+            no_docs_response = "متأسفانه اطلاعات مربوط به سوال شما در پایگاه دانش موجود نیست. لطفاً سوال خود را واضح‌تر بیان کنید یا تیکت پشتیبانی ایجاد کنید."
+            
+            total_time = time.time() - start_time
+            logger.info(f"⏱️  Total time: {total_time:.3f}s")
+            
+            return {
+                "response": no_docs_response,
+                "sources": [],
+                "confidence": 0.0,
+                "suggested_actions": ["create_ticket", "refine_question"]
+            }
 
         # Get user-specific context if available
         user_info = ""
@@ -449,7 +622,7 @@ class AgenticRAGService(RAGService):
                     logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
                     return {
                         "response": response,
-                        "sources": [{"title": doc["title"], "id": doc["id"]} for doc in relevant_docs[:3]],
+                        "sources": self._format_sources_markdown(relevant_docs[:3]),
                         "confidence": 0.9,
                         "suggested_actions": suggested_actions
                     }
@@ -457,36 +630,25 @@ class AgenticRAGService(RAGService):
                     logger.error(f"❌ Advanced RAG response generation failed: {e}")
                     import traceback
                     logger.error(f"Traceback: {traceback.format_exc()}")
+                    
+                    # در STRICT MODE، اگر خطا رخ داد، پیام خطا برمی‌گردانیم
+                    total_rag_time = time.time() - start_time
+                    logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
+                    return {
+                        "response": "متأسفانه در پردازش اطلاعات پایگاه دانش خطایی رخ داد. لطفاً دوباره تلاش کنید.",
+                        "sources": [],
+                        "confidence": 0.0,
+                        "suggested_actions": ["retry", "create_ticket"]
+                    }
 
-        logger.info("🔄 Falling back to direct OpenAI (no docs or RAG error)")
-
-        # Fallback to direct OpenAI without context
-        if settings.openai_api_key_loaded and self.client:
-            try:
-                direct_response = await self._generate_direct_openai_response(query, user_context)
-                logger.info(f"AgenticRAGService: Direct API success - Response preview: '{direct_response[:100]}...'")
-                total_rag_time = time.time() - start_time
-                logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
-                return {
-                    "response": direct_response,
-                    "sources": [],
-                    "confidence": 0.7,
-                    "suggested_actions": []
-                }
-            except Exception as e:
-                logger.error(f"AgenticRAGService: Direct OpenAI API error for query '{query[:50]}...': {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-
-        # Final fallback response
-        fallback_msg = f"{user_info}متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید."
-        logger.warning(f"AgenticRAGService: Using final fallback for query '{query[:50]}...': '{fallback_msg}'")
+        # اگر API key نداریم
+        logger.error("❌ OpenAI API key not configured")
         total_rag_time = time.time() - start_time
         logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
         return {
-            "response": fallback_msg,
+            "response": "متأسفانه سرویس هوش مصنوعی در حال حاضر در دسترس نیست.",
             "sources": [],
-            "confidence": 0.1,
+            "confidence": 0.0,
             "suggested_actions": ["contact_support"]
         }
     

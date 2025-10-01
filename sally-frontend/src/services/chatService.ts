@@ -15,7 +15,13 @@ export interface ChatMessage {
   }
   created_at: string
   metadata?: {
-    sources?: Array<{ title: string; id: string }>
+    sources?: Array<{
+      id: string
+      title: string
+      score: number
+      category?: string
+      tags?: string[]
+    }>
     confidence?: number
     suggested_actions?: string[]
     model_name?: string
@@ -36,7 +42,13 @@ export interface ChatMessage {
 export interface ChatResponse {
   conversation_id: string
   message: string
-  sources: Array<{ title: string; id: string }>
+  sources: Array<{
+    id: string
+    title: string
+    score: number
+    category?: string
+    tags?: string[]
+  }>
   confidence: number
   suggested_actions: string[]
   message_id: string
@@ -77,6 +89,78 @@ export const chatService = {
       console.error("Error response:", error.response)
       throw error
     }
+  },
+
+  async sendMessageStream(
+    content: string,
+    conversationId: string | undefined,
+    guestSessionId: string | undefined,
+    onEvent: (evt: any) => void
+  ): Promise<{ abort: () => void }> {
+    const controller = new AbortController()
+
+    const payload = {
+      content,
+      conversation_id: conversationId,
+      guest_session_id: guestSessionId,
+    }
+
+    const token = localStorage.getItem("token")
+
+    const response = await fetch("/api/message/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (!response.ok || !response.body) {
+      onEvent({ type: "error", message: `HTTP ${response.status}` })
+      return { abort: () => controller.abort() }
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder("utf-8")
+    let buffer = ""
+
+    ;(async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          
+          // 🔥 DEBUG: Log chunks as they arrive
+          console.log("📦 Received chunk:", value?.length, "bytes")
+          
+          buffer += decoder.decode(value, { stream: true })
+
+          // SSE frames are separated by \n\n and prefixed with 'data: '
+          const parts = buffer.split("\n\n")
+          buffer = parts.pop() || ""
+
+          for (const part of parts) {
+            const line = part.trim()
+            if (!line.startsWith("data:")) continue
+            const json = line.replace(/^data:\s*/, "")
+            if (!json) continue
+            try {
+              const evt = JSON.parse(json)
+              console.log("🎯 Parsed event:", evt.type, evt.content?.length || 0)
+              onEvent(evt)
+            } catch {
+              // ignore parse errors for keep-alives
+            }
+          }
+        }
+      } catch (e: any) {
+        onEvent({ type: "error", message: e?.message || String(e) })
+      }
+    })()
+
+    return { abort: () => controller.abort() }
   },
 
   async sendAdminMessage(content: string, conversationId?: string, ragType: 'simple' | 'agentic' = 'simple'): Promise<ChatResponse> {

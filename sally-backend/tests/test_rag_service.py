@@ -50,20 +50,45 @@ class TestSimpleRAGService:
         assert service.client is None  # No direct client needed
     
     @pytest.mark.asyncio
-    async def test_retrieve_relevant_documents_weaviate_failure_fallback(self):
+    async def test_retrieve_relevant_documents_hybrid_search(self):
+        """Test hybrid search: Weaviate + MongoDB enrichment."""
+        service = SimpleRAGService()
+
+        # Mock Weaviate to return results
+        weaviate_results = [
+            {"id": "article-123", "node_id": "node-456", "title": "Test Article", "content": "Content", "score": 0.8, "path": "/test"}
+        ]
+
+        # Mock MongoDB enrichment to return enriched results
+        enriched_results = [
+            {"id": "article-123", "title": "Test Article", "content": "Content", "score": 0.8, "source": "hybrid", "tags": ["tag1"], "category": "Test"}
+        ]
+
+        with patch.object(service, '_retrieve_from_weaviate', return_value=weaviate_results) as mock_weaviate:
+            with patch.object(service, '_enrich_with_mongodb_metadata', return_value=enriched_results) as mock_enrich:
+                results = await service.retrieve_relevant_documents("test query")
+
+                # Should use Weaviate first, then enrich with MongoDB
+                assert len(results) == 1
+                assert results[0]["source"] == "hybrid"
+                mock_weaviate.assert_called_once()
+                mock_enrich.assert_called_once()
+
+    async def test_retrieve_relevant_documents_weaviate_fallback_to_mongodb(self):
         """Test fallback to MongoDB when Weaviate fails."""
         service = SimpleRAGService()
-        
-        # Mock Weaviate to fail
-        with patch.object(service, '_retrieve_from_weaviate', side_effect=Exception("Weaviate error")):
+
+        # Mock Weaviate to fail (return empty results)
+        with patch.object(service, '_retrieve_from_weaviate', return_value=[]) as mock_weaviate:
             # Mock MongoDB to succeed
             with patch.object(service, '_retrieve_from_mongodb', return_value=[
                 {"id": "1", "title": "Test", "content": "Content", "score": 0.9}
             ]) as mock_mongodb:
                 results = await service.retrieve_relevant_documents("test query")
-                
+
                 # Should fallback to MongoDB
                 assert len(results) == 1
+                mock_weaviate.assert_called_once()
                 mock_mongodb.assert_called_once()
     
     @pytest.mark.asyncio
