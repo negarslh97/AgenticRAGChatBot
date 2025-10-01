@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import toast from "react-hot-toast"
 import { Plus, Edit, Trash2, Search, ChevronLeft, ChevronRight, Upload } from "lucide-react"
+import SyncStatusWidget from "../components/SyncStatusWidget"
 
 const SuperAdminKnowledgeBasePage: React.FC = () => {
   const navigate = useNavigate()
@@ -132,9 +133,14 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
   return (
     <div className="p-6" dir="rtl">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">پایگاه دانش</h1>
-        <p className="text-gray-600">این صفحه فقط برای سوپر ادمین‌ها قابل دسترسی است.</p>
+      <div className="mb-8 flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">پایگاه دانش</h1>
+          <p className="text-gray-600">این صفحه فقط برای سوپر ادمین‌ها قابل دسترسی است.</p>
+        </div>
+        <div className="w-96">
+          <SyncStatusWidget />
+        </div>
       </div>
 
 
@@ -189,6 +195,16 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
           >
             <Upload className="h-4 w-4" />
             آپلود فایل
+          </Button>
+          <Button
+            onClick={() => navigate("/super-admin/knowledge-base/weaviate")}
+            variant="outline"
+            className="flex items-center gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+          >
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
+            </svg>
+            مشاهده Weaviate
           </Button>
         </div>
 

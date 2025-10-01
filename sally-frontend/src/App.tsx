@@ -27,6 +27,7 @@ const SuperAdminAddArticlePage = lazy(() => import("./pages/SuperAdminAddArticle
 const SuperAdminUploadPage = lazy(() => import("./pages/SuperAdminUploadPage"))
 const SuperAdminChatPage = lazy(() => import("./pages/SuperAdminChatPage"))
 const ArticleEditPage = lazy(() => import("./pages/ArticleEditPage"))
+const WeaviateContentsPage = lazy(() => import("./pages/WeaviateContentsPage"))
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage"))
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"))
 const CustomerUsersPage = lazy(() => import("./pages/CustomerUsersPage"))
@@ -156,6 +157,14 @@ const App: React.FC = () => {
               />
               <Route path="knowledge-base/articles/:articleId" element={<ArticleDetail isadminView={true} />} />
               <Route path="knowledge-base/edit/:articleId" element={<ArticleEditPage />} />
+              <Route
+                path="knowledge-base/weaviate"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <WeaviateContentsPage />
+                  </AuthGuard>
+                }
+              />
               <Route path="logs" element={<div className="p-6"><h1 className="text-2xl font-bold">لاگ‌های فعالیت</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">تنظیمات سیستم</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
             </Route>

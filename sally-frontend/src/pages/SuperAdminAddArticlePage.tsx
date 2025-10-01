@@ -86,11 +86,24 @@ const SuperAdminAddArticlePage: React.FC = () => {
         formData.content_markdown
       )
 
+      // تبدیل نام دسته‌بندی به ObjectId
+      let categoryId = ""
+      if (metadata.suggested_category) {
+        const category = categories.find(cat => 
+          cat.name === metadata.suggested_category || 
+          cat.name.includes(metadata.suggested_category) ||
+          metadata.suggested_category.includes(cat.name)
+        )
+        if (category) {
+          categoryId = category.id
+        }
+      }
+
       setFormData(prev => ({
         ...prev,
         summary: metadata.summary,
         tag_names: metadata.tags.join(", "),
-        category_id: metadata.suggested_category
+        category_id: categoryId || prev.category_id // اگر دسته‌بندی پیدا نشد، مقدار قبلی را نگه دار
       }))
 
       toast.success("متادیتای هوش مصنوعی با موفقیت تولید شد ✨")

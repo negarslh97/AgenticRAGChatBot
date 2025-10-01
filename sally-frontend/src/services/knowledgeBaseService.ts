@@ -185,5 +185,62 @@ export const knowledgeBaseService = {
       }
     })
     return response.data
+  },
+
+  // New endpoints for Weaviate sync management
+  async checkArticlesSyncStatus(): Promise<{
+    total_published: number
+    synced: number
+    not_synced: number
+    not_synced_articles: Array<{ id: string; title: string; published_at: string | null }>
+    sync_percentage: number
+  }> {
+    const response = await api.get("/api/super-admin/kb/sync/check-articles")
+    return response.data
+  },
+
+  async syncAllArticlesToWeaviate(force: boolean = false): Promise<{
+    success: boolean
+    total_articles: number
+    jobs_scheduled: number
+    skipped: number
+    job_ids: string[]
+    message: string
+  }> {
+    const response = await api.post(`/api/super-admin/kb/sync/sync-all-articles?force=${force}`)
+    return response.data
+  },
+
+  async getWeaviateContents(limit: number = 100): Promise<{
+    total_nodes: number
+    returned_nodes: number
+    articles_count: number
+    articles: Array<{ article_id: string; nodes_count: number; titles: string[] }>
+    nodes: Array<{
+      uuid: string
+      article_id: string
+      title: string
+      level: number
+      content: string
+      path: string
+      order: number
+    }>
+  }> {
+    const response = await api.get(`/api/super-admin/kb/weaviate/contents?limit=${limit}`)
+    return response.data
+  },
+
+  async getWeaviateNodeDetails(nodeUuid: string): Promise<{
+    uuid: string
+    properties: any
+    vector: number[] | null
+    vector_length: number
+    metadata: {
+      creation_time: string | null
+      last_update_time: string | null
+    }
+  }> {
+    const response = await api.get(`/api/super-admin/kb/weaviate/node/${nodeUuid}`)
+    return response.data
   }
 }
