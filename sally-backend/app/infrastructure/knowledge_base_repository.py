@@ -33,7 +33,7 @@ class KnowledgeBaseRepository:
 
         try:
             import weaviate
-            from app.infrastructure.database.weaviate import WeaviateMongoDBConnector
+            from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
 
             connector = WeaviateMongoDBConnector()
             await connector.connect_mongodb()
@@ -117,9 +117,12 @@ class KnowledgeBaseRepository:
             await new_article.insert()
             logger.info(f"✅ مقاله '{title}' در MongoDB ذخیره شد - ID: {new_article.id}")
 
-            # همگام‌سازی با Weaviate اگر مقاله منتشر شده باشد
-            if status == ArticleStatus.PUBLISHED and visibility:
+            # همگام‌سازی با Weaviate فقط برای مقالات منتشر شده
+            if status == ArticleStatus.PUBLISHED:
                 await self._sync_to_weaviate(new_article, "create")
+                logger.info(f"🔄 مقاله '{title}' به Weaviate منتقل شد (PUBLISHED)")
+            else:
+                logger.info(f"ℹ️ مقاله '{title}' در وضعیت {status} است - به Weaviate منتقل نشد")
 
             return new_article
 
@@ -215,8 +218,14 @@ class KnowledgeBaseRepository:
             await article.save()
             logger.info(f"✅ مقاله '{article.title}' بروزرسانی شد - نسخه: {article.version}")
 
-            # همگام‌سازی با Weaviate
-            await self._sync_to_weaviate(article, "update")
+            # همگام‌سازی با Weaviate فقط برای مقالات منتشر شده
+            if article.status == ArticleStatus.PUBLISHED:
+                await self._sync_to_weaviate(article, "update")
+                logger.info(f"🔄 مقاله '{article.title}' در Weaviate بروزرسانی شد")
+            else:
+                # اگر مقاله از PUBLISHED به غیر PUBLISHED تغییر کرد، از Weaviate حذف شود
+                await self._sync_to_weaviate(article, "delete")
+                logger.info(f"🗑️ مقاله '{article.title}' از Weaviate حذف شد (وضعیت: {article.status})")
 
             return article
 
@@ -277,6 +286,16 @@ class KnowledgeBaseRepository:
 
             # حذف از Weaviate
             await self._sync_to_weaviate(article, "delete")
+
+            # حذف گره‌های Markdown از Weaviate
+            try:
+                from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+                weaviate_connector = WeaviateMongoDBConnector()
+                weaviate_connector.connect_weaviate()
+                weaviate_connector.delete_markdown_nodes(str(article.id))
+                logger.info(f"🗑️ گره‌های Markdown مقاله '{article.title}' حذف شدند")
+            except Exception as delete_e:
+                logger.warning(f"⚠️ خطا در حذف گره‌های Markdown: {str(delete_e)}")
 
             # حذف از MongoDB
             await article.delete()
@@ -486,82 +505,92 @@ class KnowledgeBaseRepository:
 
         return article_tags
 
+    async def check_article_in_weaviate(self, article_id: str) -> bool:
+        """
+        بررسی وجود مقاله در Weaviate
+
+        Args:
+            article_id: شناسه مقاله
+
+        Returns:
+            True اگر مقاله در Weaviate وجود داشته باشد
+        """
+        try:
+            from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+            from weaviate.classes.query import Filter
+            
+            weaviate_connector = WeaviateMongoDBConnector()
+            weaviate_connector.connect_weaviate()
+
+            # جستجوی گره‌های مربوط به این article_id
+            collection = weaviate_connector.weaviate_client.collections.get("MarkdownNode")
+            
+            # Query for nodes with this article_id using proper Filter syntax
+            response = collection.query.fetch_objects(
+                filters=Filter.by_property("article_id").equal(article_id),
+                limit=1
+            )
+            
+            has_nodes = len(response.objects) > 0
+            
+            if has_nodes:
+                logger.info(f"✅ مقاله {article_id} در Weaviate یافت شد ({len(response.objects)} گره)")
+            else:
+                logger.info(f"❌ مقاله {article_id} در Weaviate یافت نشد")
+            
+            return has_nodes
+
+        except Exception as e:
+            logger.error(f"❌ خطا در بررسی وجود مقاله در Weaviate: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     async def _sync_to_weaviate(
         self,
         article: KnowledgeBaseArticle,
         operation: str
     ) -> None:
         """
-        همگام‌سازی مقاله با Weaviate
+        همگام‌سازی ساختار درختی Markdown مقاله با Weaviate
 
         Args:
             article: مقاله برای همگام‌سازی
             operation: نوع عملیات (create/update/delete)
         """
         try:
-            await self._ensure_weaviate_client()
-            if not self.weaviate_client:
-                return
+            # اتصال به Weaviate برای ذخیره ساختار درختی
+            from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+            weaviate_connector = WeaviateMongoDBConnector()
+            weaviate_connector.connect_weaviate()
 
             if operation == "delete":
-                # حذف از Weaviate
-                self.weaviate_client.data_object.delete(
-                    class_name="KnowledgeBaseArticle",
-                    where={
-                        "operator": "Equal",
-                        "path": ["article_id"],
-                        "valueString": str(article.id)
-                    }
-                )
-                logger.info(f"🗑️ مقاله '{article.title}' از Weaviate حذف شد")
+                # حذف گره‌های Markdown از Weaviate
+                weaviate_connector.delete_markdown_nodes(str(article.id))
+                logger.info(f"🗑️ گره‌های Markdown مقاله '{article.title}' از Weaviate حذف شدند")
 
             elif operation in ["create", "update"]:
-                # آماده‌سازی داده‌ها برای Weaviate
-                tags_list = [tag.name for tag in article.tags] if article.tags else []
-
-                # Format dates properly for Weaviate (RFC3339)
-                def format_datetime(dt):
-                    if not dt:
-                        return None
-                    # Ensure it's a datetime object and make it timezone aware if not
-                    if dt.tzinfo is None:
-                        from datetime import timezone
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    return dt.isoformat().replace('+00:00', 'Z')
-
-                article_data = {
-                    "title": article.title,
-                    "content": article.content_markdown or article.content_html or "",  # ✅ اولویت به Markdown
-                    "summary": article.summary or "",
-                    "tags": tags_list,
-                    "category": article.category.name if article.category else "عمومی",
-                    "visibility": article.visibility.value if article.visibility else "",
-                    "status": article.status.value,
-                    "created_at": format_datetime(article.created_at),
-                    "updated_at": format_datetime(article.updated_at),
-                    "article_id": str(article.id)
-                }
-
-                # استفاده از vectorizer config - ابتدا OpenAI، سپس fallback محلی
+                # ذخیره ساختار درختی Markdown
                 try:
-                    # ابتدا سعی می‌کنیم با OpenAI vectorizer
-                    self.weaviate_client.data_object.create(
-                        data_object=article_data,
-                        class_name="KnowledgeBaseArticle"
+                    from app.infrastructure.markdown_parser import markdown_parser
+
+                    # ایجاد درخت Markdown با عنوان مقاله به عنوان root node
+                    tree = markdown_parser.parse_to_tree(
+                        article.content_markdown, 
+                        str(article.id),
+                        article_title=article.title  # ✅ عنوان اصلی از MongoDB
                     )
-                    logger.info(f"🔄 مقاله '{article.title}' با OpenAI vectorizer همگام‌سازی شد")
-                except Exception as e:
-                    logger.warning(f"⚠️ OpenAI vectorizer شکست خورد، استفاده از fallback محلی: {str(e)}")
-                    try:
-                        # استفاده از fallback محلی
-                        self.weaviate_client.data_object.create(
-                            data_object=article_data,
-                            class_name="KnowledgeBaseArticleLocal"
-                        )
-                        logger.info(f"🔄 مقاله '{article.title}' با local vectorizer همگام‌سازی شد")
-                    except Exception as local_e:
-                        logger.error(f"❌ هر دو vectorizer شکست خوردند: OpenAI={str(e)}, Local={str(local_e)}")
-                        raise local_e
+
+                    if tree.get_all_nodes():
+                        # ذخیره درخت در Weaviate
+                        await weaviate_connector.save_markdown_tree(tree, article.content_markdown)
+                        logger.info(f"🌳 ساختار درختی مقاله '{article.title}' ذخیره شد ({len(tree.get_all_nodes())} گره)")
+                    else:
+                        logger.info(f"📄 مقاله '{article.title}' فاقد ساختار درختی است")
+
+                except Exception as tree_e:
+                    logger.warning(f"⚠️ خطا در ذخیره ساختار درختی: {str(tree_e)}")
+                    # ادامه عملیات بدون شکست خوردن کل فرآیند
 
         except Exception as e:
             logger.error(f"❌ خطا در همگام‌سازی با Weaviate: {str(e)}")

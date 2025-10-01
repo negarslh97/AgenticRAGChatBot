@@ -351,8 +351,8 @@ class ChatUseCases:
                 "confidence": confidence,
                 "suggested_actions": suggested_actions,
                 "rag_type": "agentic" if user else "simple",
-                "model_name": settings.openai_model_loaded,
-                "provider": "OpenAI",
+                "model_name": settings.chat_model_loaded,
+                "provider": "OpenRouter",
                 "api_base_url": settings.openai_base_url_loaded,
                 "temperature": 0.7,  # Default temperature
                 "max_tokens": 1000,  # Default max tokens
@@ -420,8 +420,8 @@ class ChatUseCases:
                 "error_message": str(e),
                 "fallback": True,
                 "rag_type": "failed",
-                "model_name": settings.openai_model_loaded,
-                "provider": "OpenAI",
+                "model_name": settings.chat_model_loaded,
+                "provider": "OpenRouter",
                 "api_base_url": settings.openai_base_url_loaded,
                 "temperature": 0.7,
                 "max_tokens": 1000,

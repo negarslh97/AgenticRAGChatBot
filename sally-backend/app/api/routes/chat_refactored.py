@@ -1,6 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
 from typing import Optional, List, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from bson import ObjectId
 from app.domain.entities import (
     Customer, Admin, Conversation, Message, GuestSession, UnansweredQuestion,
@@ -22,8 +22,7 @@ class ChatMessage(BaseModel):
     conversation_id: Optional[str] = None
     guest_session_id: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AdminChatMessage(BaseModel):
@@ -31,8 +30,7 @@ class AdminChatMessage(BaseModel):
     conversation_id: Optional[str] = None
     rag_type: str = "simple"  # "simple" or "agentic"
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatResponse(BaseModel):

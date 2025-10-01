@@ -1,203 +1,198 @@
 """
-Test configuration and fixtures for SallyBot API tests.
+Test configuration and fixtures for SallyBot tests
 """
+
 import pytest
 import pytest_asyncio
 import asyncio
-from typing import AsyncGenerator, Generator
-from httpx import AsyncClient
-from fastapi import FastAPI
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
-from faker import Faker
+import sys
+from typing import AsyncGenerator, Generator
+from motor.motor_asyncio import AsyncIOMotorClient
+from pathlib import Path
 
-from app.infrastructure.database.mongodb import init_db
-from app.core.permissions import create_default_roles
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 from app.core.config import settings
 from app.domain.entities import (
-    Admin, Customer, Role, Ticket, TicketReply, KnowledgeBaseArticle,
-    Category, Tag, GuestSession, Conversation, Message, ActivityLog, Feedback
+    Admin, Customer, Role, KnowledgeBaseArticle, 
+    Category, Tag, ArticleStatus, ArticleVisibility
 )
-from main import app
+from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
 
 
-# Test database settings
-TEST_DATABASE_URL = "mongodb://localhost:27017/test_sally_db"
-TEST_DATABASE_NAME = "test_sally_db"
+# ==================== Pytest Configuration ====================
+
+def pytest_configure(config):
+    """Configure pytest with custom markers."""
+    config.addinivalue_line(
+        "markers", "unit: marks tests as unit tests (fast, no external dependencies)"
+    )
+    config.addinivalue_line(
+        "markers", "integration: marks tests as integration tests (requires external services)"
+    )
+    config.addinivalue_line(
+        "markers", "weaviate: marks tests that require Weaviate"
+    )
+    config.addinivalue_line(
+        "markers", "mongodb: marks tests that require MongoDB"
+    )
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow running"
+    )
 
 
 @pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+def event_loop():
     """Create an instance of the default event loop for the test session."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
 
+
+# ==================== Database Fixtures ====================
+
 @pytest_asyncio.fixture(scope="function")
-async def test_db():
-    """Create test database connection and setup."""
-    # Override settings for testing
-    original_db_url = getattr(settings, 'database_url', None)
-
-    # Set the test database URL (which includes the database name)
-    settings.database_url = TEST_DATABASE_URL
-
-    # Initialize test database
-    await init_db()
-
-    # Create default roles
-    await create_default_roles()
-
-    yield
-
-    # Cleanup: Drop test database
-    client = AsyncIOMotorClient(TEST_DATABASE_URL)
-    await client.drop_database(TEST_DATABASE_NAME)
+async def mongodb_client() -> AsyncGenerator[AsyncIOMotorClient, None]:
+    """
+    Provide MongoDB client for testing.
+    Uses test database to avoid affecting production data.
+    """
+    # Use test database
+    test_db_url = os.getenv("TEST_DATABASE_URL", "mongodb://localhost:27017/SallyChatBot_Test")
+    client = AsyncIOMotorClient(test_db_url)
+    
+    # Wait for connection
+    try:
+        await client.admin.command('ping')
+        print(f"✅ Connected to test MongoDB: {test_db_url}")
+    except Exception as e:
+        pytest.skip(f"MongoDB not available: {e}")
+    
+    yield client
+    
+    # Cleanup: Drop test database after tests
+    db_name = client.get_default_database().name
+    await client.drop_database(db_name)
     client.close()
+    print(f"🧹 Cleaned up test database: {db_name}")
 
-    # Restore original settings
-    if original_db_url:
-        settings.database_url = original_db_url
+
+@pytest.fixture(scope="function")
+def weaviate_connector() -> Generator[WeaviateMongoDBConnector, None, None]:
+    """
+    Provide Weaviate connector for testing.
+    Requires Weaviate to be running.
+    """
+    connector = WeaviateMongoDBConnector()
+    
+    # Test connection
+    try:
+        connected = connector.connect_weaviate()
+        if not connected:
+            pytest.skip("Weaviate connection failed")
+        print("✅ Connected to Weaviate for testing")
+    except Exception as e:
+        pytest.skip(f"Weaviate not available: {e}")
+    
+    yield connector
+    
+    # Cleanup
+    try:
+        connector.cleanup()
+        print("🧹 Cleaned up Weaviate connector")
+    except Exception as e:
+        print(f"⚠️ Cleanup warning: {e}")
+
+
+@pytest_asyncio.fixture(scope="function")
+async def weaviate_connector_async() -> AsyncGenerator[WeaviateMongoDBConnector, None]:
+    """
+    Provide async Weaviate connector for testing with MongoDB connection.
+    """
+    connector = WeaviateMongoDBConnector()
+    
+    # Test connections
+    try:
+        mongodb_ok = await connector.connect_mongodb()
+        weaviate_ok = connector.connect_weaviate()
+
+        if not mongodb_ok:
+            pytest.skip("Failed to connect to MongoDB")
+
+        if not weaviate_ok:
+            pytest.skip("Failed to connect to Weaviate")
+
+        print("✅ Connected to both MongoDB and Weaviate for testing")
+    except Exception as e:
+        pytest.skip(f"Services not available: {e}")
+    
+    yield connector
+    
+    # Cleanup
+    try:
+        connector.cleanup()
+        print("🧹 Cleaned up async connector")
+    except Exception as e:
+        print(f"⚠️ Cleanup warning: {e}")
+
+
+# ==================== Entity Fixtures ====================
+
+@pytest_asyncio.fixture
+async def test_role(mongodb_client) -> Role:
+    """Create a test role."""
+    from beanie import init_beanie
+    
+    db = mongodb_client.get_default_database()
+    await init_beanie(database=db, document_models=[Role, Admin, Customer, KnowledgeBaseArticle, Category, Tag])
+    
+    role = Role(
+        name="TestAdmin",
+        description="Test admin role",
+        permissions=[],
+        is_active=True
+    )
+    await role.insert()
+    return role
 
 
 @pytest_asyncio.fixture
-async def client(test_db):
-    """Create test client."""
-    async with AsyncClient(app=app, base_url="http://testserver") as ac:
-        yield ac
+async def test_admin(test_role: Role) -> Admin:
+    """Create or get a test admin user."""
+    # First check if admin already exists
+    existing_admin = await Admin.find_one({"email": "test_admin@test.com"})
 
+    if existing_admin:
+        return existing_admin
 
-@pytest.fixture
-def faker():
-    """Faker instance for generating test data."""
-    return Faker('fa_IR')  # Persian locale for more realistic test data
-
-
-@pytest_asyncio.fixture
-async def super_admin_user(test_db, faker):
-    """Create a test super admin user."""
-    from app.core.security import get_password_hash
-
-    # Get SuperAdmin role
-    super_admin_role = await Role.find_one({"name": "SuperAdmin"})
-    assert super_admin_role, "SuperAdmin role not found"
-
+    # Create new admin if doesn't exist
     admin = Admin(
-        email=faker.email(),
-        hashed_password=get_password_hash("testpassword123"),
-        full_name=faker.name(),
-        role_id=str(super_admin_role.id),
-        role_name=super_admin_role.name
+        email="test_admin@test.com",
+        hashed_password="$2b$12$test_hash",
+        full_name="Test Admin",
+        role_id=str(test_role.id),
+        role_name=test_role.name,
+        is_active=True
     )
     await admin.insert()
     return admin
 
 
 @pytest_asyncio.fixture
-async def admin_user(test_db, faker):
-    """Create a test admin user."""
-    from app.core.security import get_password_hash
-
-    # Get Admin role
-    admin_role = await Role.find_one({"name": "Admin"})
-    assert admin_role, "Admin role not found"
-
-    admin = Admin(
-        email=faker.email(),
-        hashed_password=get_password_hash("testpassword123"),
-        full_name=faker.name(),
-        role_id=str(admin_role.id),
-        role_name=admin_role.name
-    )
-    await admin.insert()
-    return admin
-
-
-@pytest_asyncio.fixture
-async def customer_user(test_db, faker):
-    """Create a test customer user."""
-    from app.core.security import get_password_hash
-
-    customer = Customer(
-        email=faker.email(),
-        hashed_password=get_password_hash("testpassword123"),
-        full_name=faker.name()
-    )
-    await customer.insert()
-    return customer
-
-
-@pytest.fixture
-def auth_headers():
-    """Helper fixture to create authorization headers."""
-    def _create_headers(token: str) -> dict:
-        return {"Authorization": f"Bearer {token}"}
-
-    return _create_headers
-
-
-@pytest_asyncio.fixture
-async def super_admin_token(super_admin_user):
-    """Create JWT token for super admin."""
-    from app.core.security import create_access_token
-    from datetime import timedelta
-
-    access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
-    token = create_access_token(
-        data={"sub": str(super_admin_user.id), "type": "SuperAdmin"},
-        expires_delta=access_token_expires
-    )
-    return token
-
-
-@pytest_asyncio.fixture
-async def admin_token(admin_user):
-    """Create JWT token for admin."""
-    from app.core.security import create_access_token
-    from datetime import timedelta
-
-    access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
-    token = create_access_token(
-        data={"sub": str(admin_user.id), "type": "Admin"},
-        expires_delta=access_token_expires
-    )
-    return token
-
-
-@pytest_asyncio.fixture
-async def customer_token(customer_user):
-    """Create JWT token for customer."""
-    from app.core.security import create_access_token
-    from datetime import timedelta
-
-    access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
-    token = create_access_token(
-        data={"sub": str(customer_user.id), "type": "Customer"},
-        expires_delta=access_token_expires
-    )
-    return token
-
-
-@pytest_asyncio.fixture
-async def test_ticket(customer_user, faker):
-    """Create a test ticket."""
-    ticket = Ticket(
-        customer_id=str(customer_user.id),
-        title=faker.sentence(),
-        description=faker.paragraph(),
-        priority="medium"
-    )
-    await ticket.insert()
-    return ticket
-
-
-@pytest_asyncio.fixture
-async def test_category(faker):
-    """Create a test knowledge base category."""
+async def test_category(mongodb_client) -> Category:
+    """Create a test category."""
+    from beanie import init_beanie
+    
+    db = mongodb_client.get_default_database()
+    await init_beanie(database=db, document_models=[Category])
+    
     category = Category(
-        name=faker.word(),
-        slug=faker.slug(),
-        description=faker.sentence(),
+        name="Test Category",
+        slug="test-category",
+        description="Test category for testing",
         is_public=True
     )
     await category.insert()
@@ -205,20 +200,104 @@ async def test_category(faker):
 
 
 @pytest_asyncio.fixture
-async def test_article(test_category, admin_user, faker):
+async def test_article(test_admin: Admin, test_category: Category) -> KnowledgeBaseArticle:
     """Create a test knowledge base article."""
-    from app.domain.entities import ArticleStatus, ArticleVisibility, ArticleCategory
-
+    from app.domain.entities import ArticleCategory
+    
     article = KnowledgeBaseArticle(
-        title=faker.sentence(),
-        content_markdown=faker.paragraph(),
-        content_html=f"<p>{faker.paragraph()}</p>",
-        summary=faker.sentence(),
-        category=ArticleCategory(id=str(test_category.id), name=test_category.name, slug=test_category.slug),
-        tags=[],
+        title="Test Article",
+        content_markdown="# Test Header\n\nThis is test content.\n\n## Subheader\n\nMore test content.",
+        content_html="<h1>Test Header</h1><p>This is test content.</p><h2>Subheader</h2><p>More test content.</p>",
+        summary="Test article summary",
+        category=ArticleCategory(
+            id=str(test_category.id),
+            name=test_category.name,
+            slug=test_category.slug
+        ),
         status=ArticleStatus.DRAFT,
-        visibility=ArticleVisibility.INTERNAL,
-        author_id=str(admin_user.id)
+        visibility=None,
+        author_id=str(test_admin.id),
+        version=1
     )
     await article.insert()
     return article
+
+
+@pytest.fixture
+def sample_markdown_content() -> str:
+    """Provide sample markdown content for testing."""
+    return """# Main Title
+
+This is the introduction to the document.
+
+## Section 1
+
+Content for section 1.
+
+### Subsection 1.1
+
+Details for subsection 1.1.
+
+### Subsection 1.2
+
+Details for subsection 1.2.
+
+## Section 2
+
+Content for section 2.
+
+# Another Main Title
+
+More content here.
+"""
+
+
+# ==================== Environment Fixtures ====================
+
+@pytest.fixture
+def mock_env_vars(monkeypatch):
+    """Mock environment variables for testing."""
+    test_env = {
+        "DATABASE_URL": "mongodb://localhost:27017/SallyChatBot_Test",
+        "WEAVIATE_URL": "http://localhost:8080",
+        "OPENAI_API_KEY": "test-key-12345",
+        "Embedder_API_KEY": "test-embedder-key-12345",
+    }
+    
+    for key, value in test_env.items():
+        monkeypatch.setenv(key, value)
+    
+    return test_env
+
+
+# ==================== Helper Fixtures ====================
+
+@pytest.fixture
+def cleanup_weaviate_data(weaviate_connector: WeaviateMongoDBConnector):
+    """Clean up Weaviate data after test."""
+    yield
+    
+    # Cleanup after test
+    try:
+        weaviate_connector.delete_all_from_weaviate()
+        print("🧹 Cleaned up Weaviate test data")
+    except Exception as e:
+        print(f"⚠️ Failed to cleanup Weaviate: {e}")
+
+
+@pytest_asyncio.fixture
+async def cleanup_mongodb_data(mongodb_client: AsyncIOMotorClient):
+    """Clean up MongoDB test data after test."""
+    yield
+    
+    # Cleanup after test
+    try:
+        db = mongodb_client.get_default_database()
+        collections = await db.list_collection_names()
+        
+        for collection_name in collections:
+            await db[collection_name].delete_many({})
+        
+        print(f"🧹 Cleaned up {len(collections)} MongoDB collections")
+    except Exception as e:
+        print(f"⚠️ Failed to cleanup MongoDB: {e}")

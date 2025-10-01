@@ -1,20 +1,35 @@
-# docker-compose.yml
-version: '3.4'
 services:
   weaviate:
-    image: cr.weaviate.io/semitechnologies/weaviate:1.24.2
-    restart: unless-stopped
+    image: cr.weaviate.io/semitechnologies/weaviate:1.33.0
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8080'
+      - --scheme
+      - http
     ports:
       - "8080:8080"
       - "50051:50051"
+    restart: on-failure:0
     environment:
-      - QUERY_DEFAULTS_LIMIT=25
-      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
-      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
-      - DEFAULT_VECTORIZER_MODULE=text2vec-openai,text2vec-ollama
-      - ENABLE_MODULES=text2vec-openai,text2vec-ollama,generative-openai
-      - OPENAI_API_KEY=${Embedder_API_KEY}
-      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      # Basic settings
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      ENABLE_API_BASED_MODULES: 'true'
+      CLUSTER_HOSTNAME: 'node1'
+
+      # OpenAI settings
+      OPENAI_APIKEY: ${Embedder_API_KEY}
+      OPENAI_BASE_URL: ${Embedder_OPENAI_BASE_URL}
+
+      # Optional: Ollama settings (if needed)
+      # OLLAMA_URL: ${OLLAMA_URL}
+
+      # Optional: Disable telemetry and set log level
+      DISABLE_TELEMETRY: 'true'
+      LOG_LEVEL: 'info'
     volumes:
       - weaviate_data:/var/lib/weaviate
 

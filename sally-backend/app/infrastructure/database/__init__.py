@@ -7,7 +7,7 @@ This package contains all database-related functionality including:
 """
 
 from .mongodb import *
-from .weaviate import WeaviateMongoDBConnector
+from .weaviate_connector import WeaviateMongoDBConnector
 
 __all__ = [
     # MongoDB functions

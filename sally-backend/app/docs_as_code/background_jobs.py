@@ -144,12 +144,12 @@ class JobQueue:
         return True
 
     async def get_pending_count(self) -> int:
-        """Get the number of pending jobs."""
-        pending_jobs = [
+        """Get the number of pending and running jobs."""
+        active_jobs = [
             job for job in self._jobs.values()
-            if job.status == JobStatus.PENDING
+            if job.status in [JobStatus.PENDING, JobStatus.RUNNING]
         ]
-        return len(pending_jobs)
+        return len(active_jobs)
     
     async def _process_jobs(self):
         """Process jobs from the queue."""
@@ -295,6 +295,7 @@ class JobQueue:
     async def _process_vectorize_article(self, job: SyncJob):
         """Process article vectorization job."""
         article_id = job.data.get('article_id')
+        force = job.data.get('force', False)  # Force re-sync even if already exists
 
         if not article_id:
             raise ValueError("Article ID is required for vectorization")
@@ -306,7 +307,7 @@ class JobQueue:
         # Ensure database is initialized
         await init_db()
 
-        job.progress = 25
+        job.progress = 10
         logger.info(f"Starting vectorization for article {article_id}")
 
         # Get article from database
@@ -314,7 +315,7 @@ class JobQueue:
         if not article:
             raise ValueError(f"Article {article_id} not found")
 
-        job.progress = 50
+        job.progress = 25
         logger.info(f"Article found: {article.title}")
 
         # Check if article is published and has visibility
@@ -329,24 +330,48 @@ class JobQueue:
             job.progress = 100
             return
 
-        job.progress = 75
+        job.progress = 40
+        
+        # Check if already synced (unless force=True)
+        if not force:
+            is_synced = await knowledge_base_repository.check_article_in_weaviate(article_id)
+            if is_synced:
+                logger.info(f"⏭️ Article '{article.title}' already synced, skipping")
+                job.result = {
+                    'article_id': article_id,
+                    'title': article.title,
+                    'status': 'already_synced',
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                job.progress = 100
+                return
+
+        job.progress = 60
         logger.info(f"Vectorizing article: {article.title}")
 
-        # Vectorize the article (this will sync to Weaviate)
-        # Since we're in background job, we don't need to check permissions again
-        # The article is already validated as published by SuperAdmin
+        # Delete existing nodes first to avoid duplicates
+        try:
+            from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+            weaviate_connector = WeaviateMongoDBConnector()
+            weaviate_connector.connect_weaviate()
+            weaviate_connector.delete_markdown_nodes(article_id)
+            logger.info(f"🗑️ حذف گره‌های قبلی مقاله '{article.title}' از Weaviate")
+        except Exception as e:
+            logger.warning(f"⚠️ خطا در حذف گره‌های قبلی: {str(e)}")
 
-        # Force re-sync to Weaviate (update operation)
+        job.progress = 75
+
+        # Sync Markdown tree to Weaviate (create/update operation)
         await knowledge_base_repository._sync_to_weaviate(article, "update")
 
         job.result = {
             'article_id': article_id,
             'title': article.title,
-            'status': 'vectorized',
+            'status': 'markdown_synced',
             'timestamp': datetime.utcnow().isoformat()
         }
         job.progress = 100
-        logger.info(f"Successfully vectorized article: {article.title}")
+        logger.info(f"✅ Successfully synced Markdown tree for article: {article.title}")
 
 
 # Global job queue instance

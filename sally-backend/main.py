@@ -1,21 +1,84 @@
-# from fastapi import FastAPI
-# from fastapi.middleware.cors import CORSMiddleware
-# from contextlib import asynccontextmanager
-# import asyncio
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import asyncio
 
 # from app.core.config import settings
 # from app.infrastructure.database import init_database, create_default_admin
 # from app.api.routes import auth, chat, tickets, admin, knowledge_base, admin_knowledge_base, upload
 
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     # Startup
-#     await init_database()
-#     await create_default_admin()
-#     yield
-#     # Shutdown
-#     pass
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for startup and shutdown events."""
+    # Startup code
+    logger.info("Starting up the application...")
+    await init_db()
+
+    # Log existing roles in database for debugging
+    from app.domain.entities import Role
+    existing_roles = await Role.find_all().to_list()
+    logger.info(f"DEBUG: Existing roles in database before create_default_roles: {[role.name for role in existing_roles]}")
+
+    # این تابع نقش‌ها را با حروف بزرگ (SuperAdmin, Admin, ...) می‌سازد
+    from app.core.permissions import create_default_roles
+    await create_default_roles()
+
+    # Log roles after creation
+    roles_after = await Role.find_all().to_list()
+    logger.info(f"DEBUG: Roles in database after create_default_roles: {[role.name for role in roles_after]}")
+
+    # ساخت ادمین پیش‌فرض در صورتی که هیچ ادمینی وجود نداشته باشد
+    from app.domain.entities import Admin, Role
+    from app.core.security import get_password_hash
+
+    admin_count = await Admin.find_all().count()
+    if admin_count == 0:
+        logger.info("No admins found. Creating default super admin...")
+
+        # --- اصلاح اصلی و کلیدی اینجاست ---
+        # حالا به دنبال نقشی با نام "SuperAdmin" (با حرف بزرگ) می‌گردیم
+        SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
+        # --- پایان اصلاح ---
+
+        if not SuperAdmin_role:
+            # این پیام خطا حالا بسیار مهم است، چون نشان می‌دهد حتی نقش با حروف بزرگ هم ساخته نشده
+            logger.error("SuperAdmin role not found! Cannot create default admin. Check DEFAULT_ROLES in permissions.py")
+            return
+
+        default_admin = Admin(
+            email=settings.default_SuperAdmin_email,
+            hashed_password=get_password_hash(settings.default_SuperAdmin_password),
+            full_name="Default Super Admin",
+            # --- بهبود کوچک اما مهم: تبدیل id به رشته ---
+            role_id=str(SuperAdmin_role.id),
+            # --- بهبود دوم: اضافه کردن role_name ---
+            role_name=SuperAdmin_role.name
+        )
+        await default_admin.insert()
+        logger.info(f"Created default super Admin: {settings.default_SuperAdmin_email}")
+
+    # Start background job processor
+    from app.docs_as_code.background_jobs import start_background_jobs
+    await start_background_jobs()
+    logger.info("Background job processor started")
+    logger.info("Application startup completed!")
+
+    yield  # Application runs here
+
+    # Shutdown code
+    logger.info("Shutting down the application...")
+
+    # Close MongoDB client
+    from app.infrastructure.database.mongodb import close_mongo_client
+    await close_mongo_client()
+    logger.info("MongoDB client closed")
+
+    # Stop background job processor
+    from app.docs_as_code.background_jobs import stop_background_jobs
+    await stop_background_jobs()
+    logger.info("Background job processor stopped")
+    logger.info("Application shutdown completed!")
 
 
 # app = FastAPI(
@@ -84,7 +147,11 @@ from app.api.routes.upload import router as upload_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Sally Chat Bot API", version="2.0")
+app = FastAPI(
+    title="Sally Chat Bot API",
+    version="2.0",
+    lifespan=lifespan
+)
 
 # CORS configuration
 app.add_middleware(
@@ -217,79 +284,7 @@ async def serve_spa_with_auth(path: str, request: Request):
 
 # Note: SPA route handler with authentication check is defined above
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and create default roles/admin on startup."""
-    logger.info("Starting up the application...")
-    await init_db()
-
-    # Log existing roles in database for debugging
-    from app.domain.entities import Role
-    existing_roles = await Role.find_all().to_list()
-    logger.info(f"DEBUG: Existing roles in database before create_default_roles: {[role.name for role in existing_roles]}")
-
-    # این تابع نقش‌ها را با حروف بزرگ (SuperAdmin, Admin, ...) می‌سازد
-    from app.core.permissions import create_default_roles
-    await create_default_roles()
-
-    # Log roles after creation
-    roles_after = await Role.find_all().to_list()
-    logger.info(f"DEBUG: Roles in database after create_default_roles: {[role.name for role in roles_after]}")
-
-    # ساخت ادمین پیش‌فرض در صورتی که هیچ ادمینی وجود نداشته باشد
-    from app.domain.entities import Admin, Role
-    from app.core.security import get_password_hash
-
-    admin_count = await Admin.find_all().count()
-    if admin_count == 0:
-        logger.info("No admins found. Creating default super admin...")
-
-        # --- اصلاح اصلی و کلیدی اینجاست ---
-        # حالا به دنبال نقشی با نام "SuperAdmin" (با حرف بزرگ) می‌گردیم
-        SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
-        # --- پایان اصلاح ---
-
-        if not SuperAdmin_role:
-            # این پیام خطا حالا بسیار مهم است، چون نشان می‌دهد حتی نقش با حروف بزرگ هم ساخته نشده
-            logger.error("SuperAdmin role not found! Cannot create default admin. Check DEFAULT_ROLES in permissions.py")
-            return
-
-        default_admin = Admin(
-            email=settings.default_SuperAdmin_email,
-            hashed_password=get_password_hash(settings.default_SuperAdmin_password),
-            full_name="Default Super Admin",
-            # --- بهبود کوچک اما مهم: تبدیل id به رشته ---
-            role_id=str(SuperAdmin_role.id),
-            # --- بهبود دوم: اضافه کردن role_name ---
-            role_name=SuperAdmin_role.name
-        )
-        await default_admin.insert()
-        logger.info(f"Created default super Admin: {settings.default_SuperAdmin_email}")
-
-    # Start background job processor
-    from app.docs_as_code.background_jobs import start_background_jobs
-    await start_background_jobs()
-    logger.info("Background job processor started")
-
-    logger.info("Application startup completed!")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup resources on shutdown."""
-    logger.info("Shutting down the application...")
-
-    # Close MongoDB client
-    from app.infrastructure.database.mongodb import close_mongo_client
-    await close_mongo_client()
-    logger.info("MongoDB client closed")
-
-    # Stop background job processor
-    from app.docs_as_code.background_jobs import stop_background_jobs
-    await stop_background_jobs()
-    logger.info("Background job processor stopped")
-
-    logger.info("Application shutdown completed!")
+# Application startup and shutdown handled by lifespan context manager above
 
 
 @app.get("/")

@@ -9,10 +9,25 @@ from app.domain.entities import Role
 router = APIRouter()
 
 
+class MarkdownNodeResponse(BaseModel):
+    id: str
+    title: str
+    level: int
+    content: str
+    parent_id: Optional[str]
+    path: str
+    order: int
+    children: List['MarkdownNodeResponse'] = []
+
+class MarkdownTreeResponse(BaseModel):
+    article_id: str
+    root_nodes: List[MarkdownNodeResponse]
+
 class ArticleResponse(BaseModel):
     id: str
     title: str
     content_html: str
+    content_markdown: str
     summary: Optional[str]
     category: Optional[ArticleCategory]
     tags: List[ArticleTag]
@@ -20,6 +35,7 @@ class ArticleResponse(BaseModel):
     visibility: Optional[ArticleVisibility]
     created_at: str
     updated_at: str
+    markdown_tree: Optional[MarkdownTreeResponse] = None
 
 
 class CategoryResponse(BaseModel):
@@ -141,17 +157,47 @@ async def get_article(
         if article.visibility not in [ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER]:
             raise HTTPException(status_code=403, detail="Access denied")
     
+    # دریافت ساختار درختی Markdown اگر وجود داشته باشد
+    markdown_tree = None
+    try:
+        from app.infrastructure.markdown_parser import markdown_parser
+        tree = markdown_parser.parse_to_tree(article.content_markdown, str(article.id))
+
+        if tree.get_all_nodes():
+            # تبدیل به response format
+            def convert_node(node):
+                return MarkdownNodeResponse(
+                    id=node.id,
+                    title=node.title,
+                    level=node.level,
+                    content=node.content,
+                    parent_id=node.parent_id,
+                    path=node.path,
+                    order=node.order,
+                    children=[convert_node(child) for child in node.children]
+                )
+
+            markdown_tree = MarkdownTreeResponse(
+                article_id=str(article.id),
+                root_nodes=[convert_node(node) for node in tree.root_nodes]
+            )
+    except Exception as e:
+        # در صورت خطا، ساختار درختی خالی برمی‌گردانیم
+        pass
+
     return ArticleResponse(
         id=str(article.id),
         title=article.title,
         content_html=article.content_html,
+        content_markdown=article.content_markdown,
         summary=article.summary,
         category=article.category,
         tags=article.tags,
         status=article.status,
         visibility=article.visibility,
         created_at=article.created_at.isoformat(),
-        updated_at=article.updated_at.isoformat()
+        updated_at=article.updated_at.isoformat(),
+        markdown_tree=markdown_tree
     )
 
 

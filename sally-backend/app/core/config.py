@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     openai_base_url: Optional[str] = None
     embedder_api_key: Optional[str] = None
     embedder_openai_base_url: Optional[str] = None
+    embedder_model: Optional[str] = None
     # Ollama Configuration for local embeddings fallback
     ollama_url: Optional[str] = None
     ollama_embedding_model: Optional[str] = None
@@ -96,6 +97,11 @@ class Settings(BaseSettings):
         return self.embedder_openai_base_url or os.getenv("Embedder_OPENAI_BASE_URL")
 
     @property
+    def embedder_model_loaded(self) -> str:
+        import os
+        return self.embedder_model or os.getenv("EMBEDDER_MODEL") or "text-embedding-3-small"
+
+    @property
     def ollama_url_loaded(self) -> Optional[str]:
         import os
         return self.ollama_url or os.getenv("OLLAMA_URL")
@@ -111,7 +117,8 @@ class Settings(BaseSettings):
 
     model_config = {
         "protected_namespaces": ("settings_",),
-        "env_file": ".env"
+        "env_file": ".env",
+        "extra": "ignore"  # Ignore extra fields from environment variables
     }
 
 settings = Settings()

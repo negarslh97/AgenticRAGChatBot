@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Import text extraction libraries
 try:
-    from PyPDF2 import PdfReader
+    from pypdf import PdfReader
     from docx import Document
     import openpyxl
     TEXT_EXTRACTION_AVAILABLE = True
@@ -28,6 +28,9 @@ from app.docs_as_code.sync_service import MongoToGitSync
 from app.docs_as_code.config import get_default_config
 from app.docs_as_code.git_manager import GitManager
 from app.docs_as_code.monitoring import get_system_stats
+import logging
+
+logger = logging.getLogger(__name__)
 from app.infrastructure.knowledge_base_service import knowledge_base_service
 
 router = APIRouter()
@@ -137,6 +140,20 @@ class ArticleUpdate(BaseModel):
     status: Optional[ArticleStatus] = None
     visibility: Optional[ArticleVisibility] = None
 
+class MarkdownNodeResponse(BaseModel):
+    id: str
+    title: str
+    level: int
+    content: str
+    parent_id: Optional[str]
+    path: str
+    order: int
+    children: List['MarkdownNodeResponse'] = []
+
+class MarkdownTreeResponse(BaseModel):
+    article_id: str
+    root_nodes: List[MarkdownNodeResponse]
+
 class ArticleResponse(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
@@ -154,6 +171,7 @@ class ArticleResponse(BaseModel):
     created_at: str  # Use string instead of datetime
     updated_at: str  # Use string instead of datetime
     published_at: Optional[str] = None  # Use string instead of datetime
+    markdown_tree: Optional[MarkdownTreeResponse] = None
 
 class ArticlePublishRequest(BaseModel):
     visibility: ArticleVisibility
@@ -357,6 +375,18 @@ async def upload_kb_file(
     await new_article.insert()
     new_article.id = str(new_article.id)
 
+    # Sync to Weaviate فقط برای مقالات منتشر شده
+    if new_article.status == ArticleStatus.PUBLISHED:
+        try:
+            from app.infrastructure.knowledge_base_repository import KnowledgeBaseRepository
+            repo = KnowledgeBaseRepository()
+            await repo._sync_to_weaviate(new_article, "create")
+            print(f"✅ Article {new_article.id} synced to Weaviate (PUBLISHED)")
+        except Exception as sync_error:
+            print(f"⚠️ خطا در sync با Weaviate: {str(sync_error)}")
+    else:
+        print(f"ℹ️ Article {new_article.id} is {new_article.status} - not synced to Weaviate")
+
     # Sync to Git repository (disabled - empty repository)
     print(f"Article {new_article.id} created successfully (Git sync disabled - empty repository)")
 
@@ -485,6 +515,34 @@ async def get_article(
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
+    # دریافت ساختار درختی Markdown اگر وجود داشته باشد
+    markdown_tree = None
+    try:
+        from app.infrastructure.markdown_parser import markdown_parser
+        tree = markdown_parser.parse_to_tree(article.content_markdown, str(article.id))
+
+        if tree.get_all_nodes():
+            # تبدیل به response format
+            def convert_node(node):
+                return MarkdownNodeResponse(
+                    id=node.id,
+                    title=node.title,
+                    level=node.level,
+                    content=node.content,
+                    parent_id=node.parent_id,
+                    path=node.path,
+                    order=node.order,
+                    children=[convert_node(child) for child in node.children]
+                )
+
+            markdown_tree = MarkdownTreeResponse(
+                article_id=str(article.id),
+                root_nodes=[convert_node(node) for node in tree.root_nodes]
+            )
+    except Exception as e:
+        # در صورت خطا، ساختار درختی خالی برمی‌گردانیم
+        pass
+
     return ArticleResponse(
         id=str(article.id),
         title=article.title,
@@ -499,7 +557,8 @@ async def get_article(
         version=article.version,
         created_at=article.created_at.isoformat() if article.created_at else None,
         updated_at=article.updated_at.isoformat() if article.updated_at else None,
-        published_at=article.published_at.isoformat() if article.published_at else None
+        published_at=article.published_at.isoformat() if article.published_at else None,
+        markdown_tree=markdown_tree
     )
 
 @router.put("/articles/{article_id}", response_model=ArticleResponse, tags=["Knowledge Base Management"])
@@ -703,6 +762,255 @@ async def get_sync_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching sync status: {str(e)}"
+        )
+
+@router.get("/sync/check-articles", tags=["Knowledge Base Management"])
+async def check_articles_sync_status(
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    Check which published articles are not synced to Weaviate.
+    """
+    try:
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+        
+        # Get all published articles
+        published_articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED
+        ).to_list()
+        
+        total_published = len(published_articles)
+        synced_count = 0
+        not_synced = []
+        
+        for article in published_articles:
+            # Check if article exists in Weaviate
+            is_synced = await knowledge_base_repository.check_article_in_weaviate(str(article.id))
+            if is_synced:
+                synced_count += 1
+            else:
+                not_synced.append({
+                    "id": str(article.id),
+                    "title": article.title,
+                    "published_at": article.published_at.isoformat() if article.published_at else None
+                })
+        
+        return {
+            "total_published": total_published,
+            "synced": synced_count,
+            "not_synced": len(not_synced),
+            "not_synced_articles": not_synced,
+            "sync_percentage": (synced_count / total_published * 100) if total_published > 0 else 100
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error checking sync status: {str(e)}"
+        )
+
+@router.post("/sync/sync-all-articles", tags=["Knowledge Base Management"])
+async def sync_all_articles_to_weaviate(
+    force: bool = False,
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.PUBLISH_ARTICLES))
+):
+    """
+    Sync all published articles to Weaviate.
+    
+    Args:
+        force: If True, re-sync all articles even if already synced. Default is False (only sync missing articles).
+    """
+    try:
+        from app.docs_as_code.background_jobs import schedule_vectorize_article
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+        
+        # Get all published articles
+        published_articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED
+        ).to_list()
+        
+        job_ids = []
+        skipped_count = 0
+        
+        for article in published_articles:
+            try:
+                article_id = str(article.id)
+                
+                # Check if article already exists in Weaviate (unless force=True)
+                if not force:
+                    is_synced = await knowledge_base_repository.check_article_in_weaviate(article_id)
+                    if is_synced:
+                        logger.info(f"⏭️ مقاله '{article.title}' قبلاً sync شده، رد می‌شود")
+                        skipped_count += 1
+                        continue
+                
+                # Schedule the job
+                job_id = await schedule_vectorize_article(article_id)
+                job_ids.append(job_id)
+                logger.info(f"✅ Job برای مقاله '{article.title}' ایجاد شد: {job_id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to schedule job for article {article.id}: {str(e)}")
+        
+        return {
+            "success": True,
+            "total_articles": len(published_articles),
+            "jobs_scheduled": len(job_ids),
+            "skipped": skipped_count,
+            "job_ids": job_ids,
+            "message": f"Scheduled {len(job_ids)} vectorization jobs, skipped {skipped_count} already synced articles"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in sync_all_articles: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error scheduling sync jobs: {str(e)}"
+        )
+
+@router.get("/weaviate/node/{node_uuid}", tags=["Knowledge Base Management"])
+async def get_weaviate_node_details(
+    node_uuid: str,
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    Get detailed information about a specific Weaviate node including vector.
+    """
+    try:
+        from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+        import uuid as uuid_lib
+        
+        # Create connector instance and connect
+        weaviate_connector = WeaviateMongoDBConnector()
+        weaviate_connector.connect_weaviate()
+        
+        if not weaviate_connector.weaviate_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cannot connect to Weaviate"
+            )
+        
+        # Get collection
+        collection = weaviate_connector.weaviate_client.collections.get("MarkdownNode")
+        
+        # Get specific object with UUID
+        try:
+            obj = collection.query.fetch_object_by_id(uuid_lib.UUID(node_uuid), include_vector=True)
+            
+            if not obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Node with UUID {node_uuid} not found"
+                )
+            
+            # Prepare detailed response
+            return {
+                "uuid": str(obj.uuid),
+                "properties": obj.properties,
+                "vector": obj.vector.get("default") if obj.vector else None,
+                "vector_length": len(obj.vector.get("default")) if obj.vector and obj.vector.get("default") else 0,
+                "metadata": {
+                    "creation_time": obj.metadata.creation_time.isoformat() if obj.metadata and obj.metadata.creation_time else None,
+                    "last_update_time": obj.metadata.last_update_time.isoformat() if obj.metadata and obj.metadata.last_update_time else None,
+                }
+            }
+            
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid UUID format: {str(e)}"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ خطا در دریافت جزئیات گره: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching node details: {str(e)}"
+        )
+
+@router.get("/weaviate/contents", tags=["Knowledge Base Management"])
+async def get_weaviate_contents(
+    limit: int = 100,
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    Get all contents stored in Weaviate for inspection.
+    """
+    try:
+        from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+        
+        # Create connector instance and connect
+        weaviate_connector = WeaviateMongoDBConnector()
+        weaviate_connector.connect_weaviate()
+        
+        if not weaviate_connector.weaviate_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cannot connect to Weaviate"
+            )
+        
+        # Get collection
+        collection = weaviate_connector.weaviate_client.collections.get("MarkdownNode")
+        
+        # Query all objects with limit
+        response = collection.query.fetch_objects(limit=limit)
+        
+        items = []
+        for obj in response.objects:
+            items.append({
+                "uuid": str(obj.uuid),
+                "article_id": obj.properties.get("article_id"),
+                "title": obj.properties.get("title"),
+                "level": obj.properties.get("level"),
+                "content": obj.properties.get("content", "")[:200] + "..." if len(obj.properties.get("content", "")) > 200 else obj.properties.get("content", ""),
+                "path": obj.properties.get("path"),
+                "order": obj.properties.get("order")
+            })
+        
+        # Get total count
+        total_response = collection.aggregate.over_all(total_count=True)
+        total_count = total_response.total_count
+        
+        # Group by article_id
+        articles_dict = {}
+        for item in items:
+            article_id = item.get("article_id")
+            if article_id:
+                if article_id not in articles_dict:
+                    articles_dict[article_id] = {
+                        "article_id": article_id,
+                        "nodes_count": 0,
+                        "titles": []
+                    }
+                articles_dict[article_id]["nodes_count"] += 1
+                if item.get("level") == 0:  # Root node
+                    articles_dict[article_id]["titles"].append(item.get("title"))
+        
+        logger.info(f"✅ دریافت {len(items)} گره از Weaviate (کل: {total_count})")
+        
+        return {
+            "total_nodes": total_count,
+            "returned_nodes": len(items),
+            "articles_count": len(articles_dict),
+            "articles": list(articles_dict.values()),
+            "nodes": items
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ خطا در دریافت محتویات Weaviate: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching Weaviate contents: {str(e)}"
         )
 
 @router.post("/upload-convert", response_model=FileUploadResponse, tags=["Knowledge Base Management"])

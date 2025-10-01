@@ -33,14 +33,15 @@ class LangChainService:
     def __init__(self):
         self._models = {}
 
-    def _get_model(self, model_name: str, force_json: bool = False) -> ChatOpenAI:
+    def _get_model(self, model_name: str, force_json: bool = False, max_tokens: int = 500) -> ChatOpenAI:
         """Get or create a ChatOpenAI model instance."""
-        cache_key = f"{model_name}_{'json' if force_json else 'text'}"
+        cache_key = f"{model_name}_{'json' if force_json else 'text'}_{max_tokens}"
         
         if cache_key not in self._models:
             logger.info(f"🤖 بارگذاری مدل: {model_name}")
             logger.info(f"🔑 API Key تنظیم شده: {'بله' if settings.openai_api_key_loaded else 'خیر'}")
             logger.info(f"🌐 Base URL: {settings.openai_base_url_loaded or 'پیش‌فرض OpenAI'}")
+            logger.info(f"📊 Max Tokens: {max_tokens}")
 
             model_kwargs = {}
             if force_json:
@@ -53,7 +54,7 @@ class LangChainService:
                 openai_api_key=settings.openai_api_key_loaded,
                 base_url=settings.openai_base_url_loaded,
                 temperature=0.7,
-                max_tokens=500,
+                max_tokens=max_tokens,
                 model_kwargs=model_kwargs
             )
             logger.info(f"✅ مدل {model_name} آماده استفاده است")
@@ -78,25 +79,56 @@ class LangChainService:
             logger.info(f"📝 عنوان مقاله: {title[:100]}...")
             logger.info(f"📊 طول محتوا: {len(content)} کاراکتر")
 
-            model = self._get_model(selected_model, force_json=True)
-            logger.info(f"✅ مدل {selected_model} با موفقیت بارگذاری شد")
+            # استفاده از 1000 توکن برای metadata generation
+            model = self._get_model(selected_model, force_json=True, max_tokens=1000)
+            logger.info(f"✅ مدل {selected_model} با موفقیت بارگذاری شد (max_tokens: 1000)")
 
             prompt = ChatPromptTemplate.from_template("""
-Generate metadata for this article in Persian (Farsi).
+شما یک متخصص تولید متادیتای مقالات هستید. برای مقاله زیر، متادیتای کامل تولید کنید.
 
-**Title:** {title}
-**Content:** {content}
+**عنوان مقاله:** {title}
+**محتوای مقاله:** {content}
 
-Respond with ONLY valid JSON:
+**دستورالعمل‌های مهم برای تولید خلاصه:**
+1. خلاصه باید یک پاراگراف منسجم و روان باشد (نه فهرست یا نقطه‌چین)
+2. خلاصه باید در 2-4 جمله، محتوای اصلی مقاله را توضیح دهد
+3. خلاصه باید مفید و قابل فهم باشد حتی اگر مقاله کامل خوانده نشده باشد
+4. از کلمات کلیدی مهم مقاله استفاده کنید
+5. خلاصه باید به زبان فارسی روان باشد
+
+**مثال خلاصه خوب:**
+"این راهنما نحوه استقرار و راه‌اندازی نرم‌افزار مدیریت فروش را شرح می‌دهد. ابتدا تنظیمات اولیه سیستم انجام می‌شود و سپس کاربران و محصولات به سیستم اضافه می‌گردند."
+
+**مثال خلاصه بد (استفاده نکنید):**
+"استقرار نرم افزار مدیریت فروش
+1. تنظیمات
+2. راه‌اندازی"
+
+**دستورالعمل‌های تگ‌ها:**
+- 3 تا 5 تگ کلیدی و مرتبط انتخاب کنید
+- تگ‌ها باید مفاهیم اصلی مقاله را پوشش دهند
+- از کلمات ساده و قابل جستجو استفاده کنید
+
+**دستورالعمل‌های دسته‌بندی:**
+- یکی از دسته‌بندی‌های زیر را انتخاب کنید:
+  * "راهنمای محصول" - برای آموزش استفاده از محصول
+  * "مشکلات فنی" - برای حل مشکلات و عیب‌یابی
+  * "حساب کاربری و صورتحساب" - برای مسائل مالی و حساب کاربری
+  * "عمومی" - برای سایر موضوعات
+
+**دستورالعمل‌های سطح دسترسی:**
+- یکی از موارد زیر را انتخاب کنید:
+  * "public" - برای اطلاعات عمومی و غیرمحرمانه
+  * "customer" - فقط برای مشتریان وارد شده
+  * "internal" - فقط برای کارمندان و تیم داخلی
+
+**فقط JSON زیر را برگردانید (بدون توضیح اضافی):**
 {{
-  "summary": "خلاصه مقاله",
+  "summary": "خلاصه کامل به صورت پاراگراف منسجم",
   "tags": ["تگ1", "تگ2", "تگ3"],
   "suggested_category": "دسته‌بندی",
   "suggested_visibility": "دسترسی"
 }}
-
-Categories: راهنمای محصول, مشکلات فنی, حساب کاربری و صورتحساب, عمومی
-Visibility: public, customer, internal
 """)
 
             # Create the chain with JSON parser
@@ -158,8 +190,9 @@ Visibility: public, customer, internal
             logger.info(f"📝 عنوان: {title[:100]}...")
             logger.info(f"📊 طول محتوا: {len(content)} کاراکتر")
 
-            model = self._get_model(selected_model, force_json=False)
-            logger.info(f"✅ مدل {selected_model} برای تبدیل Markdown بارگذاری شد")
+            # استفاده از max_tokens بالا برای markdown conversion (4096 توکن)
+            model = self._get_model(selected_model, force_json=False, max_tokens=4096)
+            logger.info(f"✅ مدل {selected_model} برای تبدیل Markdown بارگذاری شد (max_tokens: 4096)")
 
             prompt = ChatPromptTemplate.from_template("""
 شما یک متخصص تبدیل متن به فرمت Markdown هستید. متن ساده زیر را به فرمت Markdown تبدیل کنید:

@@ -333,3 +333,90 @@ class ActivityLog(Document):
     
     class Settings:
         name = "activity_logs"
+
+
+# ===========================================
+# MARKDOWN TREE STRUCTURES
+# ===========================================
+
+class MarkdownNode(BaseModel):
+    """Node in the markdown tree structure."""
+    id: str = Field(description="Unique ID for the node")
+    title: str = Field(description="Heading text without # symbols")
+    level: int = Field(description="Heading level (1-6 for # to ######)")
+    content: str = Field(description="Content under this heading")
+    parent_id: Optional[str] = Field(default=None, description="Parent node ID (-1 for root)")
+    path: str = Field(description="Full path like '1.2.3' for hierarchy")
+    order: int = Field(description="Order within siblings")
+    children: List['MarkdownNode'] = Field(default_factory=list, description="Child nodes")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for storage."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "level": self.level,
+            "content": self.content,
+            "parent_id": self.parent_id,
+            "path": self.path,
+            "order": self.order,
+            "children": [child.to_dict() for child in self.children]
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MarkdownNode':
+        """Create from dictionary."""
+        children = [cls.from_dict(child) for child in data.get("children", [])]
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            level=data["level"],
+            content=data["content"],
+            parent_id=data["parent_id"],
+            path=data["path"],
+            order=data["order"],
+            children=children
+        )
+
+
+class MarkdownTree(BaseModel):
+    """Complete markdown tree structure."""
+    article_id: str = Field(description="Reference to the article")
+    root_nodes: List[MarkdownNode] = Field(default_factory=list, description="Root level nodes")
+
+    def get_all_nodes(self) -> List[MarkdownNode]:
+        """Get all nodes in the tree (flattened)."""
+        nodes = []
+
+        def traverse(node: MarkdownNode):
+            nodes.append(node)
+            for child in node.children:
+                traverse(child)
+
+        for root in self.root_nodes:
+            traverse(root)
+
+        return nodes
+
+    def find_node_by_path(self, path: str) -> Optional[MarkdownNode]:
+        """Find a node by its path."""
+        for node in self.get_all_nodes():
+            if node.path == path:
+                return node
+        return None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for storage."""
+        return {
+            "article_id": self.article_id,
+            "root_nodes": [node.to_dict() for node in self.root_nodes]
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MarkdownTree':
+        """Create from dictionary."""
+        root_nodes = [MarkdownNode.from_dict(node) for node in data.get("root_nodes", [])]
+        return cls(
+            article_id=data["article_id"],
+            root_nodes=root_nodes
+        )

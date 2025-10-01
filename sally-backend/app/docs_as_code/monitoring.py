@@ -426,14 +426,28 @@ async def get_system_stats() -> Dict[str, Any]:
 
 def setup_logging():
     """Setup structured logging for Docs-as-Code system."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('docs_as_code.log', encoding='utf-8')
-        ]
-    )
+    # Create logger
+    logger = logging.getLogger('docs_as_code')
+    logger.setLevel(logging.INFO)
+
+    # Remove existing handlers to avoid duplicates
+    logger.handlers.clear()
+
+    # Create formatters
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # File handler with explicit file closing
+    try:
+        file_handler = logging.FileHandler('docs_as_code.log', encoding='utf-8')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception as e:
+        logger.warning(f"Could not create file handler: {e}")
     
     # Reduce noise from third-party libraries
     logging.getLogger('git').setLevel(logging.WARNING)

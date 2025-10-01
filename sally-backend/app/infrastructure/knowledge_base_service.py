@@ -568,7 +568,7 @@ class KnowledgeBaseService:
             elif file_extension == 'pdf':
                 # استفاده از PyPDF2 اگر موجود باشد
                 try:
-                    from PyPDF2 import PdfReader
+                    from pypdf import PdfReader
                     reader = PdfReader(file_path)
                     text = ""
                     for page in reader.pages:

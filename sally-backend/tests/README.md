@@ -1,169 +1,300 @@
-# SallyBot API Tests
+# SallyBot Test Suite
 
-این فایل شامل تست‌های جامع عملکردی و منطق تجاری برای API SallyBot است.
+This directory contains comprehensive tests for the SallyBot backend application, with special focus on Weaviate and MongoDB storage functionality.
 
-## ساختار تست‌ها
+## Test Structure
 
-### 1. تست‌های احراز هویت (`test_auth.py`)
-- **ثبت‌نام مشتری**: بررسی امکان ثبت‌نام با ایمیل معتبر و جلوگیری از ثبت‌نام با ایمیل تکراری
-- **ثبت‌نام ادمین**: بررسی امکان ثبت‌نام ادمین توسط SuperAdmin و جلوگیری از ثبت‌نام توسط ادمین عادی
-- **ورود به سیستم**: بررسی ورود موفق برای مشتریان، ادمین‌ها و SuperAdmin‌ها
-- **ساختار توکن**: بررسی اینکه توکن JWT حاوی اطلاعات صحیح (sub برای ID و type برای نقش) باشد
-
-### 2. تست‌های تیکت‌ها (`test_tickets.py`)
-- **ایجاد تیکت**: بررسی امکان ایجاد تیکت توسط مشتریان
-- **پاسخ به تیکت**: بررسی امکان پاسخ مشتریان به تیکت‌های خود و عدم امکان پاسخ به تیکت‌های دیگران
-- **دسترسی ادمین**: بررسی امکان مشاهده تمام تیکت‌ها و پاسخ به هر تیکتی توسط ادمین
-- **اختصاص تیکت**: بررسی امکان اختصاص تیکت به ادمین دیگر
-- **مدیریت وضعیت**: بررسی امکان تغییر وضعیت تیکت توسط ادمین
-
-### 3. تست‌های پایگاه دانش (`test_knowledge_base.py`)
-- **دسترسی عمومی**: بررسی امکان مشاهده مقالات عمومی توسط مهمانان
-- **دسترسی مشتریان**: بررسی امکان مشاهده مقالات عمومی و مشتری توسط کاربران احراز هویت شده
-- **ایجاد مقاله**: بررسی امکان ایجاد مقاله در حالت پیش‌نویس توسط ادمین
-- **انتشار مقاله**: بررسی امکان انتشار مقاله تنها توسط SuperAdmin
-- **حذف مقاله**: بررسی امکان حذف مقاله تنها توسط SuperAdmin
-
-### 4. تست‌های مدیریت ادمین (`test_admin_management.py`)
-- **دسترسی به لیست ادمین‌ها**: بررسی اینکه تنها SuperAdmin بتواند لیست ادمین‌ها را ببیند
-- **ایجاد ادمین**: بررسی امکان ایجاد ادمین جدید تنها توسط SuperAdmin
-- **به‌روزرسانی ادمین**: بررسی امکان تغییر اطلاعات ادمین توسط SuperAdmin
-- **حذف ادمین**: بررسی امکان حذف ادمین توسط SuperAdmin
-- **مدیریت مشتریان**: بررسی دسترسی ادمین به مدیریت مشتریان
-
-## نیازمندی‌های تست
-
-```bash
-pip install -r requirements.txt
+```
+tests/
+├── conftest.py                          # Pytest configuration and fixtures
+├── test_weaviate_connection.py         # Weaviate connection tests
+├── test_mongodb_storage.py             # MongoDB storage tests
+├── test_weaviate_mongodb_integration.py # Integration tests
+├── test_rag_service.py                  # RAG service tests
+└── README.md                            # This file
 ```
 
-## اجرای تست‌ها
+## Test Categories
 
-### اجرای تمام تست‌ها
+### Unit Tests
+Fast tests with no external dependencies or mocked dependencies.
+
+```bash
+pytest -m unit
+```
+
+### Integration Tests
+Tests that require external services (MongoDB, Weaviate).
+
+```bash
+pytest -m integration
+```
+
+### Service-Specific Tests
+
+**Weaviate Tests:**
+```bash
+pytest -m weaviate
+```
+
+**MongoDB Tests:**
+```bash
+pytest -m mongodb
+```
+
+**Slow Tests:**
+```bash
+pytest -m slow
+```
+
+## Prerequisites
+
+### Required Services
+
+1. **MongoDB** (for all tests)
+   ```bash
+   # Docker
+   docker run -d -p 27017:27017 --name mongodb mongo:latest
+   
+   # Or use your existing MongoDB instance
+   ```
+
+2. **Weaviate** (for Weaviate and integration tests)
+   ```bash
+   # Docker Compose (recommended)
+   docker-compose up -d
+   
+   # Or standalone Docker
+   docker run -d -p 8080:8080 -p 50051:50051 \
+     -e QUERY_DEFAULTS_LIMIT=25 \
+     -e AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true \
+     -e PERSISTENCE_DATA_PATH='/var/lib/weaviate' \
+     cr.weaviate.io/semitechnologies/weaviate:latest
+   ```
+
+### Environment Variables
+
+Create a `.env.test` file or set these environment variables:
+
+```bash
+# MongoDB
+DATABASE_URL=mongodb://localhost:27017/SallyChatBot_Test
+TEST_DATABASE_URL=mongodb://localhost:27017/SallyChatBot_Test
+
+# Weaviate
+WEAVIATE_URL=http://localhost:8080
+WEAVIATE_API_KEY=  # Optional for local development
+
+# OpenAI (for vectorization tests)
+OPENAI_API_KEY=your_openai_key_here
+Embedder_API_KEY=your_embedder_key_here  # Alternative to OPENAI_API_KEY
+
+# Models
+RAG_MODEL=gpt-4
+CHAT_MODEL=gpt-4
+METADATA_MODEL=gpt-4
+```
+
+## Running Tests
+
+### Run All Tests
 ```bash
 pytest
 ```
 
-### اجرای تست‌های خاص
+### Run Specific Test File
 ```bash
-# تست احراز هویت
-pytest tests/test_auth.py
-
-# تست تیکت‌ها
-pytest tests/test_tickets.py
-
-# تست پایگاه دانش
-pytest tests/test_knowledge_base.py
-
-# تست مدیریت ادمین
-pytest tests/test_admin_management.py
+pytest tests/test_weaviate_connection.py
 ```
 
-### اجرای تست‌های خاص با جزئیات بیشتر
+### Run Specific Test Class
 ```bash
-pytest tests/test_auth.py::TestCustomerRegistration::test_customer_registration_success -v
+pytest tests/test_weaviate_connection.py::TestWeaviateConnection
 ```
 
-### اجرای تست‌ها با پوشش کد
+### Run Specific Test Function
 ```bash
-pytest --cov=app --cov-report=html
+pytest tests/test_weaviate_connection.py::TestWeaviateConnection::test_weaviate_connection_success
 ```
 
-## تنظیمات تست
+### Run with Verbose Output
+```bash
+pytest -v
+```
 
-### متغیرهای محیطی
-- `TEST_DATABASE_URL`: URL دیتابیس تست (پیش‌فرض: `mongodb://localhost:27017/test_sally_db`)
-- `TEST_DATABASE_NAME`: نام دیتابیس تست (پیش‌فرض: `test_sally_db`)
-
-### تنظیمات pytest
-فایل `pytest.ini` شامل تنظیمات پایه pytest است.
-
-## فیکسچرهای تست
-
-### فیکسچرهای پایه
-- `test_db`: راه‌اندازی دیتابیس تست و ایجاد نقش‌های پیش‌فرض
-- `client`: کلاینت HTTPX برای تست API
-- `faker`: تولید داده‌های تصادفی برای تست
-
-### فیکسچرهای کاربران
-- `super_admin_user`: کاربر SuperAdmin تست
-- `admin_user`: کاربر Admin تست
-- `customer_user`: کاربر Customer تست
-
-### فیکسچرهای توکن
-- `super_admin_token`: توکن JWT SuperAdmin
-- `admin_token`: توکن JWT Admin
-- `customer_token`: توکن JWT Customer
-
-### فیکسچرهای داده‌ها
-- `test_ticket`: تیکت تست
-- `test_category`: دسته‌بندی تست
-- `test_article`: مقاله تست
-
-## پوشش تست‌ها
-
-تست‌ها تمام سناریوهای زیر را پوشش می‌دهند:
-
-### احراز هویت
-- ✅ ثبت‌نام مشتری موفق
-- ✅ جلوگیری از ثبت‌نام با ایمیل تکراری
-- ✅ ثبت‌نام ادمین توسط SuperAdmin
-- ✅ جلوگیری از ثبت‌نام ادمین توسط Admin عادی
-- ✅ ورود موفق برای همه انواع کاربر
-- ✅ جلوگیری از ورود با رمز عبور اشتباه
-- ✅ جلوگیری از ورود کاربر غیرفعال
-- ✅ ساختار صحیح توکن JWT
-
-### تیکت‌ها
-- ✅ ایجاد تیکت توسط مشتری
-- ✅ پاسخ مشتری به تیکت خود
-- ✅ جلوگیری از پاسخ مشتری به تیکت دیگران
-- ✅ پاسخ ادمین به هر تیکتی
-- ✅ مشاهده تمام تیکت‌ها توسط ادمین
-- ✅ مشاهده فقط تیکت‌های خود توسط مشتری
-- ✅ اختصاص تیکت توسط ادمین
-- ✅ تغییر وضعیت تیکت توسط ادمین
-- ✅ تغییر خودکار وضعیت تیکت به open هنگام پاسخ مشتری
-
-### پایگاه دانش
-- ✅ مشاهده مقالات عمومی توسط مهمانان
-- ✅ عدم مشاهده مقالات مشتری توسط مهمانان
-- ✅ عدم مشاهده مقالات draft توسط مهمانان
-- ✅ مشاهده مقالات عمومی و مشتری توسط مشتریان
-- ✅ عدم مشاهده مقالات داخلی توسط مشتریان
-- ✅ ایجاد مقاله draft توسط ادمین
-- ✅ انتشار مقاله توسط SuperAdmin
-- ✅ عدم امکان انتشار مقاله توسط Admin عادی
-- ✅ حذف مقاله توسط SuperAdmin
-- ✅ عدم امکان حذف مقاله توسط Admin عادی
-
-### مدیریت ادمین
-- ✅ مشاهده لیست ادمین‌ها توسط SuperAdmin
-- ✅ عدم مشاهده لیست ادمین‌ها توسط Admin عادی
-- ✅ ایجاد ادمین جدید توسط SuperAdmin
-- ✅ عدم امکان ایجاد ادمین توسط Admin عادی
-- ✅ به‌روزرسانی اطلاعات ادمین توسط SuperAdmin
-- ✅ حذف ادمین توسط SuperAdmin
-- ✅ مدیریت مشتریان توسط Admin
-- ✅ عدم دسترسی مشتریان به endpointهای مدیریتی
-
-## نکات مهم
-
-1. **دیتابیس تست**: هر تست در دیتابیس جداگانه اجرا می‌شود و پس از پایان پاکسازی می‌شود.
-
-2. **فیکسچرها**: از فیکسچرهای pytest برای راه‌اندازی داده‌های تست استفاده شده است.
-
-3. **Authentication**: تست‌ها از JWT token برای احراز هویت استفاده می‌کنند.
-
-4. **Permissions**: تمام تست‌ها بر اساس سیستم RBAC پیاده‌سازی شده‌اند.
-
-5. **Error Handling**: تست‌ها سناریوهای خطا را نیز پوشش می‌دهند.
-
-## گزارش‌گیری
-
-برای تولید گزارش HTML از پوشش کد:
+### Run with Coverage
 ```bash
 pytest --cov=app --cov-report=html
 ```
 
-گزارش در پوشه `htmlcov` ذخیره می‌شود.
+### Run Tests Excluding Slow Tests
+```bash
+pytest -m "not slow"
+```
+
+### Run Only Integration Tests
+```bash
+pytest -m integration
+```
+
+## Test Coverage
+
+### Weaviate Tests (`test_weaviate_connection.py`)
+
+✅ Connection establishment  
+✅ Schema creation  
+✅ MarkdownNode storage  
+✅ Node deletion  
+✅ Vector search  
+✅ Cleanup operations  
+
+### MongoDB Tests (`test_mongodb_storage.py`)
+
+✅ Connection and basic operations  
+✅ Article CRUD operations  
+✅ Article queries with filters  
+✅ Search functionality  
+✅ Category operations  
+✅ Statistics gathering  
+
+### Integration Tests (`test_weaviate_mongodb_integration.py`)
+
+✅ Dual connection setup  
+✅ Article sync to Weaviate on publish  
+✅ Article update sync  
+✅ Article deletion sync  
+✅ Draft articles not synced  
+✅ Single article migration  
+✅ Bulk article migration  
+✅ Markdown parsing and tree structure  
+
+### RAG Service Tests (`test_rag_service.py`)
+
+✅ Service factory  
+✅ Document retrieval from Weaviate  
+✅ MongoDB fallback  
+✅ Visibility filtering  
+✅ Semantic search quality  
+✅ User context handling  
+
+## Common Issues and Solutions
+
+### Issue: "MongoDB not available"
+**Solution:** Ensure MongoDB is running on port 27017
+```bash
+docker ps | grep mongo
+```
+
+### Issue: "Weaviate connection failed"
+**Solution:** Check Weaviate is running and accessible
+```bash
+curl http://localhost:8080/v1/.well-known/ready
+```
+
+### Issue: "Vectorization not configured"
+**Solution:** Set OPENAI_API_KEY or Embedder_API_KEY in environment
+```bash
+export OPENAI_API_KEY=your_key_here
+```
+
+### Issue: Tests fail with "Collection already exists"
+**Solution:** Tests should handle this automatically, but you can manually clean:
+```bash
+# Delete Weaviate data
+curl -X DELETE http://localhost:8080/v1/schema/MarkdownNode
+```
+
+## Debugging Tests
+
+### Enable Debug Logging
+```bash
+pytest --log-cli-level=DEBUG
+```
+
+### Run Single Test with Print Statements
+```bash
+pytest -s tests/test_weaviate_connection.py::TestWeaviateConnection::test_weaviate_connection_success
+```
+
+### Use Pytest Debugger
+```bash
+pytest --pdb
+```
+
+### Check Test Fixtures
+```bash
+pytest --fixtures
+```
+
+## Writing New Tests
+
+### Example Unit Test
+```python
+import pytest
+
+@pytest.mark.unit
+def test_example():
+    assert 1 + 1 == 2
+```
+
+### Example Integration Test
+```python
+import pytest
+
+@pytest.mark.integration
+@pytest.mark.weaviate
+@pytest.mark.mongodb
+@pytest.mark.asyncio
+async def test_sync(weaviate_connector_async):
+    # Your test code here
+    pass
+```
+
+### Using Fixtures
+```python
+@pytest.mark.asyncio
+async def test_with_article(test_article, test_admin):
+    # test_article and test_admin are automatically created
+    assert test_article.author_id == str(test_admin.id)
+```
+
+## Continuous Integration
+
+These tests are designed to run in CI/CD pipelines. Make sure your CI environment has:
+
+1. MongoDB service
+2. Weaviate service (optional, tests will skip if unavailable)
+3. Required environment variables
+
+Example GitHub Actions:
+```yaml
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - 27017:27017
+  
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:latest
+    ports:
+      - 8080:8080
+      - 50051:50051
+```
+
+## Contributing
+
+When adding new tests:
+
+1. Use appropriate markers (`@pytest.mark.unit`, `@pytest.mark.integration`, etc.)
+2. Write descriptive test names and docstrings
+3. Clean up test data in fixtures
+4. Skip tests gracefully when services unavailable
+5. Add new test files to this README
+
+## Performance
+
+- Unit tests: < 1 second each
+- Integration tests: 1-5 seconds each
+- Slow tests: > 5 seconds (marked with `@pytest.mark.slow`)
+
+Total test suite runtime: ~30-60 seconds (depending on services and data)

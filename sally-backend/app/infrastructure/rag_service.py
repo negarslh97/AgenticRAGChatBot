@@ -37,7 +37,7 @@ class RAGService(ABC):
             return await self._retrieve_from_mongodb(query, is_public_only)
 
     async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True) -> List[Dict[str, Any]]:
-        """Retrieve documents using Weaviate vector search."""
+        """Retrieve documents using Weaviate vector search with Client-Side Vectorization."""
         logger.info("🔗 Connecting to Weaviate vector database...")
         
         try:
@@ -45,7 +45,7 @@ class RAGService(ABC):
             import warnings
             from app.core.config import settings
 
-            # Connect to Weaviate (using v3 client like the connector script)
+            # Connect to Weaviate v4 API
             weaviate_url = settings.weaviate_url_loaded or "http://localhost:8080"
             weaviate_api_key = settings.weaviate_api_key_loaded
             
@@ -55,7 +55,11 @@ class RAGService(ABC):
             # Suppress warnings temporarily
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                client = weaviate.Client(url=weaviate_url)
+                # استفاده از v4 API
+                client = weaviate.connect_to_local(
+                    host="localhost",
+                    port=8080
+                )
             
             logger.info("✅ Weaviate client created successfully")
 
@@ -88,116 +92,104 @@ class RAGService(ABC):
             else:
                 logger.info("🔓 No visibility filter: searching all documents")
 
-            # Perform near text search
-            near_text = {
-                "concepts": [query],
-                "distance": 0.7  # Cosine similarity threshold
-            }
+            # تولید vector از query برای جستجو (Client-Side Vectorization)
+            logger.info(f"🔢 تولید vector از query برای جستجو...")
+            from openai import OpenAI
             
-            logger.info(f"🎯 Building semantic search query...")
-            logger.info(f"📝 Search concepts: {near_text['concepts']}")
-            logger.info(f"📏 Distance threshold: {near_text['distance']}")
+            embedder_api_key = settings.embedder_api_key_loaded
+            embedder_base_url = settings.embedder_openai_base_url_loaded  
+            embedder_model = settings.embedder_model_loaded
+            
+            openai_client = OpenAI(
+                api_key=embedder_api_key,
+                base_url=embedder_base_url
+            )
+            
+            response = openai_client.embeddings.create(
+                model=embedder_model,
+                input=query
+            )
+            
+            query_vector = response.data[0].embedding
+            logger.info(f"✅ Query vector تولید شد (ابعاد: {len(query_vector)})")
+            
+            logger.info(f"🎯 جستجوی معنایی با vector...")
 
-            # Build the query with API key header (like in connector)
-            query_builder = client.query.get(
-                "KnowledgeBaseArticle",
-                ["title", "content", "summary", "article_id"]
-            ).with_near_text(near_text).with_limit(5).with_additional("certainty")
-            
-            # Add where filter if specified
-            if where_filter:
-                query_builder = query_builder.with_where(where_filter)
+            # استفاده از v4 API برای جستجو
+            collection = client.collections.get("MarkdownNode")
             
             logger.info("⚡ Executing Weaviate vector search...")
             
-            # Execute query using client - vectorizer config handles API keys
+            # Execute query using v4 API
             try:
-                # ابتدا سعی می‌کنیم از کلاس OpenAI
-                result = query_builder.do()
-                logger.info("✅ Weaviate query executed successfully with OpenAI vectorizer")
-
-                # اگر نتیجه خالی بود، از کلاس محلی هم جستجو کنیم
-                objects = result.get("data", {}).get("Get", {}).get("KnowledgeBaseArticle", [])
-                if not objects or len(objects) == 0:
-                    logger.info("🔄 نتیجه خالی از OpenAI، جستجو در کلاس محلی...")
-                    local_query_builder = client.query.get(
-                        "KnowledgeBaseArticleLocal",
-                        ["title", "content", "summary", "article_id"]
-                    ).with_near_text(near_text).with_limit(5).with_additional("certainty")
-
-                    # Add where filter if specified
-                    if where_filter:
-                        local_query_builder = local_query_builder.with_where(where_filter)
-
-                    local_result = local_query_builder.do()
-                    local_objects = local_result.get("data", {}).get("Get", {}).get("KnowledgeBaseArticleLocal", [])
-
-                    if local_objects:
-                        logger.info(f"✅ {len(local_objects)} نتیجه از vectorizer محلی یافت شد")
-                        # ترکیب نتایج
-                        result = local_result
-                        # تغییر نام کلاس به KnowledgeBaseArticle برای سازگاری
-                        if "data" in result and "Get" in result["data"]:
-                            result["data"]["Get"]["KnowledgeBaseArticle"] = result["data"]["Get"]["KnowledgeBaseArticleLocal"]
-                            del result["data"]["Get"]["KnowledgeBaseArticleLocal"]
+                response = collection.query.near_vector(
+                    near_vector=query_vector,
+                    limit=10,
+                    return_metadata=['distance', 'certainty']
+                )
+                
+                objects = response.objects if response.objects else []
+                logger.info(f"✅ {len(objects)} گره Markdown یافت شد")
 
             except Exception as e:
-                logger.warning(f"⚠️ OpenAI vectorizer شکست خورد، استفاده از fallback محلی: {str(e)}")
-                try:
-                    # استفاده از کلاس محلی
-                    local_query_builder = client.query.get(
-                        "KnowledgeBaseArticleLocal",
-                        ["title", "content", "summary", "article_id"]
-                    ).with_near_text(near_text).with_limit(5).with_additional("certainty")
+                logger.error(f"❌ خطا در جستجوی MarkdownNode: {str(e)}")
+                objects = []
 
-                    # Add where filter if specified
-                    if where_filter:
-                        local_query_builder = local_query_builder.with_where(where_filter)
-
-                    result = local_query_builder.do()
-                    logger.info("✅ Weaviate query executed successfully with local vectorizer")
-
-                    # تغییر نام کلاس برای سازگاری
-                    if "data" in result and "Get" in result["data"]:
-                        result["data"]["Get"]["KnowledgeBaseArticle"] = result["data"]["Get"]["KnowledgeBaseArticleLocal"]
-                        del result["data"]["Get"]["KnowledgeBaseArticleLocal"]
-
-                except Exception as local_e:
-                    logger.error(f"❌ هر دو vectorizer شکست خوردند: OpenAI={str(e)}, Local={str(local_e)}")
-                    raise local_e
-
-            objects = result.get("data", {}).get("Get", {}).get("KnowledgeBaseArticle", [])
-
-            # Handle case where objects is None (due to API key issues or other errors)
+            # Handle case where objects is None
             if objects is None:
-                logger.warning("⚠️  Weaviate returned None objects (possible API key issue)")
+                logger.warning("⚠️  Weaviate returned None objects")
                 objects = []
             
-            logger.info(f"📊 Raw results from Weaviate: {len(objects) if objects else 0} objects")
+            logger.info(f"📊 Raw results from Weaviate: {len(objects)} objects")
 
             relevant_docs = []
             for i, obj in enumerate(objects):
-                certainty = obj.get("_additional", {}).get("certainty", 0.5)
+                # در v4، metadata در obj.metadata قرار دارد
+                certainty = obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5
                 score = certainty  # Keep as float between 0-1
-                title = obj.get("title", "")
+                
+                # در v4، properties در obj.properties قرار دارند
+                title = obj.properties.get("title", "")
+                node_id = obj.properties.get("node_id", "")
+                article_id = obj.properties.get("article_id", "")
+                path = obj.properties.get("path", "")
 
-                logger.info(f"   📄 Document {i+1}: '{title[:50]}...' (Score: {score:.3f})")
+                logger.info(f"   📄 Node {i+1}: '{title[:30]}...' (Path: {path}, Score: {score:.3f})")
+
+                # Combine title and content for better context
+                full_content = obj.properties.get("full_content", "")[:1000]
+                node_content = obj.properties.get("content", "")
+
+                # Create a more informative content by combining path, title and content
+                combined_content = f"Path: {path}\nTitle: {title}\nContent: {node_content}"
+                if full_content:
+                    combined_content += f"\n\nFull Article Context: {full_content[:500]}..."
 
                 relevant_docs.append({
-                    "id": obj.get("article_id", ""),
-                    "title": title,
-                    "content": obj.get("content", "")[:1000] if obj.get("content") else "",  # Truncate content
-                    "summary": obj.get("summary", ""),
+                    "id": article_id,
+                    "node_id": node_id,
+                    "title": f"{path} - {title}",  # Include path in title for better context
+                    "content": combined_content,
+                    "path": path,
                     "score": score,
                     "source": "weaviate"
                 })
 
             logger.info(f"✅ Weaviate search completed: {len(relevant_docs)} documents found")
             logger.info(f"🎯 Query: '{query[:50]}{'...' if len(query) > 50 else ''}'")
+            
+            # بستن client
+            client.close()
             return relevant_docs
 
         except Exception as e:
             logger.error(f"Weaviate search error: {e}")
+            # بستن client در صورت خطا
+            try:
+                if 'client' in locals():
+                    client.close()
+            except:
+                pass
             raise e
 
     async def _retrieve_from_mongodb(self, query: str, is_public_only: bool = True) -> List[Dict[str, Any]]:
@@ -205,20 +197,26 @@ class RAGService(ABC):
         logger.info("🗄️  Starting MongoDB fallback search...")
         logger.info(f"📊 Search scope: {'Public only' if is_public_only else 'All documents'}")
 
-        # Initialize database connection
-        from app.infrastructure.database.mongodb import init_db
-        await init_db()
+        # Initialize database connection (only if not already initialized)
+        from app.infrastructure.database.mongodb import init_db, get_mongo_client
+        from app.domain.entities import ArticleStatus, ArticleVisibility
 
-        # Build query for articles
+        # Check if database is already initialized (e.g., in tests)
+        if get_mongo_client() is None:
+            await init_db()
+
+        # Build query for articles (using string values, not enum objects)
         if is_public_only:
             articles = await KnowledgeBaseArticle.find({
-                "status": "published",
-                "visibility": "public"
+                "status": ArticleStatus.PUBLISHED.value,  # Use .value to get string
+                "visibility": ArticleVisibility.PUBLIC.value  # Use .value to get string
             }).to_list()
         else:
             articles = await KnowledgeBaseArticle.find({
-                "status": "published"
+                "status": ArticleStatus.PUBLISHED.value  # Use .value to get string
             }).to_list()
+
+        logger.info(f"🔍 Found {len(articles)} articles in database")
 
         # Simple keyword-based retrieval (fallback method)
         query_lower = query.lower()
@@ -248,6 +246,8 @@ class RAGService(ABC):
                     "score": score,
                     "source": "mongodb"
                 })
+
+        logger.info(f"✅ MongoDB search completed: {len(relevant_docs)} documents found")
 
         # Normalize MongoDB scores to 0-1 scale (max possible score is ~25)
         max_possible_score = 25.0

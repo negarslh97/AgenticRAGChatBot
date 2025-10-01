@@ -5,7 +5,7 @@ from app.domain.entities import Admin, KnowledgeBaseArticle, ArticleStatus, Arti
 import os
 import uuid
 from pathlib import Path
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from docx import Document
 import openpyxl
 import markdown
@@ -215,6 +215,19 @@ async def upload_file(
         await article.insert()
         article_id = str(article.id)
         print(f"✅ مقاله ایجاد شد با ID: {article_id}")
+        
+        # Sync to Weaviate فقط برای مقالات منتشر شده
+        if article.status == ArticleStatus.PUBLISHED:
+            try:
+                from app.infrastructure.knowledge_base_repository import KnowledgeBaseRepository
+                repo = KnowledgeBaseRepository()
+                await repo._sync_to_weaviate(article, "create")
+                print(f"✅ Article {article_id} synced to Weaviate (PUBLISHED)")
+            except Exception as sync_error:
+                print(f"⚠️ خطا در sync با Weaviate: {str(sync_error)}")
+        else:
+            print(f"ℹ️ Article {article_id} is {article.status} - not synced to Weaviate")
+            
     except Exception as e:
         print(f"❌ خطا در ایجاد مقاله: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error creating article: {str(e)}")
