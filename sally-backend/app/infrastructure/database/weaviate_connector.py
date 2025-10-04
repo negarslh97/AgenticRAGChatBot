@@ -44,19 +44,39 @@ logger = logging.getLogger(__name__)
 
 
 class WeaviateMongoDBConnector: 
-    """اتصال‌دهنده بین Weaviate و MongoDB"""
+    """
+    اتصال‌دهنده بین Weaviate و MongoDB
+    
+    ⚠️ این کلاس برای migration و کارهای CLI استفاده می‌شود
+    ✅ برای استفاده در API، از Connection Manager استفاده کنید
+    """
 
     def __init__(self):
         self.weaviate_client = None
         self.mongodb_client = None
         self.collection_name = "SallyChatBot"
+        self._use_connection_manager = False  # برای CLI این False است
 
-    def connect_weaviate(self) -> bool:
-        """اتصال به Weaviate"""
+    def connect_weaviate(self, use_manager: bool = False) -> bool:
+        """
+        اتصال به Weaviate
+        
+        Args:
+            use_manager: اگر True باشد، از Connection Manager استفاده می‌کند
+        """
         try:
             logger.info("🔌 اتصال به Weaviate...")
 
+            if use_manager:
+                # ✅ استفاده از Connection Manager (برای API)
+                from app.infrastructure.connection_manager import WeaviateConnectionManager
+                manager = WeaviateConnectionManager()
+                self.weaviate_client = manager.get_client()
+                self._use_connection_manager = True
+                logger.info("✅ از Connection Manager استفاده شد")
+                return True
 
+            # ❌ اتصال مستقیم (فقط برای CLI و migration)
             weaviate_url = settings.weaviate_url_loaded or "http://localhost:8080"
             weaviate_api_key = settings.weaviate_api_key_loaded
             embedder_api_key = settings.embedder_api_key_loaded
@@ -87,8 +107,6 @@ class WeaviateMongoDBConnector:
             http_secure = parsed_url.scheme == "https"
 
             # اتصال به Weaviate using v4 client with proper auth
-            # توجه: OpenAI API Key باید در docker-compose.yml به عنوان environment variable تنظیم شود
-            # Weaviate خودش از OPENAI_API_KEY environment variable استفاده می‌کند
             if weaviate_api_key:
                 self.weaviate_client = weaviate.connect_to_custom(
                     http_host=http_host,
@@ -1172,10 +1190,13 @@ class WeaviateMongoDBConnector:
                 self.mongodb_client.close()
                 logger.info("🧹 اتصال MongoDB بسته شد")
 
-            if hasattr(self, 'weaviate_client') and self.weaviate_client:
+            # ✅ فقط اگر از Connection Manager استفاده نمی‌کنیم، client را ببندیم
+            if hasattr(self, 'weaviate_client') and self.weaviate_client and not self._use_connection_manager:
                 # Close Weaviate client v4
                 self.weaviate_client.close()
                 logger.info("🧹 اتصال Weaviate بسته شد")
+            elif self._use_connection_manager:
+                logger.info("ℹ️ Weaviate client توسط Connection Manager مدیریت می‌شود")
 
         except Exception as e:
             logger.error(f"❌ خطا در پاک‌سازی: {str(e)}")

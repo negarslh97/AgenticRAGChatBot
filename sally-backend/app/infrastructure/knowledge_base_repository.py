@@ -20,34 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 class KnowledgeBaseRepository:
-    """Repository برای مدیریت عملیات پایگاه دانش در MongoDB و Weaviate"""
+    """
+    Repository برای مدیریت عملیات پایگاه دانش در MongoDB و Weaviate
+    
+    ✅ همه متدها از Connection Manager استفاده می‌کنند و اتصالات را به درستی مدیریت می‌کنند
+    """
 
     def __init__(self):
-        self.weaviate_client = None
-        self._weaviate_initialized = False
-
-    async def _ensure_weaviate_client(self):
-        """Initialize Weaviate client if not already done"""
-        if self._weaviate_initialized:
-            return
-
-        try:
-            import weaviate
-            from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
-
-            connector = WeaviateMongoDBConnector()
-            await connector.connect_mongodb()
-            connector.connect_weaviate()
-
-            if connector.weaviate_client:
-                self.weaviate_client = connector.weaviate_client
-                self._weaviate_initialized = True
-                logger.info("✅ Weaviate client initialized for repository")
-            else:
-                logger.warning("⚠️ Could not initialize Weaviate client")
-
-        except Exception as e:
-            logger.error(f"❌ Error initializing Weaviate client: {str(e)}")
+        # ✅ دیگر نیازی به نگهداری client در repository نیست
+        # همه متدها از Connection Manager استفاده می‌کنند
+        pass
 
     # =============== ARTICLE CRUD OPERATIONS ===============
 
@@ -284,18 +266,8 @@ class KnowledgeBaseRepository:
             if not article:
                 return False
 
-            # حذف از Weaviate
+            # ✅ حذف از Weaviate (قبلاً کد تکراری بود، حالا فقط یکبار فراخوانی می‌شود)
             await self._sync_to_weaviate(article, "delete")
-
-            # حذف گره‌های Markdown از Weaviate
-            try:
-                from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
-                weaviate_connector = WeaviateMongoDBConnector()
-                weaviate_connector.connect_weaviate()
-                weaviate_connector.delete_markdown_nodes(str(article.id))
-                logger.info(f"🗑️ گره‌های Markdown مقاله '{article.title}' حذف شدند")
-            except Exception as delete_e:
-                logger.warning(f"⚠️ خطا در حذف گره‌های Markdown: {str(delete_e)}")
 
             # حذف از MongoDB
             await article.delete()
@@ -348,65 +320,67 @@ class KnowledgeBaseRepository:
         category_id: Optional[str] = None,
         limit: int = 20
     ) -> List[Dict[str, Any]]:
-        """جستجو در Weaviate"""
+        """جستجو در Weaviate با استفاده از MarkdownNode collection"""
         try:
-            await self._ensure_weaviate_client()
-            if not self.weaviate_client:
-                return []
-
-            # جستجو در کلاس KnowledgeBaseArticle
-            where_filter = {
-                "operator": "And",
-                "operands": [
-                    {"path": ["status"], "operator": "Equal", "valueString": "published"}
-                ]
-            }
-
-            # اضافه کردن فیلتر visibility
-            if visibility_filter:
-                visibility_values = [v.value for v in visibility_filter]
-                where_filter["operands"].append({
-                    "path": ["visibility"],
-                    "operator": "In",
-                    "valueString": visibility_values
-                })
-
-            # اضافه کردن فیلتر category
-            if category_id:
-                where_filter["operands"].append({
-                    "path": ["category_id"],
-                    "operator": "Equal",
-                    "valueString": category_id
-                })
-
-            result = (
-                self.weaviate_client.query
-                .get("KnowledgeBaseArticle", ["title", "content", "summary", "article_id", "category", "tags"])
-                .with_where(where_filter)
-                .with_near_text({"concepts": [query]})
-                .with_limit(limit)
-                .with_additional(["certainty"])
-                .do()
+            # ✅ استفاده از Connection Manager
+            from app.infrastructure.connection_manager import weaviate_client
+            from openai import OpenAI
+            from app.core.config import settings
+            
+            # تولید vector از query
+            embedder_api_key = settings.embedder_api_key_loaded
+            embedder_base_url = settings.embedder_openai_base_url_loaded
+            embedder_model = settings.embedder_model_loaded
+            
+            openai_client = OpenAI(
+                api_key=embedder_api_key,
+                base_url=embedder_base_url
             )
-
-            # پردازش نتایج
-            articles = result.get("data", {}).get("Get", {}).get("KnowledgeBaseArticle", [])
-            processed_results = []
-
-            for article in articles:
-                certainty = article.get("_additional", {}).get("certainty", 0)
-                processed_results.append({
-                    "id": article.get("article_id"),
-                    "title": article.get("title", ""),
-                    "summary": article.get("summary", ""),
-                    "score": certainty,
-                    "source": "weaviate"
-                })
-
-            return processed_results
+            
+            response = openai_client.embeddings.create(
+                model=embedder_model,
+                input=query
+            )
+            query_vector = response.data[0].embedding
+            
+            with weaviate_client() as client:
+                collection = client.collections.get("MarkdownNode")
+                
+                # جستجوی vector-based
+                search_response = collection.query.near_vector(
+                    near_vector=query_vector,
+                    limit=limit,
+                    return_metadata=['distance', 'certainty']
+                )
+                
+                processed_results = []
+                seen_article_ids = set()
+                
+                for obj in search_response.objects:
+                    article_id = obj.properties.get("article_id", "")
+                    
+                    # جلوگیری از تکرار مقالات
+                    if article_id in seen_article_ids:
+                        continue
+                    seen_article_ids.add(article_id)
+                    
+                    certainty = obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5
+                    
+                    processed_results.append({
+                        "id": article_id,
+                        "title": obj.properties.get("title", ""),
+                        "summary": obj.properties.get("content", "")[:200],
+                        "score": certainty,
+                        "source": "weaviate"
+                    })
+                
+                return processed_results
+            # ✅ client به صورت خودکار بسته می‌شود
 
         except Exception as e:
             logger.error(f"❌ خطا در جستجوی Weaviate: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
 
     async def _search_mongodb(
@@ -516,29 +490,29 @@ class KnowledgeBaseRepository:
             True اگر مقاله در Weaviate وجود داشته باشد
         """
         try:
-            from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+            # ✅ استفاده از Connection Manager به جای ایجاد اتصال جدید
+            from app.infrastructure.connection_manager import weaviate_client
             from weaviate.classes.query import Filter
             
-            weaviate_connector = WeaviateMongoDBConnector()
-            weaviate_connector.connect_weaviate()
-
-            # جستجوی گره‌های مربوط به این article_id
-            collection = weaviate_connector.weaviate_client.collections.get("MarkdownNode")
-            
-            # Query for nodes with this article_id using proper Filter syntax
-            response = collection.query.fetch_objects(
-                filters=Filter.by_property("article_id").equal(article_id),
-                limit=1
-            )
-            
-            has_nodes = len(response.objects) > 0
-            
-            if has_nodes:
-                logger.info(f"✅ مقاله {article_id} در Weaviate یافت شد ({len(response.objects)} گره)")
-            else:
-                logger.info(f"❌ مقاله {article_id} در Weaviate یافت نشد")
-            
-            return has_nodes
+            with weaviate_client() as client:
+                # جستجوی گره‌های مربوط به این article_id
+                collection = client.collections.get("MarkdownNode")
+                
+                # Query for nodes with this article_id using proper Filter syntax
+                response = collection.query.fetch_objects(
+                    filters=Filter.by_property("article_id").equal(article_id),
+                    limit=1
+                )
+                
+                has_nodes = len(response.objects) > 0
+                
+                if has_nodes:
+                    logger.info(f"✅ مقاله {article_id} در Weaviate یافت شد ({len(response.objects)} گره)")
+                else:
+                    logger.info(f"❌ مقاله {article_id} در Weaviate یافت نشد")
+                
+                return has_nodes
+            # ✅ client به صورت خودکار بسته می‌شود
 
         except Exception as e:
             logger.error(f"❌ خطا در بررسی وجود مقاله در Weaviate: {str(e)}")
@@ -559,38 +533,85 @@ class KnowledgeBaseRepository:
             operation: نوع عملیات (create/update/delete)
         """
         try:
-            # اتصال به Weaviate برای ذخیره ساختار درختی
-            from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
-            weaviate_connector = WeaviateMongoDBConnector()
-            weaviate_connector.connect_weaviate()
-
-            if operation == "delete":
-                # حذف گره‌های Markdown از Weaviate
-                weaviate_connector.delete_markdown_nodes(str(article.id))
-                logger.info(f"🗑️ گره‌های Markdown مقاله '{article.title}' از Weaviate حذف شدند")
-
-            elif operation in ["create", "update"]:
-                # ذخیره ساختار درختی Markdown
-                try:
-                    from app.infrastructure.markdown_parser import markdown_parser
-
-                    # ایجاد درخت Markdown با عنوان مقاله به عنوان root node
-                    tree = markdown_parser.parse_to_tree(
-                        article.content_markdown, 
-                        str(article.id),
-                        article_title=article.title  # ✅ عنوان اصلی از MongoDB
+            # ✅ استفاده از Connection Manager به جای ایجاد اتصال جدید
+            from app.infrastructure.connection_manager import weaviate_client
+            from weaviate.classes.query import Filter
+            
+            with weaviate_client() as client:
+                if operation == "delete":
+                    # حذف گره‌های Markdown از Weaviate
+                    collection = client.collections.get("MarkdownNode")
+                    collection.data.delete_many(
+                        where=Filter.by_property("article_id").equal(str(article.id))
                     )
+                    logger.info(f"🗑️ گره‌های Markdown مقاله '{article.title}' از Weaviate حذف شدند")
 
-                    if tree.get_all_nodes():
-                        # ذخیره درخت در Weaviate
-                        await weaviate_connector.save_markdown_tree(tree, article.content_markdown)
-                        logger.info(f"🌳 ساختار درختی مقاله '{article.title}' ذخیره شد ({len(tree.get_all_nodes())} گره)")
-                    else:
-                        logger.info(f"📄 مقاله '{article.title}' فاقد ساختار درختی است")
+                elif operation in ["create", "update"]:
+                    # ذخیره ساختار درختی Markdown
+                    try:
+                        from app.infrastructure.markdown_parser import markdown_parser
+                        from openai import OpenAI
 
-                except Exception as tree_e:
-                    logger.warning(f"⚠️ خطا در ذخیره ساختار درختی: {str(tree_e)}")
-                    # ادامه عملیات بدون شکست خوردن کل فرآیند
+                        # ایجاد درخت Markdown با عنوان مقاله به عنوان root node
+                        tree = markdown_parser.parse_to_tree(
+                            article.content_markdown, 
+                            str(article.id),
+                            article_title=article.title  # ✅ عنوان اصلی از MongoDB
+                        )
+
+                        if tree.get_all_nodes():
+                            # ذخیره درخت در Weaviate با vectorization
+                            from app.core.config import settings
+                            
+                            all_nodes = tree.get_all_nodes()
+                            logger.info(f"🔢 تولید {len(all_nodes)} vector با OpenAI...")
+                            
+                            # تولید vectorها
+                            embedder_api_key = settings.embedder_api_key_loaded
+                            embedder_base_url = settings.embedder_openai_base_url_loaded
+                            embedder_model = settings.embedder_model_loaded
+                            
+                            openai_client = OpenAI(
+                                api_key=embedder_api_key,
+                                base_url=embedder_base_url
+                            )
+                            
+                            texts_to_vectorize = [f"{node.title}\n\n{node.content}" for node in all_nodes]
+                            response = openai_client.embeddings.create(
+                                model=embedder_model,
+                                input=texts_to_vectorize
+                            )
+                            vectors = [item.embedding for item in response.data]
+                            
+                            # حذف گره‌های قدیمی
+                            collection = client.collections.get("MarkdownNode")
+                            collection.data.delete_many(
+                                where=Filter.by_property("article_id").equal(str(article.id))
+                            )
+                            
+                            # ذخیره گره‌های جدید
+                            for idx, node in enumerate(all_nodes):
+                                node_data = {
+                                    "node_id": node.id,
+                                    "article_id": str(article.id),
+                                    "title": node.title,
+                                    "level": node.level,
+                                    "content": node.content,
+                                    "parent_id": node.parent_id,
+                                    "path": node.path,
+                                    "order": node.order,
+                                    "full_content": article.content_markdown
+                                }
+                                collection.data.insert(properties=node_data, vector=vectors[idx])
+                            
+                            logger.info(f"🌳 ساختار درختی مقاله '{article.title}' ذخیره شد ({len(all_nodes)} گره)")
+                        else:
+                            logger.info(f"📄 مقاله '{article.title}' فاقد ساختار درختی است")
+
+                    except Exception as tree_e:
+                        logger.warning(f"⚠️ خطا در ذخیره ساختار درختی: {str(tree_e)}")
+                        # ادامه عملیات بدون شکست خوردن کل فرآیند
+            # ✅ client به صورت خودکار بسته می‌شود
 
         except Exception as e:
             logger.error(f"❌ خطا در همگام‌سازی با Weaviate: {str(e)}")

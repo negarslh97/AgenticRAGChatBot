@@ -6,7 +6,7 @@ from datetime import datetime
 
 from app.domain.entities import (
     Conversation, Message, Customer, Admin, GuestSession, UnansweredQuestion,
-    MessageRating
+    MessageRating, SenderType
 )
 from app.infrastructure.rag_service import get_rag_service
 from app.core.config import settings
@@ -91,13 +91,21 @@ class ChatUseCases:
             await conversation.insert()
             logger.info(f"✅ Created admin conversation: {conversation.id}")
         
+        # ✅ تشخیص نقش دقیق ادمین
+        sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
+        
         # Save user message
         user_message = Message(
             conversation_id=str(conversation.id),
             content=content,
-            sender_type="admin",
+            sender_type=sender_type,
             sender_id=str(admin.id),
-            metadata={"rag_type": rag_type, "admin_email": admin.email}
+            metadata={
+                "rag_type": rag_type, 
+                "admin_email": admin.email,
+                "admin_name": admin.full_name,
+                "admin_role": admin.role_name
+            }
         )
         await user_message.insert()
         
@@ -240,18 +248,23 @@ class ChatUseCases:
             await conversation.insert()
             logger.info(f"Created new admin conversation: {conversation.id}")
 
+        # ✅ تشخیص نقش دقیق ادمین
+        sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
+        
         # Save user message
         user_message = Message(
             conversation_id=str(conversation.id),
             content=content,
-            sender_type="admin",
+            sender_type=sender_type,
             sender_id=str(admin.id),
             is_failed=False,
             failure_reason=None,
             metadata={
                 "rag_type": rag_type,
                 "admin_email": admin.email,
-                "admin_name": admin.full_name
+                "admin_name": admin.full_name,
+                "admin_role": admin.role_name,
+                "timestamp": datetime.utcnow().isoformat()
             }
         )
         await user_message.insert()

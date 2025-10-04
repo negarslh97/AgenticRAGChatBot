@@ -13,6 +13,11 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown events."""
     # Startup code
     logger.info("Starting up the application...")
+    
+    # Initialize connection managers
+    from app.infrastructure.connection_manager import startup_connections
+    await startup_connections()
+    
     await init_db()
 
     # Log existing roles in database for debugging
@@ -68,6 +73,10 @@ async def lifespan(app: FastAPI):
 
     # Shutdown code
     logger.info("Shutting down the application...")
+    
+    # Cleanup connections
+    from app.infrastructure.connection_manager import shutdown_connections
+    await shutdown_connections()
 
     # Close MongoDB client
     from app.infrastructure.database.mongodb import close_mongo_client
@@ -214,6 +223,10 @@ app.include_router(admin_router, prefix="/api/admin", tags=["👨‍💼 Admin M
 # PUBLISH_ARTICLES, DELETE_ARTICLES, MANAGE_SYSTEM_SETTINGS
 app.include_router(admin_kb_router, prefix="/api/super-admin/kb", tags=["👑 Super Admin Knowledge Base"])
 app.include_router(upload_router, prefix="/api/super-admin", tags=["👑 Super Admin Upload"])
+
+# System Routes
+from app.api.routes.system_routes import router as system_router
+app.include_router(system_router, prefix="/api/system", tags=["🔧 System Monitoring"])
 
 # ============================================================================
 

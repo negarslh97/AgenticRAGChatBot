@@ -37,7 +37,31 @@ class ChatMessage(BaseModel):
 class AdminChatMessage(BaseModel):
     content: str
     conversation_id: Optional[str] = None
-    rag_type: str = "simple"  # "simple" or "agentic"
+    rag_type: str = "simple"  # "simple", "agentic", or "advanced_agentic"
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdvancedAgenticRequest(BaseModel):
+    """درخواست برای Advanced Agentic RAG"""
+    query: str
+    conversation_id: Optional[str] = None
+    include_metadata: bool = True  # شامل شدن metadata مثل action_history
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdvancedAgenticResponse(BaseModel):
+    """پاسخ Advanced Agentic RAG"""
+    response: str
+    sources: List[dict]
+    confidence: float
+    complexity: str
+    actions_taken: List[str]
+    reflection_notes: List[str]
+    errors: List[str]
+    session_id: str
+    conversation_id: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -107,8 +131,8 @@ async def send_admin_message(
         logger.info(f"Admin chat message received - Admin: {current_admin.email}, RAG type: {message.rag_type}, Content length: {len(message.content)}, Conversation ID: {message.conversation_id}")
         
         # Validate RAG type
-        if message.rag_type not in ["simple", "agentic"]:
-            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple' or 'agentic'")
+        if message.rag_type not in ["simple", "agentic", "advanced_agentic"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple', 'agentic', or 'advanced_agentic'")
         
         response = await ChatUseCases.send_admin_message(
             content=message.content,
@@ -143,8 +167,8 @@ async def send_admin_message_stream(
         logger.info(f"🌊 Admin streaming message - Admin: {current_admin.email}, RAG type: {message.rag_type}")
         
         # Validate RAG type
-        if message.rag_type not in ["simple", "agentic"]:
-            raise HTTPException(status_code=400, detail="Invalid RAG type")
+        if message.rag_type not in ["simple", "agentic", "advanced_agentic"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple', 'agentic', or 'advanced_agentic'")
         
         async def generate_stream():
             """Generator for admin streaming"""
@@ -479,6 +503,114 @@ async def get_article_for_highlighting(
     except Exception as e:
         logger.error(f"Error getting article: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/advanced-agentic", response_model=AdvancedAgenticResponse)
+async def advanced_agentic_rag(
+    request: AdvancedAgenticRequest,
+    current_admin: Optional[Admin] = Depends(get_optional_admin),
+    current_customer: Optional[Customer] = Depends(get_optional_customer)
+):
+    """
+    Advanced Agentic RAG endpoint با قابلیت‌های پیشرفته:
+    - Multi-agent workflow با LangGraph
+    - Tree-aware search در ساختار درختی Markdown
+    - Query decomposition برای سوالات پیچیده
+    - Self-reflection و quality assessment
+    
+    این endpoint برای سوالات پیچیده و تحقیقات عمیق مناسب است.
+    """
+    
+    try:
+        logger.info("="*80)
+        logger.info("🚀 Advanced Agentic RAG Request Received")
+        logger.info(f"📝 Query: {request.query}")
+        logger.info(f"👤 User: {'Admin' if current_admin else 'Customer' if current_customer else 'Guest'}")
+        logger.info("="*80)
+        
+        # بررسی دسترسی - فقط کاربران احراز هویت شده
+        current_user = current_admin or current_customer
+        if not current_user:
+            raise HTTPException(
+                status_code=401, 
+                detail="Authentication required for Advanced Agentic RAG"
+            )
+        
+        # Import services
+        from app.infrastructure.langchain_utils import langchain_service
+        from app.infrastructure.rag_service import get_rag_service
+        from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
+        from app.domain.entities import Conversation, Message
+        from bson import ObjectId
+        
+        # دریافت RAG service
+        rag_service = get_rag_service(current_user)
+        
+        # دریافت Advanced Agentic RAG
+        advanced_rag = get_advanced_agentic_rag(
+            langchain_service, 
+            rag_service
+        )
+        
+        # دریافت تاریخچه مکالمه از MongoDB
+        conversation_history = []
+        if request.conversation_id:
+            try:
+                conversation = await Conversation.get(ObjectId(request.conversation_id))
+                if conversation:
+                    # دریافت پیام‌های قبلی
+                    messages = await Message.find(
+                        {"conversation_id": request.conversation_id}
+                    ).sort("created_at", 1).to_list()
+                    
+                    # تبدیل به فرمت مورد نیاز
+                    for msg in messages[-10:]:  # فقط 10 پیام آخر
+                        conversation_history.append({
+                            "role": "user" if msg.sender_type in ["Customer", "Admin"] else "assistant",
+                            "content": msg.content
+                        })
+                    
+                    logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not load conversation history: {e}")
+        
+        # اجرای workflow با تاریخچه
+        result = await advanced_rag.run(
+            query=request.query,
+            user_id=str(current_user.id),
+            conversation_history=conversation_history
+        )
+        
+        logger.info("="*80)
+        logger.info("✅ Advanced Agentic RAG Completed")
+        logger.info(f"🎯 Confidence: {result['confidence']:.2f}")
+        logger.info(f"🔍 Complexity: {result['complexity']}")
+        logger.info(f"📊 Actions Taken: {len(result['actions_taken'])}")
+        logger.info("="*80)
+        
+        # آماده‌سازی پاسخ
+        response_data = {
+            "response": result["response"],
+            "sources": result["sources"],
+            "confidence": result["confidence"],
+            "complexity": result["complexity"],
+            "actions_taken": result["actions_taken"],
+            "reflection_notes": result.get("reflection_notes", []),
+            "errors": result.get("errors", []),
+            "session_id": result["session_id"],
+            "conversation_id": request.conversation_id
+        }
+        
+        return AdvancedAgenticResponse(**response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Advanced Agentic RAG error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Advanced Agentic RAG failed: {str(e)}"
+        )
 
 
 @router.post("/create-sample-articles")

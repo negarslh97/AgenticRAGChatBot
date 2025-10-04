@@ -199,62 +199,28 @@ class RAGService(ABC):
         logger.info("🔗 Connecting to Weaviate vector database...")
         
         try:
-            import weaviate
-            import warnings
-            from app.core.config import settings
-
-            # Connect to Weaviate v4 API
-            weaviate_url = settings.weaviate_url_loaded or "http://localhost:8080"
-            weaviate_api_key = settings.weaviate_api_key_loaded
-            
-            logger.info(f"🌐 Weaviate URL: {weaviate_url}")
-            logger.info(f"🔑 Weaviate API Key: {'✅ Set' if weaviate_api_key else '❌ Not Set'}")
-
-            # Suppress warnings temporarily
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                # استفاده از v4 API
-                client = weaviate.connect_to_local(
-                    host="localhost",
-                    port=8080
-                )
-            
-            logger.info("✅ Weaviate client created successfully")
-
-            # Set API key in environment AFTER creating client (like in connector)
             import os
+            from app.core.config import settings
+            from app.infrastructure.connection_manager import weaviate_client
+            from openai import OpenAI
+
+            logger.info(f"🌐 Weaviate URL: {settings.weaviate_url_loaded or 'http://localhost:8080'}")
+            logger.info(f"🔑 Weaviate API Key: {'✅ Set' if settings.weaviate_api_key_loaded else '❌ Not Set'}")
+
+            # Set API key in environment
             embedder_api_key = settings.embedder_api_key_loaded
             openai_api_key = settings.openai_api_key_loaded
-            
-            # Try embedder_api_key first, then openai_api_key
             api_key_to_use = embedder_api_key or openai_api_key
             
             if api_key_to_use:
-                # Set both environment variables for compatibility
                 os.environ['Embedder_API_KEY'] = api_key_to_use
                 logger.info("🔑 OpenAI API key set for embeddings")
                 logger.info(f"🔑 API Key source: {'Embedder' if embedder_api_key else 'OpenAI'}")
             else:
                 logger.warning("⚠️  No OpenAI API key found for embeddings")
-                logger.warning("⚠️  Please set OPENAI_API_KEY or Embedder_API_KEY environment variable")
 
-            # Build where filter for visibility
-            where_filter = None
-            if is_public_only:
-                where_filter = {
-                    "path": ["visibility"],
-                    "operator": "Equal",
-                    "valueText": "public"
-                }
-                logger.info("🔒 Applied visibility filter: public documents only")
-            else:
-                logger.info("🔓 No visibility filter: searching all documents")
-
-            # تولید vector از query برای جستجو (Client-Side Vectorization)
+            # تولید vector از query
             logger.info(f"🔢 تولید vector از query برای جستجو...")
-            from openai import OpenAI
-            
-            embedder_api_key = settings.embedder_api_key_loaded
             embedder_base_url = settings.embedder_openai_base_url_loaded  
             embedder_model = settings.embedder_model_loaded
             
@@ -270,84 +236,87 @@ class RAGService(ABC):
             
             query_vector = response.data[0].embedding
             logger.info(f"✅ Query vector تولید شد (ابعاد: {len(query_vector)})")
-            
-            logger.info(f"🎯 جستجوی معنایی با vector...")
 
-            # استفاده از v4 API برای جستجو
-            collection = client.collections.get("MarkdownNode")
-            
-            logger.info("⚡ Executing Weaviate vector search...")
-            
-            # Execute query using v4 API
-            try:
-                response = collection.query.near_vector(
-                    near_vector=query_vector,
-                    limit=10,
-                    return_metadata=['distance', 'certainty']
-                )
+            # استفاده از Connection Manager - کل عملیات داخل with
+            with weaviate_client() as client:
+                logger.info("✅ Weaviate client ready (using connection manager)")
                 
-                objects = response.objects if response.objects else []
-                logger.info(f"✅ {len(objects)} گره Markdown یافت شد")
+                # Build where filter for visibility
+                if is_public_only:
+                    logger.info("🔒 Applied visibility filter: public documents only")
+                else:
+                    logger.info("🔓 No visibility filter: searching all documents")
 
-            except Exception as e:
-                logger.error(f"❌ خطا در جستجوی MarkdownNode: {str(e)}")
-                objects = []
+                logger.info(f"🎯 جستجوی معنایی با vector...")
 
-            # Handle case where objects is None
-            if objects is None:
-                logger.warning("⚠️  Weaviate returned None objects")
-                objects = []
-            
-            logger.info(f"📊 Raw results from Weaviate: {len(objects)} objects")
-
-            relevant_docs = []
-            for i, obj in enumerate(objects):
-                # در v4، metadata در obj.metadata قرار دارد
-                certainty = obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5
-                score = certainty  # Keep as float between 0-1
+                # استفاده از v4 API برای جستجو
+                collection = client.collections.get("MarkdownNode")
                 
-                # در v4، properties در obj.properties قرار دارند
-                title = obj.properties.get("title", "")
-                node_id = obj.properties.get("node_id", "")
-                article_id = obj.properties.get("article_id", "")
-                path = obj.properties.get("path", "")
+                logger.info("⚡ Executing Weaviate vector search...")
+                
+                # Execute query using v4 API
+                try:
+                    response = collection.query.near_vector(
+                        near_vector=query_vector,
+                        limit=10,
+                        return_metadata=['distance', 'certainty']
+                    )
+                    
+                    objects = response.objects if response.objects else []
+                    logger.info(f"✅ {len(objects)} گره Markdown یافت شد")
 
-                logger.info(f"   📄 Node {i+1}: '{title[:30]}...' (Path: {path}, Score: {score:.3f})")
+                except Exception as e:
+                    logger.error(f"❌ خطا در جستجوی MarkdownNode: {str(e)}")
+                    objects = []
 
-                # Combine title and content for better context
-                full_content = obj.properties.get("full_content", "")[:1000]
-                node_content = obj.properties.get("content", "")
+                # Handle case where objects is None
+                if objects is None:
+                    logger.warning("⚠️  Weaviate returned None objects")
+                    objects = []
+                
+                logger.info(f"📊 Raw results from Weaviate: {len(objects)} objects")
 
-                # Create a more informative content by combining path, title and content
-                combined_content = f"Path: {path}\nTitle: {title}\nContent: {node_content}"
-                if full_content:
-                    combined_content += f"\n\nFull Article Context: {full_content[:500]}..."
+                relevant_docs = []
+                for i, obj in enumerate(objects):
+                    # در v4، metadata در obj.metadata قرار دارد
+                    certainty = obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5
+                    score = certainty  # Keep as float between 0-1
+                    
+                    # در v4، properties در obj.properties قرار دارند
+                    title = obj.properties.get("title", "")
+                    node_id = obj.properties.get("node_id", "")
+                    article_id = obj.properties.get("article_id", "")
+                    path = obj.properties.get("path", "")
 
-                relevant_docs.append({
-                    "id": article_id,
-                    "node_id": node_id,
-                    "title": f"{path} - {title}",  # Include path in title for better context
-                    "content": combined_content,
-                    "path": path,
-                    "score": score,
-                    "source": "weaviate"
-                })
+                    logger.info(f"   📄 Node {i+1}: '{title[:30]}...' (Path: {path}, Score: {score:.3f})")
 
-            logger.info(f"✅ Weaviate search completed: {len(relevant_docs)} documents found")
-            logger.info(f"🎯 Query: '{query[:50]}{'...' if len(query) > 50 else ''}'")
-            
-            # بستن client
-            client.close()
-            return relevant_docs
+                    # Combine title and content for better context
+                    full_content = obj.properties.get("full_content", "")[:1000]
+                    node_content = obj.properties.get("content", "")
+
+                    # Create a more informative content by combining path, title and content
+                    combined_content = f"Path: {path}\nTitle: {title}\nContent: {node_content}"
+                    if full_content:
+                        combined_content += f"\n\nFull Article Context: {full_content[:500]}..."
+
+                    relevant_docs.append({
+                        "id": article_id,
+                        "node_id": node_id,
+                        "title": f"{path} - {title}",  # Include path in title for better context
+                        "content": combined_content,
+                        "path": path,
+                        "score": score,
+                        "source": "weaviate"
+                    })
+
+                logger.info(f"✅ Weaviate search completed: {len(relevant_docs)} documents found")
+                logger.info(f"🎯 Query: '{query[:50]}{'...' if len(query) > 50 else ''}'")
+                
+                return relevant_docs
+            # client به صورت خودکار بسته می‌شود توسط context manager
 
         except Exception as e:
             logger.error(f"Weaviate search error: {e}")
-            # بستن client در صورت خطا
-            try:
-                if 'client' in locals():
-                    client.close()
-            except:
-                pass
             raise e
 
     async def _retrieve_from_mongodb(self, query: str, is_public_only: bool = True) -> List[Dict[str, Any]]:

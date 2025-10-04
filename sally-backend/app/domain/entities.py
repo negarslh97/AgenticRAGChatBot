@@ -140,6 +140,15 @@ class Conversation(Document):
         name = "conversations"
 
 
+class SenderType(str, Enum):
+    """استاندارد نوع فرستنده پیام - با CamelCase"""
+    SUPER_ADMIN = "SuperAdmin"
+    ADMIN = "Admin"
+    CUSTOMER = "Customer"
+    GUEST = "Guest"
+    AI = "AI"
+
+
 class MessageRating(BaseModel):
     """User rating for AI responses."""
     rating: int  # 1-5 scale
@@ -149,15 +158,22 @@ class MessageRating(BaseModel):
 
 
 class Message(Document):
-    """Message belongs to a conversation."""
+    """
+    Message belongs to a conversation.
+    
+    ✅ استاندارد ذخیره‌سازی:
+    - sender_type: از Enum استفاده می‌کند (SuperAdmin, Admin, Customer, Guest, AI)
+    - metadata: شامل تمام اطلاعات مدل، token usage، sources و غیره
+    - rating: امتیاز کاربر برای پاسخ‌های AI
+    """
     conversation_id: str
     content: str
-    sender_type: str = "Guest"  # Who sent this message
-    sender_id: Optional[str] = None  # ID of the sender (user ID or None for AI/guest)
-    is_failed: bool = False  # Whether AI failed to generate response
-    failure_reason: Optional[str] = None  # Reason for failure if is_failed=True
-    metadata: Optional[Dict[str, Any]] = None  # Rich metadata
-    rating: Optional[MessageRating] = None  # User rating for AI responses
+    sender_type: str = SenderType.GUEST.value  # نوع فرستنده (از SenderType enum)
+    sender_id: Optional[str] = None  # شناسه فرستنده (برای کاربران واقعی)
+    is_failed: bool = False  # آیا پاسخ AI با خطا مواجه شد؟
+    failure_reason: Optional[str] = None  # دلیل خطا (در صورت وجود)
+    metadata: Optional[Dict[str, Any]] = None  # اطلاعات کامل (model, tokens, sources, confidence, ...)
+    rating: Optional[MessageRating] = None  # امتیاز کاربر (برای پاسخ‌های AI)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
