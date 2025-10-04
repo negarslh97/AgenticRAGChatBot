@@ -505,6 +505,205 @@ async def get_article_for_highlighting(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/advanced-agentic/stream")
+async def advanced_agentic_rag_stream(
+    request: AdvancedAgenticRequest,
+    current_admin: Optional[Admin] = Depends(get_optional_admin),
+    current_customer: Optional[Customer] = Depends(get_optional_customer)
+):
+    """
+    🌊 Advanced Agentic RAG with Streaming Support
+    
+    این endpoint پاسخ را به صورت تدریجی و لحظه‌ای ارسال می‌کند.
+    مناسب برای سوالات پیچیده که به تحلیل عمیق نیاز دارند.
+    """
+    
+    try:
+        logger.info("="*80)
+        logger.info("🌊 Advanced Agentic RAG Streaming Request Received")
+        logger.info(f"📝 Query: {request.query}")
+        logger.info(f"👤 User: {'Admin' if current_admin else 'Customer' if current_customer else 'Guest'}")
+        logger.info("="*80)
+        
+        # بررسی دسترسی - فقط کاربران احراز هویت شده
+        current_user = current_admin or current_customer
+        if not current_user:
+            raise HTTPException(
+                status_code=401, 
+                detail="Authentication required for Advanced Agentic RAG"
+            )
+        
+        async def generate_stream():
+            """Generator for streaming advanced agentic response"""
+            conversation_id_str = None
+            
+            try:
+                # Import services
+                from app.infrastructure.langchain_utils import langchain_service
+                from app.infrastructure.rag_service import get_rag_service
+                from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
+                from app.domain.entities import Conversation, Message, SenderType
+                from bson import ObjectId
+                from datetime import datetime, timezone
+                
+                # دریافت RAG service
+                rag_service = get_rag_service(current_user)
+                
+                # دریافت Advanced Agentic RAG
+                advanced_rag = get_advanced_agentic_rag(
+                    langchain_service, 
+                    rag_service
+                )
+                
+                # 1️⃣ ساخت یا بازیابی Conversation
+                conversation = None
+                if request.conversation_id:
+                    try:
+                        conversation = await Conversation.get(ObjectId(request.conversation_id))
+                        if not conversation:
+                            logger.warning(f"⚠️ Conversation {request.conversation_id} not found, creating new one")
+                            conversation = None
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error loading conversation: {e}")
+                        conversation = None
+                
+                if not conversation:
+                    # ساخت conversation جدید
+                    conversation = Conversation(
+                        customer_id=str(current_user.id) if current_customer else None,
+                        admin_id=str(current_user.id) if current_admin else None,
+                        title=request.query[:50] + "..." if len(request.query) > 50 else request.query,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc)
+                    )
+                    await conversation.insert()
+                    logger.info(f"💾 Created new conversation: {conversation.id} for {'Customer' if current_customer else 'Admin'}")
+                
+                conversation_id_str = str(conversation.id)
+                
+                # Send conversation_id first
+                yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': conversation_id_str}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.01)
+                
+                # 2️⃣ ذخیره پیام کاربر
+                user_sender_type = SenderType.ADMIN.value if current_admin else SenderType.CUSTOMER.value
+                user_message = Message(
+                    conversation_id=conversation_id_str,
+                    user_id=str(current_user.id),
+                    content=request.query,
+                    sender_type=user_sender_type,
+                    created_at=datetime.now(timezone.utc),
+                    metadata={
+                        "rag_type": "agentic_stream",
+                        "endpoint": "/api/advanced-agentic/stream"
+                    }
+                )
+                await user_message.insert()
+                logger.info(f"💾 Saved user message: {user_message.id}")
+                
+                # دریافت تاریخچه مکالمه
+                conversation_history = []
+                try:
+                    messages = await Message.find(
+                        {"conversation_id": conversation_id_str}
+                    ).sort("created_at", 1).to_list()
+                    
+                    for msg in messages[-10:]:
+                        conversation_history.append({
+                            "role": "user" if msg.sender_type in ["Customer", "Admin"] else "assistant",
+                            "content": msg.content
+                        })
+                    
+                    logger.info(f"📚 Loaded {len(conversation_history)} messages")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not load conversation history: {e}")
+                
+                # اجرای workflow
+                result = await advanced_rag.run(
+                    query=request.query,
+                    user_id=str(current_user.id),
+                    conversation_history=conversation_history
+                )
+                
+                # Stream the response
+                response_text = result["response"]
+                chunk_size = 15
+                words = response_text.split()
+                
+                for i in range(0, len(words), chunk_size):
+                    chunk = " ".join(words[i:i + chunk_size])
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk + ' '}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.03)
+                
+                # Send metadata
+                metadata_event = {
+                    'type': 'metadata',
+                    'confidence': result['confidence'],
+                    'complexity': result['complexity'],
+                    'actions_taken': result['actions_taken'],
+                    'sources': result['sources']
+                }
+                yield f"data: {json.dumps(metadata_event, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.01)
+                
+                # ذخیره پیام AI
+                ai_message = Message(
+                    conversation_id=conversation_id_str,
+                    user_id=str(current_user.id),
+                    content=result["response"],
+                    sender_type=SenderType.AI.value,
+                    created_at=datetime.now(timezone.utc),
+                    metadata={
+                        "rag_type": "agentic_stream",
+                        "confidence": result["confidence"],
+                        "complexity": result["complexity"],
+                        "actions_taken": result["actions_taken"],
+                        "sources": result["sources"],
+                        "session_id": result["session_id"],
+                        "model": "x-ai/grok-4-fast"
+                    }
+                )
+                await ai_message.insert()
+                logger.info(f"💾 Saved AI message: {ai_message.id}")
+                
+                # بروزرسانی conversation
+                conversation.updated_at = datetime.now(timezone.utc)
+                await conversation.save()
+                
+                # تولید عنوان
+                try:
+                    from app.use_cases.chat_use_cases_refactored import ChatUseCases
+                    await ChatUseCases.generate_conversation_title_and_tags(conversation_id_str)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to generate title: {e}")
+                
+                logger.info(f"✅ Streaming completed")
+                yield f"data: {json.dumps({'type': 'done', 'message_id': str(ai_message.id)}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Streaming error: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Advanced Agentic RAG streaming error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Advanced Agentic RAG streaming failed: {str(e)}"
+        )
+
+
 @router.post("/advanced-agentic", response_model=AdvancedAgenticResponse)
 async def advanced_agentic_rag(
     request: AdvancedAgenticRequest,
@@ -588,6 +787,83 @@ async def advanced_agentic_rag(
         logger.info(f"📊 Actions Taken: {len(result['actions_taken'])}")
         logger.info("="*80)
         
+        # ===================================================================
+        # 💾 ذخیره‌سازی Conversation و Messages در MongoDB
+        # ===================================================================
+        from app.domain.entities import SenderType
+        from datetime import datetime, timezone
+        
+        # 1️⃣ ساخت یا بازیابی Conversation
+        if request.conversation_id:
+            try:
+                conversation = await Conversation.get(ObjectId(request.conversation_id))
+                if not conversation:
+                    logger.warning(f"⚠️ Conversation {request.conversation_id} not found, creating new one")
+                    conversation = None
+            except Exception as e:
+                logger.warning(f"⚠️ Error loading conversation: {e}")
+                conversation = None
+        else:
+            conversation = None
+        
+        if not conversation:
+            # ساخت conversation جدید
+            conversation = Conversation(
+                customer_id=str(current_user.id) if current_customer else None,
+                admin_id=str(current_user.id) if current_admin else None,
+                title=request.query[:50] + "..." if len(request.query) > 50 else request.query,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            )
+            await conversation.insert()
+            logger.info(f"💾 Created new conversation: {conversation.id} for {'Customer' if current_customer else 'Admin'}")
+        
+        conversation_id_str = str(conversation.id)
+        
+        # 2️⃣ ذخیره پیام کاربر
+        user_sender_type = SenderType.ADMIN.value if current_admin else SenderType.CUSTOMER.value
+        user_message = Message(
+            conversation_id=conversation_id_str,
+            user_id=str(current_user.id),
+            content=request.query,
+            sender_type=user_sender_type,
+            created_at=datetime.now(timezone.utc),
+            metadata={
+                "rag_type": "agentic",
+                "endpoint": "/api/advanced-agentic"
+            }
+        )
+        await user_message.insert()
+        logger.info(f"💾 Saved user message: {user_message.id}")
+        
+        # 3️⃣ ذخیره پیام AI
+        ai_message = Message(
+            conversation_id=conversation_id_str,
+            user_id=str(current_user.id),
+            content=result["response"],
+            sender_type=SenderType.AI.value,
+            created_at=datetime.now(timezone.utc),
+            metadata={
+                "rag_type": "agentic",
+                "confidence": result["confidence"],
+                "complexity": result["complexity"],
+                "actions_taken": result["actions_taken"],
+                "reflection_notes": result.get("reflection_notes", []),
+                "errors": result.get("errors", []),
+                "sources": result["sources"],
+                "session_id": result["session_id"],
+                "model": "x-ai/grok-4-fast",
+                "endpoint": "/api/advanced-agentic"
+            }
+        )
+        await ai_message.insert()
+        logger.info(f"💾 Saved AI message: {ai_message.id}")
+        
+        # 4️⃣ بروزرسانی conversation
+        conversation.updated_at = datetime.now(timezone.utc)
+        await conversation.save()
+        logger.info(f"💾 Updated conversation: {conversation_id_str}")
+        
         # آماده‌سازی پاسخ
         response_data = {
             "response": result["response"],
@@ -598,7 +874,7 @@ async def advanced_agentic_rag(
             "reflection_notes": result.get("reflection_notes", []),
             "errors": result.get("errors", []),
             "session_id": result["session_id"],
-            "conversation_id": request.conversation_id
+            "conversation_id": conversation_id_str  # 🔥 برگرداندن conversation_id جدید یا موجود
         }
         
         return AdvancedAgenticResponse(**response_data)

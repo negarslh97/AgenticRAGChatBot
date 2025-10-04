@@ -20,6 +20,7 @@ class ChatUseCases:
         """Generate AI-powered title and tags for a conversation based on its messages."""
         try:
             from bson import ObjectId
+            from app.infrastructure.langchain_utils import langchain_service
 
             # Get conversation
             conversation = await Conversation.get(ObjectId(conversation_id))
@@ -31,30 +32,62 @@ class ChatUseCases:
                 Message.conversation_id == conversation_id
             ).sort(Message.created_at).to_list()
 
-            if len(messages) < 2:  # Need at least user message + AI response
-                return {"title": conversation.title or "New Conversation", "tags": []}
+            if len(messages) < 1:  # Need at least one message
+                return {"title": conversation.title or "گفتگوی جدید", "tags": []}
 
-            # Prepare conversation content for AI
-            conversation_text = ""
-            for msg in messages[:10]:  # Use first 10 messages to avoid token limits
-                sender = "User" if msg.sender_type != "ai" else "Assistant"
-                conversation_text += f"{sender}: {msg.content}\n"
+            # 🎯 استفاده از اولین پیام کاربر به عنوان intent
+            first_user_message = None
+            for msg in messages:
+                if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"]:
+                    first_user_message = msg.content
+                    break
+            
+            if not first_user_message:
+                return {"title": conversation.title or "گفتگوی جدید", "tags": []}
 
             # Initialize OpenAI client
             if not settings.openai_api_key_loaded:
-                return {"title": conversation.title or "New Conversation", "tags": []}
+                # اگر API key نداریم، از 50 کاراکتر اول استفاده می‌کنیم
+                simple_title = first_user_message[:50] + "..." if len(first_user_message) > 50 else first_user_message
+                return {"title": simple_title, "tags": []}
 
-            # For now, use simple fallback for title/tags generation
-            # TODO: Fix OpenAI client compatibility issues
-            logger.info("Using fallback for title/tags generation")
-            return {"title": conversation.title or "New Conversation", "tags": []}
+            try:
+                # 🤖 از AI برای تولید عنوان خلاصه و مناسب استفاده می‌کنیم
+                prompt = f"""لطفاً یک عنوان کوتاه و مناسب (حداکثر 40 کاراکتر) برای این مکالمه ایجاد کن که intent کاربر را نشان دهد:
 
-            # For now, just return the existing title and empty tags
-            return {"title": conversation.title or "New Conversation", "tags": conversation.tags or []}
+پیام کاربر: "{first_user_message}"
+
+فقط عنوان را بنویس، بدون توضیح اضافی."""
+
+                model = langchain_service._get_model(settings.chat_model_loaded, force_json=False, temperature=0.3)
+                from langchain_core.prompts import ChatPromptTemplate
+                
+                prompt_template = ChatPromptTemplate.from_template("{query}")
+                chain = prompt_template | model
+                result = await chain.ainvoke({"query": prompt})
+                
+                generated_title = result.content.strip()
+                
+                # اگر عنوان خیلی طولانی است، کوتاه کن
+                if len(generated_title) > 60:
+                    generated_title = generated_title[:57] + "..."
+                
+                # بروزرسانی conversation با عنوان جدید
+                conversation.title = generated_title
+                await conversation.save()
+                
+                logger.info(f"✅ Generated title: '{generated_title}' for conversation {conversation_id}")
+                return {"title": generated_title, "tags": []}
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to generate AI title: {e}")
+                # Fallback: از 50 کاراکتر اول استفاده کن
+                simple_title = first_user_message[:50] + "..." if len(first_user_message) > 50 else first_user_message
+                return {"title": simple_title, "tags": []}
 
         except Exception as e:
             logger.error(f"Error generating title and tags: {e}")
-            return {"title": "New Conversation", "tags": [], "error": str(e)}
+            return {"title": "گفتگوی جدید", "tags": [], "error": str(e)}
 
     @staticmethod
     async def send_admin_message_stream(
@@ -485,6 +518,27 @@ class ChatUseCases:
                 "conversation_id": str(conversation.id)
             }
         
+        # 💾 Load conversation history for context
+        conversation_history = []
+        try:
+            # Load previous messages from this conversation (last 10 messages)
+            messages = await Message.find(
+                {"conversation_id": str(conversation.id)}
+            ).sort("created_at", 1).to_list()
+            
+            for msg in messages[-10:]:  # Last 10 messages
+                conversation_history.append({
+                    "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
+                    "content": msg.content
+                })
+            
+            logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load conversation history: {e}")
+        
+        # Add conversation history to context
+        context["conversation_history"] = conversation_history
+        
         # Generate AI response
         ai_message = None
         try:
@@ -888,9 +942,12 @@ class ChatUseCases:
     @staticmethod
     async def get_user_conversations(customer: Customer) -> List[Dict[str, Any]]:
         """Get customer's conversation list."""
+        logger.info(f"📋 Getting conversations for customer: {customer.id}")
         conversations = await Conversation.find(
             Conversation.customer_id == str(customer.id)
         ).sort(-Conversation.updated_at).to_list()
+        
+        logger.info(f"📋 Found {len(conversations)} conversations for customer {customer.id}")
         
         return [
             {

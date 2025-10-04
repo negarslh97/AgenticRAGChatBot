@@ -18,6 +18,7 @@ const LoginPage = lazy(() => import("./pages/LoginPage"))
 const RegisterPage = lazy(() => import("./pages/RegisterPage"))
 const DashboardPage = lazy(() => import("./pages/CustomerDashboardPage"))
 const ChatPage = lazy(() => import("./pages/ChatPage"))
+const CustomerChatPage = lazy(() => import("./pages/CustomerChatPage"))
 const TicketsPage = lazy(() => import("./pages/TicketsPage"))
 const KnowledgeBasePage = lazy(() => import("./pages/KnowledgeBasePage"))
 const AdminPanel = lazy(() => import("./pages/AdminPanel"))
@@ -92,6 +93,13 @@ const App: React.FC = () => {
               </MainLayout>
             } />
             <Route path="/chat" element={
+              <MainLayout>
+                <ProtectedRoute>
+                  <CustomerChatPage />
+                </ProtectedRoute>
+              </MainLayout>
+            } />
+            <Route path="/chat-old" element={
               <MainLayout>
                 <ProtectedRoute>
                   <ChatPage />

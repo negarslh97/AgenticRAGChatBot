@@ -238,14 +238,14 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
         access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
         access_token = create_access_token(
-            data={"sub": str(customer.id), "type": "customer"},
+            data={"sub": str(customer.id), "type": "Customer"},
             expires_delta=access_token_expires
         )
 
         return UserLoginResponse(
             access_token=access_token,
             token_type="bearer",
-            user_type="customer",
+            user_type="Customer",
             user=CustomerResponse(
                 id=str(customer.id),
                 email=customer.email,
@@ -287,7 +287,7 @@ async def _get_current_user_info(token: str):
     customer = await get_current_customer_from_token(token)
     if customer:
         return {
-            "user_type": "customer",
+            "user_type": "Customer",
             "user": {
                 "id": str(customer.id),
                 "email": customer.email,
@@ -408,7 +408,7 @@ async def refresh_token(request: Request):
         # Create new access token for customer
         access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
         new_access_token = create_access_token(
-            data={"sub": str(customer.id), "type": "customer"},
+            data={"sub": str(customer.id), "type": "Customer"},
             expires_delta=access_token_expires
         )
 
@@ -418,7 +418,7 @@ async def refresh_token(request: Request):
         return UserLoginResponse(
             access_token=new_access_token,
             token_type="bearer",
-            user_type="customer",
+            user_type="Customer",
             user=CustomerResponse(
                 id=str(customer.id),
                 email=customer.email,

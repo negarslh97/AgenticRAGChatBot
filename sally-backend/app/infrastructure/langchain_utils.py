@@ -494,13 +494,14 @@ class LangChainService:
             logger.error(f"❌ Streaming chat response failed: {e}", exc_info=True)
             yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم."
 
-    async def generate_rag_response(self, query: str, context: str) -> str:
+    async def generate_rag_response(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
         """
-        Generate a RAG response using AI - uses provided context.
+        Generate a RAG response using AI - uses provided context and conversation history.
 
         Args:
             query: User query
             context: Retrieved context from vector database
+            conversation_history: Previous messages in the conversation
 
         Returns:
             AI response string
@@ -516,27 +517,41 @@ class LangChainService:
             logger.info(f"📝 Context preview (first 500 chars): {context[:500]}...")
             logger.info(f"📝 Context length: {len(context)} characters")
             logger.info(f"❓ Query: {query}")
+            logger.info(f"📚 Conversation history: {len(conversation_history) if conversation_history else 0} messages")
+
+            # Build conversation history text
+            history_text = ""
+            if conversation_history and len(conversation_history) > 0:
+                history_text = "\n**تاریخچه مکالمه:**\n"
+                for msg in conversation_history:
+                    role_fa = "کاربر" if msg["role"] == "user" else "سالی"
+                    history_text += f"{role_fa}: {msg['content']}\n"
+                history_text += "\n"
 
             prompt = ChatPromptTemplate.from_template("""شما یک دستیار هوشمند پشتیبانی مشتریان به نام "سالی" هستید.
 
 **دستورالعمل‌های پاسخ‌دهی:**
 
-1. از اطلاعات موجود در Context زیر برای پاسخ استفاده کنید
-2. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
-3. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
-4. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
-5. از جملات روان و طبیعی استفاده کنید
+1. از اطلاعات موجود در Context و تاریخچه مکالمه برای پاسخ استفاده کنید
+2. اگر در تاریخچه مکالمه قبلاً چیزی گفته شده، به آن توجه کنید
+3. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
+4. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
+5. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
+6. از جملات روان و طبیعی استفاده کنید و در صورت لزوم به پیام‌های قبلی اشاره کنید
+
+{history}
 
 **Context (اطلاعات موجود):**
 {context}
 
-**سوال کاربر:** {query}
+**سوال جدید کاربر:** {query}
 
 **پاسخ شما:**""")
 
             chain = prompt | model
 
             result = await chain.ainvoke({
+                "history": history_text,
                 "context": context,
                 "query": query
             })

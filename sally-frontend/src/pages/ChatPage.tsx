@@ -327,11 +327,11 @@ const ChatPage = () => {
             setNewMessage('')
 
             // Send message to API
-            const response = await chatService.sendMessage(
-                messageContent,
-                selectedConversation.id.startsWith('new-') ? undefined : selectedConversation.id,
-                guestSessionId || undefined
-            )
+            const response = await chatService.sendMessage({
+                content: messageContent,
+                conversation_id: selectedConversation.id.startsWith('new-') ? undefined : selectedConversation.id,
+                guest_session_id: guestSessionId || undefined
+            })
 
             // Update conversation ID if it was a new conversation
             let conversationId = selectedConversation.id

@@ -105,11 +105,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
     try {
       const guestSessionIdToSend = user ? undefined : guestSessionId
       
-      const response: ChatResponse = await chatService.sendMessage(
-        inputMessage,
-        conversationId,
-        guestSessionIdToSend,
-      )
+      const response: ChatResponse = await chatService.sendMessage({
+        content: inputMessage,
+        conversation_id: conversationId,
+        guest_session_id: guestSessionIdToSend
+      })
 
       console.log("API Response:", response)
 

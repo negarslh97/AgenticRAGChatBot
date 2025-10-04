@@ -445,7 +445,10 @@ class SimpleRAGService(RAGService):
                 logger.info(f"📝 Context length: {len(context_text)} characters")
                 logger.info("🤖 Calling LangChain for response generation...")
                 
-                rag_response = await self._generate_openai_response(query, context_text)
+                # Get conversation history from context
+                conversation_history = context.get("conversation_history", []) if context else []
+                
+                rag_response = await self._generate_openai_response(query, context_text, conversation_history)
                 logger.info(f"✅ RAG response generated successfully")
                 logger.info(f"📄 Response preview: '{rag_response[:100]}...'")
 
@@ -478,13 +481,13 @@ class SimpleRAGService(RAGService):
             "confidence": 0.0
         }
     
-    async def _generate_openai_response(self, query: str, context: str) -> str:
+    async def _generate_openai_response(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
         """Generate response using LangChain."""
         from app.infrastructure.langchain_utils import langchain_service
 
         try:
             logger.info(f"_generate_openai_response: Using LangChain RAG model for query '{query[:50]}...'")
-            return await langchain_service.generate_rag_response(query, context)
+            return await langchain_service.generate_rag_response(query, context, conversation_history)
         except Exception as e:
             logger.error(f"_generate_openai_response: LangChain error for query '{query[:50]}...': {str(e)}")
             # Fallback response
@@ -593,7 +596,11 @@ class AgenticRAGService(RAGService):
             if settings.openai_api_key_loaded:
                 try:
                     logger.info("🤖 Calling LangChain for advanced RAG response...")
-                    response = await self._generate_openai_response_with_context(query, context_text)
+                    
+                    # Get conversation history from context
+                    conversation_history = user_context.get("conversation_history", []) if user_context else []
+                    
+                    response = await self._generate_openai_response_with_context(query, context_text, conversation_history)
                     logger.info(f"✅ Advanced RAG response generated successfully")
                     logger.info(f"📄 Response preview: '{response[:100]}...'")
                     
@@ -634,22 +641,13 @@ class AgenticRAGService(RAGService):
             "suggested_actions": ["contact_support"]
         }
     
-    async def _generate_openai_response_with_context(self, query: str, context: str) -> str:
+    async def _generate_openai_response_with_context(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
         """Generate response using OpenAI API with context from knowledge base."""
-        prompt = f"""You are Sally, a helpful customer support assistant. Use the following context to answer the user's question accurately and helpfully. Answer in Persian (Farsi) language.
-
-Context:
-{context}
-
-User Question: {query}
-
-Please provide a clear, helpful response based on the context provided. If the context doesn't contain enough information, acknowledge this and offer to help with other ways."""
-
         from app.infrastructure.langchain_utils import langchain_service
 
         try:
             logger.info(f"_generate_openai_response_with_context: Using LangChain RAG model for query '{query[:50]}...'")
-            return await langchain_service.generate_rag_response(query, context)
+            return await langchain_service.generate_rag_response(query, context, conversation_history)
         except Exception as e:
             logger.error(f"_generate_openai_response_with_context: LangChain error for query '{query[:50]}...': {e}")
             logger.error(f"Error details: {str(e)}")

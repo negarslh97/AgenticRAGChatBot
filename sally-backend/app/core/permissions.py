@@ -221,7 +221,7 @@ async def get_current_customer_from_token(token: str) -> Optional[Customer]:
         
         # توکن‌های مشتری باید نوع مشخصی داشته باشند
         if payload.get("type") != "Customer":
-            logger.info(f"Token type is not 'customer': {payload.get('type')}")
+            logger.info(f"Token type is not 'Customer': {payload.get('type')}")
             logger.info("==== GET CUSTOMER FROM TOKEN END (WRONG TYPE) ====")
             return None
             

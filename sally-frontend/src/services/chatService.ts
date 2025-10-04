@@ -73,12 +73,15 @@ export interface Conversation {
 }
 
 export const chatService = {
-  async sendMessage(content: string, conversationId?: string, guestSessionId?: string): Promise<ChatResponse> {
+  // Base URL for API (needed for some direct fetch calls)
+  API_BASE_URL: '',  // Will use relative URLs with api interceptor
+  
+  async sendMessage(data: { content: string; conversation_id?: string | null; guest_session_id?: string | null }): Promise<ChatResponse> {
     // Use the same api instance that has the Authorization interceptor
     const requestData = {
-      content,
-      conversation_id: conversationId,
-      guest_session_id: guestSessionId,
+      content: data.content,
+      conversation_id: data.conversation_id,
+      guest_session_id: data.guest_session_id,
     }
     
     try {
@@ -315,5 +318,116 @@ export const chatService = {
   }> {
     const response = await api.get(`/api/conversations/${conversationId}/rating-stats`)
     return response.data
+  },
+
+  async sendAdvancedAgenticMessage(data: { 
+    query: string; 
+    conversation_id?: string | null;
+    max_iterations?: number;
+    min_confidence?: number;
+  }): Promise<{
+    conversation_id: string
+    response: string
+    sources: Array<{
+      id: string
+      title: string
+      score: number
+      category?: string
+      tags?: string[]
+      snippet?: string
+    }>
+    confidence: number
+    suggested_actions: string[]
+    complexity: string
+    actions_taken: string[]
+    conversation_context?: any
+    final_state?: any
+  }> {
+    const requestData = {
+      query: data.query,
+      conversation_id: data.conversation_id,
+      max_iterations: data.max_iterations || 3,
+      min_confidence: data.min_confidence || 0.7,
+    }
+    
+    try {
+      const response = await api.post("/api/advanced-agentic", requestData)
+      return response.data
+    } catch (error: any) {
+      console.error("Advanced Agentic RAG request failed:", error)
+      console.error("Error response:", error.response)
+      throw error
+    }
+  },
+
+  async sendAdvancedAgenticMessageStream(
+    query: string,
+    conversationId: string | undefined,
+    onEvent: (evt: any) => void
+  ): Promise<{ abort: () => void }> {
+    const controller = new AbortController()
+
+    const payload = {
+      query,
+      conversation_id: conversationId,
+    }
+
+    const token = localStorage.getItem("token")
+
+    ;(async () => {
+      try {
+        const response = await fetch("/api/advanced-agentic/stream", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        })
+
+        if (!response.ok || !response.body) {
+          onEvent({ type: "error", message: `HTTP ${response.status}` })
+          return
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder("utf-8")
+        let buffer = ""
+
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          
+          buffer += decoder.decode(value, { stream: true })
+
+          // SSE frames are separated by \n\n and prefixed with 'data: '
+          const parts = buffer.split("\n\n")
+          buffer = parts.pop() || ""
+
+          for (const part of parts) {
+            if (part.trim() === "") continue
+            if (!part.startsWith("data: ")) continue
+
+            const jsonStr = part.substring(6) // Remove 'data: ' prefix
+            try {
+              const parsed = JSON.parse(jsonStr)
+              onEvent(parsed)
+            } catch (err) {
+              console.error("Failed to parse SSE chunk:", jsonStr, err)
+            }
+          }
+        }
+      } catch (error: any) {
+        if (error.name === "AbortError") {
+          console.log("Stream aborted")
+        } else {
+          console.error("Stream error:", error)
+          onEvent({ type: "error", message: error.message })
+        }
+      }
+    })()
+
+    return { abort: () => controller.abort() }
   },
 }
