@@ -14,26 +14,6 @@ from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Debug logging for ChatPage RTL issues
-logger.info("=== CHATPAGE RTL DEBUG LOG ===")
-logger.info("ISSUES IDENTIFIED:")
-logger.info("1. Main content margin classes (line 182): mr-80/mr-0 should be ml-80/ml-0")
-logger.info("2. Message alignment (line 258): flex justification may be incorrect for RTL")
-logger.info("3. Message order classes (line 264): order-1/order-2 may need adjustment")
-logger.info("4. Text alignment (line 268): text-left/text-right may be inverted")
-
-logger.info("=== APPLIED FIXES ===")
-logger.info("1. FIXED: Changed mr-80/mr-0 to ml-80/ml-0 for proper RTL sidebar layout")
-logger.info("2. FIXED: Swapped justify-start/justify-end for correct message alignment")
-logger.info("3. FIXED: Swapped order-1/order-2 for proper message ordering in RTL")
-logger.info("4. FIXED: Swapped text-left/text-right for correct timestamp alignment")
-logger.info("=== VALIDATION REQUIRED ===")
-logger.info("User should verify that:")
-logger.info("- Sidebar appears on the right side")
-logger.info("- User messages are right-aligned with timestamps on the right")
-logger.info("- Assistant messages are left-aligned with timestamps on the left")
-logger.info("- Layout transitions work smoothly when sidebar toggles")
-
 class ChatUseCases:
     @staticmethod
     async def generate_conversation_title_and_tags(conversation_id: str) -> Dict[str, Any]:
@@ -76,6 +56,160 @@ class ChatUseCases:
             logger.error(f"Error generating title and tags: {e}")
             return {"title": "New Conversation", "tags": [], "error": str(e)}
 
+    @staticmethod
+    async def send_admin_message_stream(
+        content: str,
+        admin: Admin,
+        conversation_id: Optional[str] = None,
+        rag_type: str = "simple"
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Process admin chat message with streaming support.
+        Similar to send_message_stream but for admin users.
+        """
+        logger.info(f"🌊 Starting admin streaming chat")
+        
+        # Create or get conversation (same logic as non-streaming)
+        if conversation_id:
+            try:
+                from bson import ObjectId
+                conversation = await Conversation.get(ObjectId(conversation_id))
+                if not conversation:
+                    yield {"type": "error", "message": "Conversation not found"}
+                    return
+            except Exception as e:
+                yield {"type": "error", "message": f"Error: {str(e)}"}
+                return
+        else:
+            conversation = Conversation(
+                customer_id=None,
+                admin_id=str(admin.id),
+                title=content[:50] + "..." if len(content) > 50 else content,
+                tags=[f"admin-{rag_type}-rag"],
+                guest_session_id=None
+            )
+            await conversation.insert()
+            logger.info(f"✅ Created admin conversation: {conversation.id}")
+        
+        # Save user message
+        user_message = Message(
+            conversation_id=str(conversation.id),
+            content=content,
+            sender_type="admin",
+            sender_id=str(admin.id),
+            metadata={"rag_type": rag_type, "admin_email": admin.email}
+        )
+        await user_message.insert()
+        
+        # Send init event
+        yield {
+            "type": "init",
+            "conversation_id": str(conversation.id),
+            "message_id": str(user_message.id)
+        }
+        
+        # Get RAG service
+        if rag_type == "simple":
+            from app.infrastructure.rag_service import SimpleRAGService
+            rag_service = SimpleRAGService()
+        else:
+            from app.infrastructure.rag_service import AgenticRAGService
+            rag_service = AgenticRAGService()
+        
+        context = {
+            "user_id": str(admin.id),
+            "user_type": "Admin",
+            "conversation_id": str(conversation.id),
+            "rag_type": rag_type
+        }
+        
+        # Stream response
+        full_response = ""
+        sources = []
+        confidence = 0.5
+        
+        try:
+            # Retrieve documents
+            relevant_docs = await rag_service.retrieve_relevant_documents(
+                content,
+                is_public_only=False  # Admins can see all docs
+            )
+            
+            if relevant_docs:
+                sources = rag_service._format_sources_markdown(relevant_docs[:3])
+                confidence = 0.9
+                
+                # Send sources
+                yield {
+                    "type": "sources",
+                    "sources": sources,
+                    "confidence": confidence
+                }
+                
+                # Build context
+                context_text = "\n\n".join([
+                    f"Document: {doc['title']}\nContent: {doc['content']}"
+                    for doc in relevant_docs[:3]
+                ])
+                
+                # Stream response
+                from app.infrastructure.langchain_utils import langchain_service
+                async for chunk in langchain_service.generate_rag_response_stream(content, context_text):
+                    full_response += chunk
+                    yield {
+                        "type": "chunk",
+                        "content": chunk
+                    }
+            else:
+                full_response = "متأسفانه اطلاعات مرتبط یافت نشد."
+                yield {
+                    "type": "chunk",
+                    "content": full_response
+                }
+            
+            # Save AI message
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=full_response,
+                sender_type="ai",
+                sender_id=None,
+                metadata={
+                    "sources": sources,
+                    "confidence": confidence,
+                    "rag_type": rag_type,
+                    "streaming": True
+                }
+            )
+            await ai_message.insert()
+            
+            # Send complete event
+            yield {
+                "type": "complete",
+                "message_id": str(ai_message.id),
+                "full_response": full_response,
+                "confidence": confidence
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
+            error_msg = f"خطا: {str(e)}"
+            
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=error_msg,
+                sender_type="ai",
+                is_failed=True,
+                failure_reason=str(e),
+                metadata={"streaming": True, "rag_type": rag_type}
+            )
+            await ai_message.insert()
+            
+            yield {
+                "type": "error",
+                "message": str(e),
+                "message_id": str(ai_message.id)
+            }
+    
     @staticmethod
     async def send_admin_message(
         content: str,
@@ -586,10 +720,7 @@ class ChatUseCases:
                 is_public_only=(not user)
             )
 
-            # DEBUG: چک کردن منابع پیدا شده
-            logger.info(f"🔍 DEBUG: Found {len(relevant_docs)} documents from Weaviate")
-            for i, doc in enumerate(relevant_docs[:3]):
-                logger.info(f"   Doc {i+1}: ID={doc.get('id')}, Title='{doc.get('title', '')[:50]}...'")
+            logger.info(f"🔍 Found {len(relevant_docs)} relevant documents")
             
             if relevant_docs:
                 sources = rag_service._format_sources_markdown(relevant_docs[:3])

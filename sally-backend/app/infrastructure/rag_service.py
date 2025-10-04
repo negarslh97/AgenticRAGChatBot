@@ -155,7 +155,7 @@ class RAGService(ABC):
         return enriched_docs
 
     def _format_sources_markdown(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Format sources as markdown with rich MongoDB metadata - with deduplication by ID."""
+        """Format sources with rich metadata and relevant snippets for highlighting."""
         formatted_sources = []
         seen_ids = set()  # برای جلوگیری از تکرار منابع
 
@@ -168,17 +168,30 @@ class RAGService(ABC):
             
             seen_ids.add(doc_id)
             
-            # Create simple source without markdown formatting
+            # استخراج snippet (بخش مرتبط) برای highlighting
+            content = doc.get("content", "")
+            snippet = content[:300] + "..." if len(content) > 300 else content
+            
+            # Create source with snippet for highlighting
             formatted_sources.append({
                 "id": doc_id,
                 "title": doc.get("title", "بدون عنوان"),
                 "score": doc.get("score", 0),
                 "category": doc.get("category"),
                 "tags": doc.get("tags", []),
-                "url": doc.get("url")
+                "url": doc.get("url"),
+                "snippet": snippet,  # 🔥 بخش مرتبط برای preview
+                "full_content": content,  # 🔥 محتوای کامل برای highlighting
+                "path": doc.get("path", ""),
+                "summary": doc.get("summary", "")
             })
 
-        logger.info(f"📋 Formatted {len(formatted_sources)} unique sources (from {len(documents)} documents)")
+        logger.info(f"📋 Formatted {len(formatted_sources)} unique sources with snippets")
+        
+        # 🔥 DEBUG: نمایش منابع برگشتی
+        for src in formatted_sources:
+            logger.info(f"   🔖 Source: ID={src['id']}, Title={src['title'][:50]}...")
+        
         return formatted_sources
 
     async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True) -> List[Dict[str, Any]]:

@@ -97,7 +97,7 @@ async def send_admin_message(
     message: AdminChatMessage,
     current_admin: Admin = Depends(get_optional_admin)
 ):
-    """Send a chat message as admin with RAG type selection."""
+    """Send a chat message as admin with RAG type selection (non-streaming)."""
     
     if not current_admin:
         raise HTTPException(status_code=401, detail="Admin authentication required")
@@ -125,6 +125,57 @@ async def send_admin_message(
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         logger.error(f"Unexpected error in send_admin_message: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/admin/message/stream")
+async def send_admin_message_stream(
+    request: Request,
+    message: AdminChatMessage,
+    current_admin: Admin = Depends(get_optional_admin)
+):
+    """Send a chat message as admin with RAG type selection (streaming)."""
+    
+    if not current_admin:
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+    
+    try:
+        logger.info(f"🌊 Admin streaming message - Admin: {current_admin.email}, RAG type: {message.rag_type}")
+        
+        # Validate RAG type
+        if message.rag_type not in ["simple", "agentic"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type")
+        
+        async def generate_stream():
+            """Generator for admin streaming"""
+            try:
+                async for event_data in ChatUseCases.send_admin_message_stream(
+                    content=message.content,
+                    admin=current_admin,
+                    conversation_id=message.conversation_id,
+                    rag_type=message.rag_type
+                ):
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.01)
+                
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -360,6 +411,74 @@ async def get_conversation_messages(
     except Exception as e:
         logger.error(f"Unexpected error in chat API: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/article/{article_id}")
+async def get_article_for_highlighting(
+    article_id: str,
+    query: Optional[str] = None,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """
+    Get article with highlighting information based on user query.
+    برای نمایش مقاله با highlight کردن قسمت‌های مرتبط.
+    """
+    try:
+        from bson import ObjectId
+        from app.domain.entities import KnowledgeBaseArticle
+        from app.infrastructure.database.mongodb import init_db, get_mongo_client
+        
+        if get_mongo_client() is None:
+            await init_db()
+        
+        # دریافت مقاله
+        article = await KnowledgeBaseArticle.get(ObjectId(article_id))
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        # استخراج کلمات کلیدی از query برای highlighting
+        highlight_keywords = []
+        if query:
+            # لیست stop words فارسی (کلماتی که نباید highlight بشن)
+            persian_stop_words = {
+                'است', 'هست', 'که', 'در', 'به', 'از', 'را', 'با', 'برای', 'این', 'آن',
+                'یک', 'چه', 'چی', 'چند', 'کدام', 'چطور', 'چگونه', 'چرا', 'کی', 'کجا',
+                'می', 'شود', 'میشود', 'می‌شود', 'بود', 'باشد', 'های', 'ها', 'ای', 'ان',
+                'و', 'یا', 'اما', 'ولی', 'تا', 'اگر', 'چون', 'پس', 'نه', 'بله', 'آره'
+            }
+            
+            # تمیز کردن query از علائم نگارشی
+            import re
+            cleaned_query = re.sub(r'[؟?!،,.\-_]', ' ', query)
+            
+            # تقسیم به کلمات
+            words = cleaned_query.split()
+            
+            # فقط کلمات معنادار (بیشتر از 2 حرف و نه stop word)
+            highlight_keywords = [
+                w.strip() for w in words 
+                if len(w.strip()) > 2 and w.strip().lower() not in persian_stop_words
+            ]
+            
+            logger.info(f"🎯 Extracted {len(highlight_keywords)} keywords from query: {highlight_keywords}")
+        
+        return {
+            "id": str(article.id),
+            "title": article.title,
+            "content": article.content_markdown,
+            "summary": article.summary,
+            "category": article.category.name if article.category else None,
+            "tags": [tag.name for tag in article.tags] if article.tags else [],
+            "highlight_keywords": highlight_keywords,  # 🔥 کلمات کلیدی برای highlight
+            "created_at": article.created_at.isoformat(),
+            "updated_at": article.updated_at.isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting article: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/create-sample-articles")

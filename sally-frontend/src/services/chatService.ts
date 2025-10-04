@@ -164,7 +164,7 @@ export const chatService = {
   },
 
   async sendAdminMessage(content: string, conversationId?: string, ragType: 'simple' | 'agentic' = 'simple'): Promise<ChatResponse> {
-    // Admin-specific message sending with RAG type selection
+    // Admin-specific message sending with RAG type selection (non-streaming)
     const requestData = {
       content,
       conversation_id: conversationId,
@@ -179,6 +179,75 @@ export const chatService = {
       console.error("Error response:", error.response)
       throw error
     }
+  },
+
+  async sendAdminMessageStream(
+    content: string,
+    conversationId: string | undefined,
+    ragType: 'simple' | 'agentic',
+    onEvent: (evt: any) => void
+  ): Promise<{ abort: () => void }> {
+    const controller = new AbortController()
+
+    const payload = {
+      content,
+      conversation_id: conversationId,
+      rag_type: ragType,
+    }
+
+    const token = localStorage.getItem("token")
+
+    const response = await fetch("/api/admin/message/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (!response.ok || !response.body) {
+      onEvent({ type: "error", message: `HTTP ${response.status}` })
+      return { abort: () => controller.abort() }
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder("utf-8")
+    let buffer = ""
+
+    ;(async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          
+          console.log("📦 Admin received chunk:", value?.length, "bytes")
+          buffer += decoder.decode(value, { stream: true })
+
+          const parts = buffer.split("\n\n")
+          buffer = parts.pop() || ""
+
+          for (const part of parts) {
+            const line = part.trim()
+            if (!line.startsWith("data:")) continue
+            const json = line.replace(/^data:\s*/, "")
+            if (!json) continue
+            try {
+              const evt = JSON.parse(json)
+              console.log("🎯 Admin parsed event:", evt.type, evt.content?.length || 0)
+              onEvent(evt)
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+      } catch (e: any) {
+        onEvent({ type: "error", message: e?.message || String(e) })
+      }
+    })()
+
+    return { abort: () => controller.abort() }
   },
 
   async getConversations(): Promise<Conversation[]> {

@@ -35,6 +35,7 @@ import { Textarea } from '../components/ui/textarea'
 import { chatService, Conversation as ApiConversation, ChatMessage } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
+import ArticleHighlightModal from '../components/ArticleHighlightModal'
 
 interface Message {
   id: string
@@ -92,6 +93,13 @@ const SuperAdminChatPage = () => {
     const [selectedArticle, setSelectedArticle] = useState<{id: string, title: string, content: string} | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const initializationRef = useRef(false)
+    
+    // 🔥 Article Highlight Modal state
+    const [highlightModal, setHighlightModal] = useState<{
+        isOpen: boolean;
+        articleId: string;
+        userQuery: string;
+    }>({ isOpen: false, articleId: '', userQuery: '' })
 
     // Development mode: API might not be available
     const isDevelopment = process.env.NODE_ENV === 'development'
@@ -167,68 +175,106 @@ const SuperAdminChatPage = () => {
             setSelectedConversation(tempConversation)
             setNewMessage('')
 
-            // Send message to API with RAG type
-            const response = await chatService.sendAdminMessage(
+            // 🔥 استفاده از streaming API برای admin
+            const assistantTempId = `ai-temp-${Date.now()}`;
+            const addAssistantPlaceholder = () => setSelectedConversation(prev => ({
+                ...prev!,
+                messages: [...(prev?.messages || []), {
+                    id: assistantTempId,
+                    content: '',
+                    role: 'assistant',
+                    timestamp: new Date(),
+                    metadata: { rag_type: ragType }
+                } as Message]
+            }));
+
+            addAssistantPlaceholder();
+
+            const currentConvId = selectedConversation.id.startsWith('new-') ? undefined : selectedConversation.id;
+
+            await chatService.sendAdminMessageStream(
                 messageContent,
-                selectedConversation.id.startsWith('new-') ? undefined : selectedConversation.id,
-                ragType
-            )
+                currentConvId,
+                ragType,
+                (evt: any) => {
+                    if (!evt) return;
 
-            // Update conversation ID if it was a new conversation
-            let conversationId = selectedConversation.id
-            if (selectedConversation.id.startsWith('new-')) {
-                conversationId = response.conversation_id
+                    if (evt.type === 'init') {
+                        // Set conversation ID if it was a new chat
+                        if (!currentConvId && evt.conversation_id) {
+                            setConversations(prev =>
+                                prev.map(conv =>
+                                    conv.id === selectedConversation.id
+                                        ? { ...conv, id: evt.conversation_id }
+                                        : conv
+                                )
+                            );
+                            setSelectedConversation(prev => prev ? ({ ...prev, id: evt.conversation_id }) : prev);
+                        }
+                    }
 
-                // Update the conversation in the list
-                setConversations(prev =>
-                    prev.map(conv =>
-                        conv.id === selectedConversation.id
-                            ? { ...tempConversation, id: conversationId }
-                            : conv
-                    )
-                )
-            }
+                    if (evt.type === 'sources') {
+                        console.log('📚 Admin sources:', evt.sources);
+                        // Add sources to message metadata
+                        setSelectedConversation(prev => {
+                            if (!prev) return prev;
+                            const updated = { ...prev };
+                            updated.messages = updated.messages.map(m => 
+                                m.id === assistantTempId 
+                                    ? { ...m, sources: evt.sources, confidence: evt.confidence }
+                                    : m
+                            );
+                            return updated;
+                        });
+                    }
 
-            // Add AI response to conversation
-            const aiMessage: Message = {
-                id: response.message_id,
-                content: response.message,
-                role: 'assistant',
-                timestamp: new Date(),
-                sources: response.sources,
-                confidence: response.confidence,
-                suggested_actions: response.suggested_actions,
-                metadata: {
-                    ...response.metadata,
-                    rag_type: ragType
+                    if (evt.type === 'chunk') {
+                        setSelectedConversation(prev => {
+                            if (!prev) return prev;
+                            const updated = { ...prev };
+                            updated.messages = updated.messages.map(m =>
+                                m.id === assistantTempId
+                                    ? { ...m, content: (m.content || '') + (evt.content || '') }
+                                    : m
+                            );
+                            return updated;
+                        });
+                    }
+
+                    if (evt.type === 'complete') {
+                        setSelectedConversation(prev => {
+                            if (!prev) return prev;
+                            const updated = { ...prev };
+                            updated.messages = updated.messages.map(m =>
+                                m.id === assistantTempId
+                                    ? { ...m, id: evt.message_id || assistantTempId, content: evt.full_response || m.content }
+                                    : m
+                            );
+                            return updated;
+                        });
+                        setIsLoading(false);
+                    }
+
+                    if (evt.type === 'error') {
+                        toast.error(`خطا: ${evt.message}`);
+                        setSelectedConversation(prev => {
+                            if (!prev) return prev;
+                            const updated = { ...prev };
+                            updated.messages = updated.messages.map(m =>
+                                m.id === assistantTempId
+                                    ? { ...m, is_failed: true, failure_reason: evt.message }
+                                    : m
+                            );
+                            return updated;
+                        });
+                        setIsLoading(false);
+                    }
                 }
-            }
-
-            // Update the conversation with the real messages
-            const updatedConversation = {
-                ...tempConversation,
-                id: conversationId,
-                messages: [...tempConversation.messages.slice(0, -1), userMessage, aiMessage]
-            }
-
-            setSelectedConversation(updatedConversation)
-
-            // Update conversations list
-            setConversations(prev =>
-                prev.map(conv =>
-                    conv.id === conversationId ? updatedConversation : conv
-                )
-            )
+            );
 
         } catch (error: any) {
-            console.error('Failed to send message:', error)
-            toast.error(error.response?.data?.detail || 'خطا در ارسال پیام')
-            // Remove the temporary user message
-            setSelectedConversation(prev => prev ? {
-                ...prev,
-                messages: prev.messages.slice(0, -1)
-            } : null)
-        } finally {
+            console.error('Failed to send message (streaming):', error)
+            toast.error('خطا در ارسال پیام')
             setIsLoading(false)
         }
     }
@@ -323,29 +369,28 @@ const SuperAdminChatPage = () => {
         }
     }
 
-    const handleSourceClick = async (sourceId: string, sourceTitle: string) => {
-        try {
-            // Call API to get article content
-            const response = await fetch(`/api/super-admin/kb/articles/${sourceId}`, {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-            })
-            
-            if (response.ok) {
-                const article = await response.json()
-                setSelectedArticle({
-                    id: sourceId,
-                    title: sourceTitle,
-                    content: article.content_html || article.content_markdown || 'محتوای مقاله در دسترس نیست'
-                })
-            } else {
-                toast.error('خطا در بارگذاری مقاله')
-            }
-        } catch (error) {
-            console.error('Error fetching article:', error)
-            toast.error('خطا در بارگذاری مقاله')
+    const handleSourceClick = async (sourceId: string, messageId: string) => {
+        // 🔥 پیدا کردن سوال کاربر از message قبلی
+        const messageIndex = selectedConversation?.messages.findIndex(m => m.id === messageId);
+        const userMessage = messageIndex !== undefined && messageIndex > 0
+            ? selectedConversation?.messages[messageIndex - 1]
+            : null;
+        const userQuery = userMessage?.role === 'user' ? userMessage.content : '';
+        
+        console.log('🖱️ Admin source clicked!');
+        console.log('   Article ID:', sourceId);
+        console.log('   User Query:', userQuery);
+        
+        if (!sourceId) {
+            toast.error('شناسه مقاله موجود نیست!');
+            return;
         }
+        
+        setHighlightModal({
+            isOpen: true,
+            articleId: sourceId,
+            userQuery: userQuery
+        });
     }
 
     const formatTime = (date: Date) => {
@@ -382,7 +427,17 @@ const SuperAdminChatPage = () => {
     }
 
     return (
-        <div className="flex bg-gray-50 h-[calc(100vh-130px)]">
+        <>
+            {/* 🔥 Article Highlight Modal */}
+            {highlightModal.isOpen && (
+                <ArticleHighlightModal
+                    articleId={highlightModal.articleId}
+                    userQuery={highlightModal.userQuery}
+                    onClose={() => setHighlightModal({ isOpen: false, articleId: '', userQuery: '' })}
+                />
+            )}
+            
+            <div className="flex bg-gray-50 h-[calc(100vh-130px)]">
             {/* Sidebar */}
             <div className={`${isSidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white border-l border-gray-200 flex flex-col overflow-hidden`}>
                 {/* Header */}
@@ -596,11 +651,11 @@ const SuperAdminChatPage = () => {
                                                             {message.sources.map((source, index) => (
                                                                 <button
                                                                     key={index}
-                                                                    onClick={() => handleSourceClick(source.id, source.title)}
+                                                                    onClick={() => handleSourceClick(source.id, message.id)}
                                                                     className="flex items-center text-blue-700 hover:text-blue-900 hover:bg-blue-100 p-1 rounded transition-colors w-full text-right"
                                                                 >
-                                                                    <ExternalLink className="h-3 w-3 ml-1 flex-shrink-0" />
-                                                                    <span>• {source.title}</span>
+                                                                    <Sparkles className="h-3 w-3 ml-1 flex-shrink-0 animate-pulse" />
+                                                                    <span>• {source.title} (کلیک برای highlight)</span>
                                                                 </button>
                                                             ))}
                                                         </div>
@@ -700,6 +755,7 @@ const SuperAdminChatPage = () => {
                 </div>
             )}
         </div>
+        </>
     )
 }
 

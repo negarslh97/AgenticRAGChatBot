@@ -12,10 +12,12 @@ import {
   ChevronRight,
   Sparkles,
   Lightbulb,
-  HelpCircle
+  HelpCircle,
+  ExternalLink
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
+import ArticleHighlightModal from './ArticleHighlightModal';
 
 // Define component-specific types
 interface Message {
@@ -63,6 +65,13 @@ const Chat: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // 🔥 State برای Article Highlight Modal
+  const [highlightModal, setHighlightModal] = useState<{
+    isOpen: boolean;
+    articleId: string;
+    userQuery: string;
+  }>({ isOpen: false, articleId: '', userQuery: '' });
 
   // Helper: Dedupe sources by ID (backend should already do this, but double-check)
   const dedupeSourcesById = (sources?: any[]) => {
@@ -210,6 +219,11 @@ const Chat: React.FC = () => {
 
           if (evt.type === 'sources') {
             const unique = dedupeSourcesById(evt.sources);
+            console.log('📚 Sources received:', unique);
+            unique.forEach((s: any, i: number) => {
+              console.log(`   Source ${i+1}: ID="${s.id}", Title="${s.title}"`);
+            });
+            
             setSelectedConversation(prev => {
               if (!prev) return prev;
               const next = { ...prev } as Conversation;
@@ -291,7 +305,17 @@ const Chat: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-full bg-gray-50">
+    <>
+      {/* 🔥 Article Highlight Modal */}
+      {highlightModal.isOpen && (
+        <ArticleHighlightModal
+          articleId={highlightModal.articleId}
+          userQuery={highlightModal.userQuery}
+          onClose={() => setHighlightModal({ isOpen: false, articleId: '', userQuery: '' })}
+        />
+      )}
+      
+      <div className="flex h-screen w-full bg-gray-50">
       {/* =============================================================== */}
       {/* Main Content Area (CORRECTED for RTL) */}
       {/* =============================================================== */}
@@ -396,16 +420,56 @@ const Chat: React.FC = () => {
                       )}
                       {message.metadata && message.role === 'assistant' && (
                         <div className="mt-2 space-y-2">
-                          {/* Sources section - simplified display */}
+                          {/* Sources section - clickable with highlighting */}
                           {message.metadata.sources && message.metadata.sources.length > 0 && (
                             <div className="mt-3 pt-3 border-t border-white/20">
-                              <p className="text-xs font-medium opacity-90 mb-2">📚 منابع:</p>
-                              <div className="space-y-1">
-                                {message.metadata.sources.map((source: any, index: number) => (
-                                  <div key={source.id || index} className="text-xs opacity-80">
-                                    {index + 1}. {source.title}
-                                  </div>
-                                ))}
+                              <p className="text-xs font-medium opacity-90 mb-2 flex items-center gap-1">
+                                <Sparkles className="h-3 w-3" />
+                                📚 منابع مرتبط (کلیک کنید برای مشاهده با highlight):
+                              </p>
+                              <div className="space-y-2">
+                                {message.metadata.sources.map((source: any, index: number) => {
+                                  // 🔥 پیدا کردن سوال اصلی کاربر (پیام قبلی)
+                                  const messageIndex = selectedConversation?.messages.findIndex(m => m.id === message.id);
+                                  const userMessage = messageIndex !== undefined && messageIndex > 0 
+                                    ? selectedConversation?.messages[messageIndex - 1] 
+                                    : null;
+                                  const userQuery = userMessage?.role === 'user' ? userMessage.content : '';
+                                  
+                                  return (
+                                    <button
+                                      key={source.id || index}
+                                      onClick={() => {
+                                        console.log('🖱️ Source clicked!');
+                                        console.log('   Article ID:', source.id);
+                                        console.log('   User Query:', userQuery);
+                                        console.log('   Source:', source);
+                                        
+                                        if (!source.id) {
+                                          console.error('❌ No article ID!');
+                                          alert('خطا: شناسه مقاله موجود نیست!');
+                                          return;
+                                        }
+                                        
+                                        setHighlightModal({
+                                          isOpen: true,
+                                          articleId: source.id,
+                                          userQuery: userQuery
+                                        });
+                                      }}
+                                      className="text-xs opacity-80 hover:opacity-100 transition-all w-full text-right p-2 rounded hover:bg-white/10 flex items-center gap-2 group"
+                                    >
+                                      <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" />
+                                      <span className="flex-1">
+                                        {index + 1}. {source.title}
+                                      </span>
+                                      {/* 🔥 Debug info */}
+                                      <span className="text-xs opacity-50">
+                                        (ID: {source.id ? source.id.substring(0, 8) + '...' : 'N/A'})
+                                      </span>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
@@ -516,6 +580,7 @@ const Chat: React.FC = () => {
           </div>
       </aside>
     </div>
+    </>
   )
 };
 

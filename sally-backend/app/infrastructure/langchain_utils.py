@@ -496,7 +496,7 @@ class LangChainService:
 
     async def generate_rag_response(self, query: str, context: str) -> str:
         """
-        Generate a RAG response using AI - STRICT MODE: Only use provided context.
+        Generate a RAG response using AI - uses provided context.
 
         Args:
             query: User query
@@ -506,25 +506,33 @@ class LangChainService:
             AI response string
         """
         try:
-            model = self._get_model(settings.rag_model_loaded, force_json=False)
+            model = self._get_model(
+                settings.rag_model_loaded, 
+                force_json=False,
+                temperature=0.3  # Lower temperature for more focused responses
+            )
 
-            prompt = ChatPromptTemplate.from_template("""
-شما یک دستیار پشتیبانی مشتریان هستید که **فقط و فقط** بر اساس اطلاعات داده شده پاسخ می‌دهید.
+            # 🔥 DEBUG: Log context preview
+            logger.info(f"📝 Context preview (first 500 chars): {context[:500]}...")
+            logger.info(f"📝 Context length: {len(context)} characters")
+            logger.info(f"❓ Query: {query}")
 
-**قوانین مهم:**
-1. فقط از اطلاعات موجود در Context زیر استفاده کنید
-2. اگر جواب در Context موجود نیست، حتماً بگویید: "متأسفانه اطلاعات مورد نیاز در پایگاه دانش من موجود نیست"
-3. هیچ‌گاه از دانش عمومی یا اطلاعات خارج از Context استفاده نکنید
-4. اگر مطمئن نیستید، ترجیح دهید بگویید نمی‌دانید
-5. پاسخ را به صورت متن ساده (Plain Text) بنویسید - بدون استفاده از Markdown، ستاره (**، *)، هشتگ (#) یا علامت‌های فرمت‌دهی
-6. از جملات کامل و روان استفاده کنید
+            prompt = ChatPromptTemplate.from_template("""شما یک دستیار هوشمند پشتیبانی مشتریان به نام "سالی" هستید.
 
-Context (پایگاه دانش):
+**دستورالعمل‌های پاسخ‌دهی:**
+
+1. از اطلاعات موجود در Context زیر برای پاسخ استفاده کنید
+2. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
+3. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
+4. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
+5. از جملات روان و طبیعی استفاده کنید
+
+**Context (اطلاعات موجود):**
 {context}
 
-سوال کاربر: {query}
+**سوال کاربر:** {query}
 
-پاسخ (متن ساده - بدون فرمت Markdown):""")
+**پاسخ شما:**""")
 
             chain = prompt | model
 
@@ -533,9 +541,11 @@ Context (پایگاه دانش):
                 "query": query
             })
 
+            logger.info(f"✅ RAG response generated: {len(result.content)} characters")
             return result.content
 
         except Exception as e:
+            logger.error(f"❌ RAG response generation failed: {e}", exc_info=True)
             return "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید."
     
     async def generate_rag_response_stream(self, query: str, context: str):
@@ -550,61 +560,76 @@ Context (پایگاه دانش):
             Chunks of the AI response as they are generated
         """
         try:
-            # استفاده از مدل با streaming enabled
+            # استفاده از مدل با streaming enabled و temperature پایین‌تر
             model = self._get_model(
                 settings.rag_model_loaded, 
                 force_json=False,
-                streaming=True
+                streaming=True,
+                temperature=0.3  # Lower temperature for more focused responses
             )
             
-            prompt = ChatPromptTemplate.from_template("""
-شما یک دستیار پشتیبانی مشتریان هستید که **فقط و فقط** بر اساس اطلاعات داده شده پاسخ می‌دهید.
+            # 🔥 DEBUG: Log context preview
+            logger.info(f"📝 Context preview (first 500 chars): {context[:500]}...")
+            logger.info(f"📝 Context length: {len(context)} characters")
+            logger.info(f"❓ Query: {query}")
+            
+            prompt = ChatPromptTemplate.from_template("""شما یک دستیار هوشمند پشتیبانی مشتریان به نام "سالی" هستید.
 
-**قوانین مهم:**
-1. فقط از اطلاعات موجود در Context زیر استفاده کنید
-2. اگر جواب در Context موجود نیست، حتماً بگویید: "متأسفانه اطلاعات مورد نیاز در پایگاه دانش من موجود نیست"
-3. هیچ‌گاه از دانش عمومی یا اطلاعات خارج از Context استفاده نکنید
-4. اگر مطمئن نیستید، ترجیح دهید بگویید نمی‌دانید
-5. پاسخ را به صورت متن ساده (Plain Text) بنویسید - بدون استفاده از Markdown، ستاره (**، *)، هشتگ (#) یا علامت‌های فرمت‌دهی
-6. از جملات کامل و روان استفاده کنید
+**دستورالعمل‌های پاسخ‌دهی:**
 
-Context (پایگاه دانش):
+1. از اطلاعات موجود در Context زیر برای پاسخ استفاده کنید
+2. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
+3. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
+4. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
+5. از جملات روان و طبیعی استفاده کنید
+
+**Context (اطلاعات موجود):**
 {context}
 
-سوال کاربر: {query}
+**سوال کاربر:** {query}
 
-پاسخ (متن ساده - بدون فرمت Markdown):""")
+**پاسخ شما:**""")
             
             chain = prompt | model
             
-            # Stream response
+            # Stream response با فیلتر هوشمند
             chunk_num = 0
+            empty_chunk_count = 0
+            first_content_found = False
+            
             async for chunk in chain.astream({
                 "context": context,
                 "query": query
             }):
                 chunk_num += 1
                 content = chunk.content if hasattr(chunk, 'content') else str(chunk)
-                
-                # 🔥 DEBUG: Log chunk size
-                logger.info(f"🎯 LangChain chunk #{chunk_num}: '{content}' ({len(content)} chars)")
-                
-                # 🔥 تقسیم chunks بزرگ به کلمات برای نمایش روان‌تر
-                if len(content) > 1:
-                    # اگر chunk شامل فاصله باشه (چند کلمه)، تقسیمش می‌کنیم
-                    if ' ' in content:
-                        words = content.split(' ')
-                        for i, word in enumerate(words):
-                            if word:  # skip empty strings
-                                # آخرین کلمه بدون فاصله، بقیه با فاصله
-                                yield word + (' ' if i < len(words) - 1 else '')
-                                await asyncio.sleep(0.03)  # تاخیر برای نمایش کلمه‌به‌کلمه
+
+                # 🔧 فیلتر کردن chunkهای خالی (فقط تا اولین محتوای معنادار)
+                if not first_content_found:
+                    if not content or not isinstance(content, str) or len(content.strip()) == 0:
+                        empty_chunk_count += 1
+                        # Skip empty chunks but log them
+                        if empty_chunk_count == 1:
+                            logger.info(f"⏭️ Skipping initial empty chunks...")
+                        continue
                     else:
-                        # اگر فاصله نداره، همون‌طور yield کن
-                        yield content
-                else:
-                    # chunks تک‌کاراکتری رو مستقیم yield می‌کنیم
+                        # اولین محتوای معنادار پیدا شد
+                        first_content_found = True
+                        if empty_chunk_count > 0:
+                            logger.info(f"✅ Skipped {empty_chunk_count} empty chunks, starting content stream...")
+
+                # بعد از پیدا شدن اولین محتوا، همه chunks را ارسال می‌کنیم (حتی فاصله‌ها)
+                if not isinstance(content, str):
+                    content = str(content)
+                
+                # Yield content directly for faster streaming
+                if content:  # حتی فاصله‌ها و newline‌ها
                     yield content
+                    # تاخیر خیلی کم برای streaming سریع‌تر
+                    if len(content) > 5:
+                        await asyncio.sleep(0.01)
+                    
+            logger.info(f"✅ Streaming completed: {chunk_num} total chunks, {empty_chunk_count} empty chunks skipped")
                     
         except Exception as e:
             logger.error(f"❌ Streaming RAG response failed: {e}", exc_info=True)
