@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { knowledgeBaseService, ArticleHistoryItem } from "../services/knowledgeBaseService"
+import { Button } from "./ui/button"
 import { toast } from "react-hot-toast"
 
 interface ArticleHistoryProps {
@@ -99,12 +100,13 @@ const ArticleHistory: React.FC<ArticleHistoryProps> = ({ articleId }) => {
         </div>
       )}
       
-      <button
+      <Button
         onClick={loadHistory}
-        className="btn-secondary w-full mt-4"
+        variant="secondary"
+        className="w-full mt-4"
       >
         بارگذاری مجدد تاریخچه
-      </button>
+      </Button>
     </div>
   )
 }

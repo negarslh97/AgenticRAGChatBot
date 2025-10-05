@@ -4,6 +4,7 @@ import type React from "react"
 import { useState } from "react"
 import { knowledgeBaseService, type SearchResult } from "../services/knowledgeBaseService"
 import { Link } from "react-router-dom"
+import { Button } from "./ui/button"
 import toast from "react-hot-toast"
 
 const ArticleSearch: React.FC = () => {
@@ -49,9 +50,9 @@ const ArticleSearch: React.FC = () => {
             placeholder="Search knowledge base..."
             className="flex-1 input-field"
           />
-          <button type="submit" className="btn-primary" disabled={loading || !query.trim()}>
+          <Button type="submit" disabled={loading || !query.trim()}>
             {loading ? "Searching..." : "Search"}
-          </button>
+          </Button>
         </div>
       </form>
 

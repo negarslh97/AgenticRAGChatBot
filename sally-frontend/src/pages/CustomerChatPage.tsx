@@ -6,24 +6,21 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   Lightbulb,
   HelpCircle,
   Trash2,
   Search,
-  Settings,
-  Zap,
   Brain,
   Target,
   ExternalLink,
   ThumbsUp,
   ThumbsDown,
-  Info,
   Menu,
   X
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
+import { MarkdownRenderer } from '../components/ui/markdown-renderer'
 import { chatService, Conversation as ApiConversation } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
@@ -89,9 +86,8 @@ const CustomerChatPage = () => {
   const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [guestSessionId, setGuestSessionId] = useState<string | null>(null)
-  const [ragType, setRAGType] = useState<RAGType>('agentic') // ✅ Default: Agentic
+  const ragType = 'agentic' // ✅ همیشه Agentic برای مشتریان
   const [useStreaming, setUseStreaming] = useState(true) // 🌊 Streaming enabled by default
-  const [showSettings, setShowSettings] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   // 🔥 Article Highlight Modal state
@@ -514,7 +510,7 @@ const CustomerChatPage = () => {
           })
         }}
       >
-        <Sparkles className="w-3 h-3 mr-1" />
+        <ExternalLink className="w-3 h-3 mr-1" />
         <span className="hidden md:inline">مشاهده مقاله</span>
         <span className="md:hidden">مشاهده</span>
       </Button>
@@ -548,62 +544,10 @@ const CustomerChatPage = () => {
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              {ragType === 'agentic' ? (
-                <Brain className="w-5 h-5 text-purple-600" />
-              ) : (
-                <Sparkles className="w-5 h-5 text-blue-600" />
-              )}
+              <Brain className="w-5 h-5 text-purple-600" />
               گفتگوها
             </h2>
-            <Button size="sm" variant="ghost" onClick={() => setShowSettings(!showSettings)}>
-              <Settings className="w-4 h-4" />
-            </Button>
           </div>
-
-          {/* RAG Type Selector */}
-          {showSettings && (
-            <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-              <p className="text-xs text-gray-600 mb-2 font-medium">نوع هوش مصنوعی:</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setRAGType('simple')}
-                  className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                    ragType === 'simple'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-                  }`}
-                >
-                  <Sparkles className="w-4 h-4 inline mr-1" />
-                  ساده
-                </button>
-                <button
-                  onClick={() => setRAGType('agentic')}
-                  disabled={!user}
-                  className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                    ragType === 'agentic'
-                      ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-md'
-                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed'
-                  }`}
-                  title={!user ? 'فقط برای کاربران ورود کرده' : ''}
-                >
-                  <Brain className="w-4 h-4 inline mr-1" />
-                  پیشرفته
-                </button>
-              </div>
-              {ragType === 'agentic' && (
-                <div className="mt-2 text-xs text-purple-700 bg-white/70 p-2 rounded">
-                  <Zap className="w-3 h-3 inline mr-1" />
-                  جستجوی هوشمند، تحلیل پیشرفته، پاسخ دقیق‌تر
-                </div>
-              )}
-              {!user && (
-                <div className="mt-2 text-xs text-orange-700 bg-orange-50 p-2 rounded">
-                  <Info className="w-3 h-3 inline mr-1" />
-                  برای استفاده از حالت پیشرفته وارد شوید
-                </div>
-              )}
-            </div>
-          )}
 
           {/* New Chat Button */}
           <Button
@@ -703,67 +647,11 @@ const CustomerChatPage = () => {
                 {selectedConversation?.title || 'گفتگوی جدید'}
               </h1>
               <p className="text-xs md:text-sm text-gray-600 flex items-center gap-2 mt-1">
-                {ragType === 'agentic' ? (
-                  <>
-                    <Brain className="w-3 h-3 md:w-4 md:h-4 text-purple-600 flex-shrink-0" />
-                    <span className="truncate">حالت پیشرفته - جستجوی هوشمند فعال</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3 h-3 md:w-4 md:h-4 text-blue-600 flex-shrink-0" />
-                    <span className="truncate">حالت ساده</span>
-                  </>
-                )}
+                <Brain className="w-3 h-3 md:w-4 md:h-4 text-purple-600 flex-shrink-0" />
+                <span className="truncate">حالت پیشرفته - جستجوی هوشمند فعال</span>
               </p>
             </div>
-
-            {/* Settings Button - Mobile */}
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="lg:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
           </div>
-
-          {/* Mobile RAG Selector */}
-          {showSettings && (
-            <div className="lg:hidden mt-3 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-              <p className="text-xs text-gray-600 mb-2 font-medium">نوع هوش مصنوعی:</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setRAGType('simple')}
-                  className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all ${
-                    ragType === 'simple'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-                  }`}
-                >
-                  <Sparkles className="w-3 h-3 inline mr-1" />
-                  ساده
-                </button>
-                <button
-                  onClick={() => setRAGType('agentic')}
-                  disabled={!user}
-                  className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-all ${
-                    ragType === 'agentic'
-                      ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-md'
-                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed'
-                  }`}
-                  title={!user ? 'فقط برای کاربران ورود کرده' : ''}
-                >
-                  <Brain className="w-3 h-3 inline mr-1" />
-                  پیشرفته
-                </button>
-              </div>
-              {!user && (
-                <div className="mt-2 text-xs text-orange-700 bg-orange-50 p-2 rounded">
-                  <Info className="w-3 h-3 inline mr-1" />
-                  برای استفاده از حالت پیشرفته وارد شوید
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Messages */}
@@ -771,21 +659,14 @@ const CustomerChatPage = () => {
           {!selectedConversation || selectedConversation.messages.length === 0 ? (
             <div className="h-window flex flex-col items-center justify-center text-gray-500 space-y-4 px-4">
               <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-r from-purple-100 to-blue-100 rounded-full flex items-center justify-center">
-                {ragType === 'agentic' ? (
-                  <Brain className="w-6 h-6 md:w-8 md:h-8 text-purple-600" />
-                ) : (
-                  <Bot className="w-6 h-6 md:w-8 md:h-8 text-blue-600" />
-                )}
+                <Brain className="w-6 h-6 md:w-8 md:h-8 text-purple-600" />
               </div>
               <div className="text-center max-w-md">
                 <h3 className="text-base md:text-lg font-semibold text-gray-700">
-                  {ragType === 'agentic' ? 'دستیار هوشمند پیشرفته' : 'دستیار هوشمند'}
+                  دستیار هوشمند پیشرفته
                 </h3>
                 <p className="text-xs md:text-sm mt-2 px-4">
-                  {ragType === 'agentic' 
-                    ? 'سوالات پیچیده خود را بپرسید. من با جستجوی هوشمند و تحلیل عمیق پاسخ دقیقی به شما می‌دهم.'
-                    : 'سوالات خود را بپرسید و پاسخ‌های سریع دریافت کنید.'
-                  }
+                  سوالات پیچیده خود را بپرسید. من با جستجوی هوشمند و تحلیل عمیق پاسخ دقیقی به شما می‌دهم.
                 </p>
               </div>
               
@@ -795,7 +676,7 @@ const CustomerChatPage = () => {
                   { icon: Lightbulb, text: 'چطور محصول را راه‌اندازی کنم؟' },
                   { icon: HelpCircle, text: 'مشکل خطای اتصال را چطور حل کنم؟' },
                   { icon: Target, text: 'بهترین روش برای پشتیبان‌گیری چیست؟' },
-                  { icon: Sparkles, text: 'چطور عملکرد را بهبود دهم؟' }
+                  { icon: Brain, text: 'چطور عملکرد را بهبود دهم؟' }
                 ].map((item, i) => (
                   <button
                     key={i}
@@ -851,7 +732,16 @@ const CustomerChatPage = () => {
                         ? 'bg-red-50 border border-red-200 text-red-900'
                         : 'bg-white border border-gray-200 text-gray-900'
                     }`}>
-                      <p className="text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
+                      {message.role === 'assistant' ? (
+                        <div className="text-xs md:text-sm leading-relaxed">
+                          <MarkdownRenderer 
+                            content={message.content}
+                            variant="compact"
+                          />
+                        </div>
+                      ) : (
+                        <p className="text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
+                      )}
                       
                       {/* Confidence Score */}
                       {message.role === 'assistant' && message.confidence !== undefined && (

@@ -4,6 +4,7 @@ import type React from "react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { ticketService, type CreateTicketData } from "../services/ticketService"
+import { Button } from "./ui/button"
 import toast from "react-hot-toast"
 
 const CreateTicketForm: React.FC = () => {
@@ -94,12 +95,12 @@ const CreateTicketForm: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between">
-            <button type="button" onClick={() => navigate("/tickets")} className="btn-secondary" disabled={loading}>
+            <Button type="button" onClick={() => navigate("/tickets")} variant="secondary" disabled={loading}>
               Cancel
-            </button>
-            <button type="submit" className="btn-primary" disabled={loading}>
+            </Button>
+            <Button type="submit" disabled={loading}>
               {loading ? "Creating..." : "Create Ticket"}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

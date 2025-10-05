@@ -5,6 +5,7 @@ import { useState, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
 import { ticketService, type Ticket, type TicketReply, type CreateReplyData } from "../services/ticketService"
 import { useAuth } from "../context/AuthContext"
+import { Button } from "./ui/button"
 import toast from "react-hot-toast"
 
 interface TicketDetailProps {
@@ -103,8 +104,8 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ isadminView = false }) => {
     return (
       <div className="max-w-4xl mx-auto text-center py-12">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Ticket Not Found</h2>
-        <Link to="/tickets" className="btn-primary">
-          Back to Tickets
+        <Link to="/tickets">
+          <Button>Back to Tickets</Button>
         </Link>
       </div>
     )
@@ -215,9 +216,9 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ isadminView = false }) => {
               >
                 ← Back to Tickets
               </Link>
-              <button type="submit" className="btn-primary" disabled={submitting}>
+              <Button type="submit" disabled={submitting}>
                 {submitting ? "Sending..." : "Send Reply"}
-              </button>
+              </Button>
             </div>
           </form>
         </div>

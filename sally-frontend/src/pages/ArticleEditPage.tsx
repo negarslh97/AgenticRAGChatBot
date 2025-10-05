@@ -5,6 +5,7 @@ import { useParams, useNavigate, Link } from "react-router-dom"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
 import { useAuth } from "../context/AuthContext"
 import ArticleForm from "../components/ArticleForm"
+import { Button } from "../components/ui/button"
 import toast from "react-hot-toast"
 
 const ArticleEditPage: React.FC = () => {
@@ -56,8 +57,8 @@ const ArticleEditPage: React.FC = () => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">مقاله یافت نشد</h2>
-          <Link to="/super-admin/knowledge-base" className="btn-primary">
-            بازگشت به پایگاه دانش
+          <Link to="/super-admin/knowledge-base">
+            <Button>بازگشت به پایگاه دانش</Button>
           </Link>
         </div>
       </div>
@@ -71,8 +72,8 @@ const ArticleEditPage: React.FC = () => {
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">دسترسی غیرمجاز</h2>
           <p className="text-gray-600 mb-4">شما اجازه ویرایش مقاله را ندارید.</p>
-          <Link to="/super-admin/knowledge-base" className="btn-primary">
-            بازگشت به پایگاه دانش
+          <Link to="/super-admin/knowledge-base">
+            <Button>بازگشت به پایگاه دانش</Button>
           </Link>
         </div>
       </div>

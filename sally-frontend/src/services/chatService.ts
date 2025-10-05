@@ -188,7 +188,9 @@ export const chatService = {
     content: string,
     conversationId: string | undefined,
     ragType: 'simple' | 'agentic',
-    onEvent: (evt: any) => void
+    onEvent: (evt: any) => void,
+    model?: string,
+    temperature?: number
   ): Promise<{ abort: () => void }> {
     const controller = new AbortController()
 
@@ -196,6 +198,8 @@ export const chatService = {
       content,
       conversation_id: conversationId,
       rag_type: ragType,
+      ...(model && { model }),
+      ...(temperature !== undefined && { temperature }),
     }
 
     const token = localStorage.getItem("token")

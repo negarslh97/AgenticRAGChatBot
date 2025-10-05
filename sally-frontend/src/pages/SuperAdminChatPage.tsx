@@ -19,19 +19,24 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   Lightbulb,
   HelpCircle,
   Trash2,
   Search,
-  Settings,
   Zap,
   Brain,
   X,
-  ExternalLink
+  ExternalLink,
+  Menu,
+  Target,
+  Edit2,
+  Settings,
+  Cpu,
+  Thermometer
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
+import { MarkdownRenderer } from '../components/ui/markdown-renderer'
 import { chatService, Conversation as ApiConversation, ChatMessage } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
@@ -78,9 +83,30 @@ interface Conversation {
 
 type RAGType = 'simple' | 'agentic'
 
+// 🤖 لیست مدل‌های موجود
+const AVAILABLE_MODELS = [
+  // OpenAI Models
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', description: 'قدرتمندترین مدل OpenAI' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI', description: 'سریع و کارآمد' },
+  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI', description: 'نسخه توربو GPT-4' },
+  { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI', description: 'سریع و اقتصادی' },
+  
+  // Ollama Local Models
+  { id: 'ollama:llama3.2', name: 'Llama 3.2', provider: 'Ollama', description: 'مدل محلی Meta' },
+  { id: 'ollama:llama3.1', name: 'Llama 3.1', provider: 'Ollama', description: 'مدل محلی قدرتمند Meta' },
+  { id: 'ollama:mistral', name: 'Mistral', provider: 'Ollama', description: 'مدل محلی Mistral AI' },
+  { id: 'ollama:gemma2', name: 'Gemma 2', provider: 'Ollama', description: 'مدل محلی Google' },
+  { id: 'ollama:qwen2.5', name: 'Qwen 2.5', provider: 'Ollama', description: 'مدل محلی Alibaba' },
+  { id: 'ollama:phi3', name: 'Phi-3', provider: 'Ollama', description: 'مدل کوچک و سریع Microsoft' },
+  
+  // Other Providers
+  { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', description: 'بهترین مدل Claude' },
+  { id: 'gemini-pro', name: 'Gemini Pro', provider: 'Google', description: 'مدل پیشرفته Google' }
+]
+
 const SuperAdminChatPage = () => {
     const { user } = useAuth()
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false) // ✅ Default: closed on mobile
     const [conversations, setConversations] = useState<Conversation[]>([])
     const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
     const [newMessage, setNewMessage] = useState('')
@@ -91,6 +117,9 @@ const SuperAdminChatPage = () => {
     const [searchQuery, setSearchQuery] = useState('')
     const [ragType, setRagType] = useState<RAGType>('simple')
     const [selectedArticle, setSelectedArticle] = useState<{id: string, title: string, content: string} | null>(null)
+    const [showSettingsModal, setShowSettingsModal] = useState(false)
+    const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini')
+    const [temperature, setTemperature] = useState<number>(0.7)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const initializationRef = useRef(false)
     
@@ -100,6 +129,21 @@ const SuperAdminChatPage = () => {
         articleId: string;
         userQuery: string;
     }>({ isOpen: false, articleId: '', userQuery: '' })
+
+    // Auto-open sidebar on desktop
+    useEffect(() => {
+        const handleResize = () => {
+            if (window.innerWidth >= 1024) {
+                setIsSidebarOpen(true)
+            } else {
+                setIsSidebarOpen(false)
+            }
+        }
+        
+        handleResize()
+        window.addEventListener('resize', handleResize)
+        return () => window.removeEventListener('resize', handleResize)
+    }, [])
 
     // Development mode: API might not be available
     const isDevelopment = process.env.NODE_ENV === 'development'
@@ -111,6 +155,10 @@ const SuperAdminChatPage = () => {
     useEffect(() => {
         scrollToBottom()
     }, [selectedConversation?.messages, scrollToBottom])
+    
+    const toggleSidebar = () => {
+        setIsSidebarOpen(!isSidebarOpen)
+    }
 
     // Load conversations on component mount
     const loadConversations = useCallback(async () => {
@@ -269,7 +317,9 @@ const SuperAdminChatPage = () => {
                         });
                         setIsLoading(false);
                     }
-                }
+                },
+                selectedModel,
+                temperature
             );
 
         } catch (error: any) {
@@ -412,12 +462,6 @@ const SuperAdminChatPage = () => {
         return type === 'simple' ? 'Simple RAG' : 'Agentic RAG'
     }
 
-    const getRagTypeDescription = (type: RAGType) => {
-        return type === 'simple' 
-            ? 'پاسخ‌دهی ساده و مستقیم بدون استفاده از پایگاه دانش'
-            : 'پاسخ‌دهی پیشرفته با استفاده کامل از پایگاه دانش و قابلیت‌های هوشمند'
-    }
-
     if (isInitialLoading) {
         return (
             <div className="flex items-center justify-center h-screen">
@@ -436,62 +480,280 @@ const SuperAdminChatPage = () => {
                     onClose={() => setHighlightModal({ isOpen: false, articleId: '', userQuery: '' })}
                 />
             )}
+
+            {/* ⚙️ Settings Modal */}
+            {showSettingsModal && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSettingsModal(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        {/* Header */}
+                        <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white p-6 rounded-t-2xl">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Settings className="w-6 h-6" />
+                                    <h2 className="text-xl font-bold">تنظیمات پیشرفته چت</h2>
+                                </div>
+                                <button
+                                    onClick={() => setShowSettingsModal(false)}
+                                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 space-y-6">
+                            {/* RAG Type Selection */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                                    <Brain className="w-4 h-4 text-purple-600" />
+                                    نوع سیستم RAG
+                                </label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => setRagType('simple')}
+                                        className={`p-4 rounded-xl border-2 transition-all ${
+                                            ragType === 'simple'
+                                                ? 'border-blue-500 bg-blue-50 shadow-md'
+                                                : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Zap className={`w-5 h-5 ${ragType === 'simple' ? 'text-blue-600' : 'text-gray-400'}`} />
+                                            <span className={`font-bold ${ragType === 'simple' ? 'text-blue-900' : 'text-gray-700'}`}>
+                                                Simple RAG
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-gray-600 text-right">
+                                            جستجوی ساده و سریع در پایگاه دانش
+                                        </p>
+                                    </button>
+                                    <button
+                                        onClick={() => setRagType('agentic')}
+                                        className={`p-4 rounded-xl border-2 transition-all ${
+                                            ragType === 'agentic'
+                                                ? 'border-purple-500 bg-purple-50 shadow-md'
+                                                : 'border-gray-200 hover:border-purple-300 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Brain className={`w-5 h-5 ${ragType === 'agentic' ? 'text-purple-600' : 'text-gray-400'}`} />
+                                            <span className={`font-bold ${ragType === 'agentic' ? 'text-purple-900' : 'text-gray-700'}`}>
+                                                Agentic RAG
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-gray-600 text-right">
+                                            تحلیل هوشمند با Agent‌های پیشرفته
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Model Selection */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                                    <Cpu className="w-4 h-4 text-purple-600" />
+                                    انتخاب مدل هوش مصنوعی
+                                </label>
+                                <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                                    {AVAILABLE_MODELS.map((model) => (
+                                        <button
+                                            key={model.id}
+                                            onClick={() => setSelectedModel(model.id)}
+                                            className={`p-3 rounded-lg border transition-all text-right ${
+                                                selectedModel === model.id
+                                                    ? 'border-purple-500 bg-gradient-to-r from-purple-50 to-blue-50 shadow-sm'
+                                                    : 'border-gray-200 hover:border-purple-300 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className={`font-bold text-sm ${
+                                                            selectedModel === model.id ? 'text-purple-900' : 'text-gray-800'
+                                                        }`}>
+                                                            {model.name}
+                                                        </span>
+                                                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                                            model.provider === 'Ollama' 
+                                                                ? 'bg-green-100 text-green-700'
+                                                                : model.provider === 'OpenAI'
+                                                                ? 'bg-blue-100 text-blue-700'
+                                                                : 'bg-gray-100 text-gray-700'
+                                                        }`}>
+                                                            {model.provider}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-gray-600">{model.description}</p>
+                                                </div>
+                                                {selectedModel === model.id && (
+                                                    <div className="w-5 h-5 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                                        <div className="w-2 h-2 bg-white rounded-full" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Temperature Control */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                                    <Thermometer className="w-4 h-4 text-purple-600" />
+                                    دمای تولید (Temperature): {temperature.toFixed(1)}
+                                </label>
+                                <div className="space-y-2">
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="2"
+                                        step="0.1"
+                                        value={temperature}
+                                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                                    />
+                                    <div className="flex justify-between text-xs text-gray-600">
+                                        <span>دقیق (0.0)</span>
+                                        <span>متعادل (1.0)</span>
+                                        <span>خلاق (2.0)</span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
+                                        💡 <strong>راهنما:</strong> مقادیر پایین‌تر برای پاسخ‌های دقیق‌تر و مقادیر بالاتر برای پاسخ‌های خلاقانه‌تر
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Current Settings Display */}
+                            <div className="bg-gradient-to-r from-purple-50 to-blue-50 p-4 rounded-lg border border-purple-200">
+                                <h3 className="text-sm font-bold text-purple-900 mb-3">تنظیمات فعلی:</h3>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-gray-600">نوع RAG:</span>
+                                        <span className="font-bold text-purple-900">
+                                            {ragType === 'agentic' ? 'Agentic RAG (پیشرفته)' : 'Simple RAG (ساده)'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-gray-600">مدل:</span>
+                                        <span className="font-bold text-purple-900">
+                                            {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || selectedModel}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-gray-600">Temperature:</span>
+                                        <span className="font-bold text-purple-900">{temperature.toFixed(1)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-4 rounded-b-2xl flex gap-3">
+                            <Button
+                                onClick={() => setShowSettingsModal(false)}
+                                variant="secondary"
+                                className="flex-1"
+                            >
+                                بستن
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    setShowSettingsModal(false)
+                                    // تنظیمات ذخیره می‌شوند و در ارسال پیام بعدی استفاده می‌شوند
+                                }}
+                                className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                            >
+                                ✅ ذخیره تنظیمات
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
             
-            <div className="flex bg-gray-50 h-[calc(100vh-130px)]">
+            <div className="flex bg-gray-50 h-[calc(100vh-130px)] relative">
+            {/* Mobile Overlay */}
+            {isSidebarOpen && (
+                <div 
+                    className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+                    onClick={toggleSidebar}
+                />
+            )}
+            
             {/* Sidebar */}
-            <div className={`${isSidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white border-l border-gray-200 flex flex-col overflow-hidden`}>
+            <div className={`
+                fixed lg:relative z-50 lg:z-0
+                w-80 lg:w-80
+                h-full lg:h-auto
+                ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
+                ${isSidebarOpen ? 'lg:w-80' : 'lg:w-0'}
+                transition-all duration-300
+                bg-white border-l border-gray-200
+                flex flex-col overflow-hidden
+                top-0 right-0
+            `}>
                 {/* Header */}
                 <div className="p-4 border-b border-gray-200">
                     <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold text-gray-900">چت ادمین</h2>
+                        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <Brain className="w-5 h-5 text-purple-600" />
+                            چت ادمین ارشد
+                        </h2>
                         <Button
-                            onClick={createNewConversation}
+                            onClick={toggleSidebar}
                             size="sm"
-                            className="bg-blue-600 hover:bg-blue-700"
+                            variant="ghost"
+                            className="lg:hidden"
                         >
-                            <Plus className="h-4 w-4 ml-1" />
-                            گفتگوی جدید
+                            <X className="w-5 h-5" />
                         </Button>
                     </div>
+                    
+                    {/* New Chat Button */}
+                    <Button
+                        onClick={createNewConversation}
+                        className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-md mb-3"
+                    >
+                        <Plus className="w-4 h-4 mr-2" />
+                        گفتگوی جدید
+                    </Button>
 
-                    {/* RAG Type Selection */}
-                    <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            نوع RAG:
-                        </label>
-                        <div className="space-y-2">
-                            <label className="flex items-center">
-                                <input
-                                    type="radio"
-                                    name="ragType"
-                                    value="simple"
-                                    checked={ragType === 'simple'}
-                                    onChange={(e) => setRagType(e.target.value as RAGType)}
-                                    className="ml-2"
-                                />
-                                <div className="flex items-center">
-                                    <Zap className="h-4 w-4 ml-2 text-yellow-500" />
-                                    <span className="text-sm">Simple RAG</span>
-                                </div>
-                            </label>
-                            <label className="flex items-center">
-                                <input
-                                    type="radio"
-                                    name="ragType"
-                                    value="agentic"
-                                    checked={ragType === 'agentic'}
-                                    onChange={(e) => setRagType(e.target.value as RAGType)}
-                                    className="ml-2"
-                                />
-                                <div className="flex items-center">
-                                    <Brain className="h-4 w-4 ml-2 text-purple-500" />
-                                    <span className="text-sm">Agentic RAG</span>
-                                </div>
-                            </label>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-2">
-                            {getRagTypeDescription(ragType)}
+                    {/* Settings Button */}
+                    <Button
+                        onClick={() => setShowSettingsModal(true)}
+                        variant="secondary"
+                        className="w-full mb-4 flex items-center justify-center gap-2"
+                    >
+                        <Settings className="w-4 h-4" />
+                        تنظیمات پیشرفته
+                    </Button>
+
+                    {/* Current Settings Display */}
+                    <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+                        <p className="text-xs text-gray-600 mb-2 font-medium flex items-center gap-1">
+                            <Brain className="w-3 h-3" />
+                            تنظیمات فعلی:
                         </p>
+                        <div className="space-y-1 text-xs text-gray-700">
+                            <div className="flex items-center justify-between">
+                                <span>RAG:</span>
+                                <span className={`font-bold ${
+                                    ragType === 'agentic' ? 'text-purple-700' : 'text-blue-700'
+                                }`}>
+                                    {ragType === 'agentic' ? 'پیشرفته' : 'ساده'}
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>مدل:</span>
+                                <span className="font-bold text-purple-700">
+                                    {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || 'GPT-4o Mini'}
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span>Temperature:</span>
+                                <span className="font-bold text-purple-700">{temperature.toFixed(1)}</span>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Search */}
@@ -510,32 +772,45 @@ const SuperAdminChatPage = () => {
                 {/* Conversations List */}
                 <div className="flex-1 overflow-y-auto">
                     {filteredConversations.length === 0 ? (
-                        <div className="p-4 text-center text-gray-500">
-                            <Bot className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                            <p>هنوز گفتگویی ندارید</p>
+                        <div className="p-6 text-center text-gray-500">
+                            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <Bot className="w-8 h-8 text-gray-400" />
+                            </div>
+                            <p className="text-sm">هنوز گفتگویی ندارید</p>
+                            <p className="text-xs mt-1">یک گفتگوی جدید شروع کنید</p>
                         </div>
                     ) : (
                         filteredConversations.map((conversation) => (
                             <div
                                 key={conversation.id}
-                                className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${
-                                    selectedConversation?.id === conversation.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
+                                className={`group p-3 border-b border-gray-100 cursor-pointer transition-all ${
+                                    selectedConversation?.id === conversation.id
+                                        ? 'bg-gradient-to-r from-purple-50 to-blue-50 border-r-4 border-r-purple-500'
+                                        : 'hover:bg-gray-50'
                                 }`}
                                 onClick={() => handleConversationClick(conversation)}
                             >
-                                <div className="flex items-start justify-between">
+                                <div className="flex items-start justify-between gap-2">
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex items-center mb-1">
-                                            {getRagTypeIcon(conversation.rag_type || 'simple')}
-                                            <h3 className="text-sm font-medium text-gray-900 truncate mr-2">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                                                conversation.rag_type === 'agentic'
+                                                    ? 'bg-gradient-to-r from-purple-100 to-blue-100'
+                                                    : 'bg-blue-100'
+                                            }`}>
+                                                {getRagTypeIcon(conversation.rag_type || 'simple')}
+                                            </div>
+                                            <h3 className="text-sm font-medium text-gray-900 truncate flex-1">
                                                 {conversation.title}
                                             </h3>
                                         </div>
-                                        <p className="text-xs text-gray-500">
+                                        <p className={`text-xs mb-1 ${
+                                            conversation.rag_type === 'agentic' ? 'text-purple-600' : 'text-blue-600'
+                                        }`}>
                                             {getRagTypeLabel(conversation.rag_type || 'simple')}
                                         </p>
                                         {conversation.messages.length > 0 && (
-                                            <p className="text-xs text-gray-400 mt-1 truncate">
+                                            <p className="text-xs text-gray-500 truncate">
                                                 {conversation.messages[conversation.messages.length - 1].content}
                                             </p>
                                         )}
@@ -547,9 +822,9 @@ const SuperAdminChatPage = () => {
                                         }}
                                         variant="ghost"
                                         size="sm"
-                                        className="text-gray-400 hover:text-red-500 p-1"
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500 p-1"
                                     >
-                                        <Trash2 className="h-4 w-4" />
+                                        <Trash2 className="w-4 h-4" />
                                     </Button>
                                 </div>
                             </div>
@@ -559,118 +834,206 @@ const SuperAdminChatPage = () => {
             </div>
 
             {/* Main Chat Area */}
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-w-0">
                 {/* Header */}
-                <div className="bg-white border-b border-gray-200 p-4">
+                <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white p-3 md:p-4 shadow-lg">
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center">
+                        <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
+                            {/* Mobile Menu Button */}
                             <Button
-                                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                                onClick={toggleSidebar}
                                 variant="ghost"
                                 size="sm"
-                                className="ml-2"
+                                className="lg:hidden text-white hover:bg-white/20"
                             >
-                                {isSidebarOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                                <Menu className="w-5 h-5" />
                             </Button>
-                            <div className="flex items-center">
-                                <Bot className="h-6 w-6 text-blue-600 ml-2" />
-                                <div>
-                                    <h1 className="text-lg font-semibold text-gray-900">
-                                        چت با Sally - {selectedConversation?.title || 'گفتگوی جدید'}
+                            
+                            {/* Desktop Toggle */}
+                            <Button
+                                onClick={toggleSidebar}
+                                variant="ghost"
+                                size="sm"
+                                className="hidden lg:flex text-white hover:bg-white/20"
+                            >
+                                {isSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+                            </Button>
+                            
+                            {/* Title */}
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <Bot className="w-4 h-4 md:w-5 md:h-5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <h1 className="text-sm md:text-lg font-bold truncate">
+                                        {selectedConversation?.title || 'گفتگوی جدید'}
                                     </h1>
-                                    <div className="flex items-center text-sm text-gray-500">
+                                    <div className="flex items-center gap-1 text-xs md:text-sm text-white/90">
                                         {getRagTypeIcon(ragType)}
-                                        <span className="mr-1">{getRagTypeLabel(ragType)}</span>
+                                        <span>{getRagTypeLabel(ragType)}</span>
+                                        <span className="hidden md:inline">•</span>
+                                        <span className="hidden md:inline">
+                                            {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || 'GPT-4o Mini'}
+                                        </span>
                                     </div>
                                 </div>
                             </div>
                         </div>
+                        
+                        {/* Settings Button */}
+                        <Button
+                            onClick={() => setShowSettingsModal(true)}
+                            variant="ghost"
+                            size="sm"
+                            className="text-white hover:bg-white/20 flex items-center gap-2"
+                        >
+                            <Settings className="w-4 h-4 md:w-5 md:h-5" />
+                            <span className="hidden md:inline text-sm">تنظیمات</span>
+                        </Button>
                     </div>
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-4">
                     {!selectedConversation ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                            <Bot className="h-16 w-16 mb-4 text-gray-300" />
-                            <h3 className="text-xl font-medium mb-2">به چت ادمین خوش آمدید</h3>
-                            <p className="text-center mb-4">
+                        <div className="flex flex-col items-center justify-center h-full text-gray-500 p-4">
+                            <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-r from-purple-100 to-blue-100 rounded-full flex items-center justify-center mb-4">
+                                <Bot className="w-8 h-8 md:w-10 md:h-10 text-purple-600" />
+                            </div>
+                            <h3 className="text-lg md:text-xl font-bold mb-2 text-gray-900">به چت ادمین ارشد خوش آمدید! 👋</h3>
+                            <p className="text-center mb-6 text-sm md:text-base max-w-md">
                                 برای شروع، یک گفتگوی جدید ایجاد کنید یا از گفتگوهای موجود انتخاب کنید
                             </p>
-                            <div className="bg-blue-50 p-4 rounded-lg max-w-md">
-                                <h4 className="font-medium text-blue-900 mb-2">انواع RAG:</h4>
-                                <ul className="text-sm text-blue-800 space-y-1">
-                                    <li className="flex items-center">
-                                        <Zap className="h-4 w-4 ml-2 text-yellow-500" />
-                                        Simple RAG: پاسخ‌دهی مستقیم
-                                    </li>
-                                    <li className="flex items-center">
-                                        <Brain className="h-4 w-4 ml-2 text-purple-500" />
-                                        Agentic RAG: پاسخ‌دهی هوشمند با پایگاه دانش
-                                    </li>
-                                </ul>
+                            <div className="grid md:grid-cols-2 gap-4 w-full max-w-2xl">
+                                <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 md:p-5 rounded-xl border border-blue-200">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Zap className="w-5 h-5 text-blue-600" />
+                                        <h4 className="font-bold text-blue-900">Simple RAG</h4>
+                                    </div>
+                                    <p className="text-sm text-blue-800">جستجوی ساده و سریع در پایگاه دانش</p>
+                                </div>
+                                <div className="bg-gradient-to-br from-purple-50 to-blue-100 p-4 md:p-5 rounded-xl border border-purple-200">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Brain className="w-5 h-5 text-purple-600" />
+                                        <h4 className="font-bold text-purple-900">Agentic RAG</h4>
+                                    </div>
+                                    <p className="text-sm text-purple-800">تحلیل هوشمند با Agent‌های پیشرفته</p>
+                                </div>
                             </div>
                         </div>
                     ) : (
                         <>
-                            {selectedConversation.messages.map((message) => (
+                            {selectedConversation.messages.map((message, messageIndex) => {
+                                // برای پیام‌های AI، آخرین پیام کاربر قبلی را پیدا کن
+                                let userQuery = ''
+                                if (message.role === 'assistant') {
+                                    for (let i = messageIndex - 1; i >= 0; i--) {
+                                        if (selectedConversation.messages[i].role === 'user') {
+                                            userQuery = selectedConversation.messages[i].content
+                                            break
+                                        }
+                                    }
+                                }
+                                
+                                return (
                                 <div
                                     key={message.id}
-                                    className={`flex ${message.role === 'user' ? 'justify-start' : 'justify-end'}`}
+                                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                                 >
-                                    <div
-                                        className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-2 rounded-lg ${
+                                    <div className={`flex gap-2 md:gap-3 max-w-full md:max-w-3xl ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                                        {/* Avatar */}
+                                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                                             message.role === 'user'
-                                                ? 'bg-gray-200 text-gray-900'
-                                                : 'bg-blue-600 text-white'
-                                        }`}
-                                    >
-                                        <div className="flex items-start">
+                                                ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
+                                                : message.is_failed
+                                                ? 'bg-red-100 text-red-600'
+                                                : 'bg-gradient-to-r from-green-100 to-blue-100 text-green-700'
+                                        }`}>
                                             {message.role === 'user' ? (
-                                                <User className="h-4 w-4 ml-2 mt-0.5 flex-shrink-0" />
+                                                <User className="w-4 h-4 md:w-5 md:h-5" />
                                             ) : (
-                                                <Bot className="h-4 w-4 ml-2 mt-0.5 flex-shrink-0" />
+                                                <Bot className="w-4 h-4 md:w-5 md:h-5" />
                                             )}
-                                            <div className="flex-1">
-                                                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                                                <div className="flex items-center justify-between mt-2">
-                                                    <span className="text-xs opacity-70">
-                                                        {formatTime(message.timestamp)}
-                                                    </span>
-                                                    {message.metadata?.rag_type && (
-                                                        <div className="flex items-center text-xs opacity-70">
-                                                            {getRagTypeIcon(message.metadata.rag_type)}
-                                                            <span className="mr-1">{getRagTypeLabel(message.metadata.rag_type)}</span>
+                                        </div>
+
+                                        {/* Message Content */}
+                                        <div className={`flex-1 min-w-0 ${message.role === 'user' ? 'text-right' : ''}`}>
+                                            <div className={`rounded-2xl px-3 py-2 md:px-5 md:py-3 ${
+                                                message.role === 'user'
+                                                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
+                                                    : message.is_failed
+                                                    ? 'bg-red-50 border border-red-200 text-red-900'
+                                                    : 'bg-white border border-gray-200 text-gray-900'
+                                            }`}>
+                                                {message.role === 'assistant' ? (
+                                                    <div className="text-xs md:text-sm leading-relaxed">
+                                                        <MarkdownRenderer 
+                                                            content={message.content}
+                                                            variant="compact"
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
+                                                )}
+                                                
+                                                {/* Confidence Score */}
+                                                {message.role === 'assistant' && message.confidence !== undefined && (
+                                                    <div className="mt-3 flex items-center gap-2">
+                                                        <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                                            <div
+                                                                className={`h-2 rounded-full ${
+                                                                    message.confidence > 0.7 ? 'bg-green-500' :
+                                                                    message.confidence > 0.4 ? 'bg-yellow-500' : 'bg-red-500'
+                                                                }`}
+                                                                style={{ width: `${message.confidence * 100}%` }}
+                                                            />
                                                         </div>
-                                                    )}
-                                                </div>
-                                                {message.sources && message.sources.length > 0 && (
-                                                    <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
-                                                        <p className="font-medium text-blue-800 mb-1">📚 منابع مرتبط:</p>
-                                                        <div className="space-y-1">
-                                                            {message.sources.map((source, index) => (
-                                                                <button
-                                                                    key={index}
-                                                                    onClick={() => handleSourceClick(source.id, message.id)}
-                                                                    className="flex items-center text-blue-700 hover:text-blue-900 hover:bg-blue-100 p-1 rounded transition-colors w-full text-right"
-                                                                >
-                                                                    <Sparkles className="h-3 w-3 ml-1 flex-shrink-0 animate-pulse" />
-                                                                    <span>• {source.title} (کلیک برای highlight)</span>
-                                                                </button>
-                                                            ))}
-                                                        </div>
+                                                        <span className="text-xs text-gray-600">
+                                                            {Math.round(message.confidence * 100)}% اطمینان
+                                                        </span>
                                                     </div>
                                                 )}
-                                                {message.confidence && (
-                                                    <div className="mt-1 text-xs opacity-70">
-                                                        اعتماد: {Math.round(message.confidence * 100)}%
+                                                
+                                                {/* RAG Type Badge */}
+                                                {message.metadata?.rag_type && (
+                                                    <div className="mt-2 flex items-center gap-1 text-xs text-gray-600">
+                                                        {getRagTypeIcon(message.metadata.rag_type)}
+                                                        <span>{getRagTypeLabel(message.metadata.rag_type)}</span>
                                                     </div>
                                                 )}
                                             </div>
+
+                                            {/* Sources */}
+                                            {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+                                                <div className="mt-2 md:mt-3 space-y-2">
+                                                    <p className="text-xs text-gray-600 font-medium flex items-center gap-1">
+                                                        <Target className="w-3 h-3" />
+                                                        منابع مرتبط:
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {message.sources.map((source, index) => (
+                                                            <button
+                                                                key={index}
+                                                                onClick={() => handleSourceClick(source.id, message.id)}
+                                                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border border-blue-200 rounded-full text-xs text-blue-700 hover:text-blue-900 transition-all"
+                                                            >
+                                                                <ExternalLink className="w-3 h-3" />
+                                                                {source.title}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            
+                                            {/* Timestamp */}
+                                            <p className={`text-xs text-gray-500 mt-2 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+                                                {formatTime(message.timestamp)}
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
-                            ))}
+                                )
+                            })}
                             <div ref={messagesEndRef} />
                         </>
                     )}
@@ -678,15 +1041,15 @@ const SuperAdminChatPage = () => {
 
                 {/* Input Area */}
                 {selectedConversation && (
-                    <div className="bg-white border-t border-gray-200 p-4">
-                        <div className="flex items-end space-x-2 space-x-reverse">
+                    <div className="bg-white border-t border-gray-200 p-3 md:p-4">
+                        <div className="flex items-end gap-2">
                             <div className="flex-1">
                                 <Textarea
                                     value={newMessage}
                                     onChange={(e) => setNewMessage(e.target.value)}
                                     onKeyPress={handleKeyPress}
                                     placeholder="پیام خود را بنویسید..."
-                                    className="resize-none"
+                                    className="resize-none min-h-[40px] max-h-[120px] text-sm md:text-base"
                                     rows={1}
                                     disabled={isLoading}
                                 />
@@ -694,18 +1057,18 @@ const SuperAdminChatPage = () => {
                             <Button
                                 onClick={handleSendMessage}
                                 disabled={!newMessage.trim() || isLoading}
-                                className="bg-blue-600 hover:bg-blue-700"
+                                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 h-10 w-10 md:h-12 md:w-12 rounded-xl flex items-center justify-center flex-shrink-0"
                             >
                                 {isLoading ? (
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                    <div className="animate-spin rounded-full h-4 w-4 md:h-5 md:w-5 border-2 border-white border-t-transparent"></div>
                                 ) : (
-                                    <Send className="h-4 w-4" />
+                                    <Send className="h-4 w-4 md:h-5 md:h-5" />
                                 )}
                             </Button>
                         </div>
                         <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-                            <span>Enter برای ارسال، Shift+Enter برای خط جدید</span>
-                            <div className="flex items-center">
+                            <span className="hidden md:inline">Enter برای ارسال، Shift+Enter برای خط جدید</span>
+                            <div className="flex items-center gap-1">
                                 {getRagTypeIcon(ragType)}
                                 <span className="mr-1">حالت فعال: {getRagTypeLabel(ragType)}</span>
                             </div>
@@ -735,10 +1098,9 @@ const SuperAdminChatPage = () => {
                         
                         {/* Modal Content */}
                         <div className="flex-1 overflow-y-auto p-4">
-                            <div 
-                                className="prose prose-sm max-w-none text-right"
-                                dangerouslySetInnerHTML={{ __html: selectedArticle.content }}
-                                style={{ direction: 'rtl' }}
+                            <MarkdownRenderer 
+                                content={selectedArticle.content}
+                                variant="default"
                             />
                         </div>
                         

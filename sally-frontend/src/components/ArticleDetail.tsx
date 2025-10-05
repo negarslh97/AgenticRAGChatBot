@@ -6,6 +6,8 @@ import { useParams, Link } from "react-router-dom"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
 import { adminService } from "../services/adminService"
 import { useAuth } from "../context/AuthContext"
+import { Button } from "./ui/button"
+import { MarkdownRenderer } from "./ui/markdown-renderer"
 import toast from "react-hot-toast"
 
 interface ArticleDetailProps {
@@ -86,8 +88,8 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
     return (
       <div className="max-w-4xl mx-auto text-center py-12">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Article Not Found</h2>
-        <Link to="/kb" className="btn-primary">
-          Back to Knowledge Base
+        <Link to="/kb">
+          <Button>Back to Knowledge Base</Button>
         </Link>
       </div>
     )
@@ -148,9 +150,10 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
       </div>
 
       {/* Article Content */}
-      <div className="prose prose-lg max-w-none text-right" dir="rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
-        <div className="whitespace-pre-wrap text-gray-800 leading-relaxed" dangerouslySetInnerHTML={{ __html: article.content_html || "<p>محتوایی برای نمایش وجود ندارد.</p>" }}></div>
-      </div>
+      <MarkdownRenderer 
+        content={article.content_markdown || article.content_html || "محتوایی برای نمایش وجود ندارد."}
+        variant="default"
+      />
 
       {/* Navigation */}
       

@@ -39,6 +39,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
+import { MarkdownRenderer } from '../components/ui/markdown-renderer'
 import { chatService, Conversation as ApiConversation, ChatMessage } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
@@ -678,7 +679,15 @@ const ChatPage = () => {
                                         )}
                                         <div className={`max-w-[70%] ${message.role === 'user' ? 'order-2' : 'order-1'}`}>
                                             <div className={`p-4 rounded-lg shadow-sm ${message.role === 'user' ? 'bg-white text-slate-800' : 'bg-blue-600 text-white'}`}>
-                                                <p className="text-right whitespace-pre-wrap">{message.content}</p>
+                                                {message.role === 'assistant' ? (
+                                                    <MarkdownRenderer 
+                                                        content={message.content}
+                                                        variant="chat"
+                                                        className="text-white"
+                                                    />
+                                                ) : (
+                                                    <p className="text-right whitespace-pre-wrap">{message.content}</p>
+                                                )}
                                                 {message.sources && message.sources.length > 0 && (
                                                     <div className="mt-3 pt-3 border-t border-gray-200">
                                                         <p className="text-xs text-gray-500 mb-2">منابع:</p>

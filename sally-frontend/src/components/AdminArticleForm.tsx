@@ -4,6 +4,7 @@ import { useState, useRef } from "react"
 import { useAuth } from "../context/AuthContext"
 import { toast } from "react-hot-toast"
 import { knowledgeBaseService, FileUploadResponse } from "../services/knowledgeBaseService"
+import { Button } from "./ui/button"
 
 interface AdminArticleFormProps {
   onArticleCreated?: () => void
@@ -165,14 +166,15 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
           className="hidden"
         />
         
-        <button
+        <Button
           type="button"
           onClick={triggerFileInput}
           disabled={uploading}
-          className="btn-secondary w-full"
+          variant="secondary"
+          className="w-full"
         >
           {uploading ? "در حال آپلود و تبدیل..." : "انتخاب فایل و تبدیل به Markdown"}
-        </button>
+        </Button>
       </div>
       
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -229,7 +231,7 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
                   <svg className="mr-1 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 0h10m-10 0v16a2 2 0 002 2h6a2 2 0 002-2V4" />
                   </svg>
-                  🤖 تبدیل به Markdown
+                  تبدیل به Markdown
                 </>
               )}
             </button>
@@ -244,7 +246,7 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
             placeholder="محتوای markdown مقاله را وارد کنید یا متن ساده وارد کرده و دکمه 'تبدیل به Markdown' را کلیک کنید"
           />
           <p className="text-xs text-gray-500 mt-1">
-            💡 نکته: می‌توانید متن ساده وارد کرده و با کلیک روی دکمه "🤖 تبدیل به Markdown" آن را به فرمت ساختاریافته تبدیل کنید
+            نکته: می‌توانید متن ساده وارد کرده و با کلیک روی دکمه "تبدیل به Markdown" آن را به فرمت ساختاریافته تبدیل کنید
           </p>
         </div>
 
@@ -305,13 +307,13 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
           </div>
         )}
 
-        <button
+        <Button
           type="submit"
           disabled={loading || uploading}
-          className="btn-primary w-full"
+          className="w-full"
         >
           {loading ? "در حال ایجاد..." : "ایجاد مقاله"}
-        </button>
+        </Button>
       </form>
     </div>
   )

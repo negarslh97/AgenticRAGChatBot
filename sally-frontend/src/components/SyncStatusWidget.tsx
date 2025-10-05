@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { knowledgeBaseService, SyncStatusResponse } from "../services/knowledgeBaseService"
+import { Button } from "./ui/button"
 import toast from "react-hot-toast"
 import { RefreshCw, CheckCircle, AlertCircle, Clock } from "lucide-react"
 
@@ -156,17 +157,19 @@ const SyncStatusWidget: React.FC = () => {
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-bold">وضعیت Weaviate</h3>
         <div className="flex items-center space-x-2 gap-2">
-          <button
+          <Button
             onClick={() => {
               loadStatus()
               checkSyncStatus()
             }}
             disabled={loading || syncCheckLoading}
-            className="btn-secondary text-sm px-3 py-1 flex items-center gap-1"
+            variant="secondary"
+            size="sm"
+            className="text-sm px-3 py-1 flex items-center gap-1"
           >
             <RefreshCw className={`h-3 w-3 ${(loading || syncCheckLoading) ? 'animate-spin' : ''}`} />
             {loading || syncCheckLoading ? "..." : "بروزرسانی"}
-          </button>
+          </Button>
           <label className="flex items-center text-sm">
             <input
               type="checkbox"

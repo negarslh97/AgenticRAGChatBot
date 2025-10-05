@@ -4,6 +4,7 @@ import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useAuth } from "../context/AuthContext"
 import { chatService, type ChatMessage, type ChatResponse } from "../services/chatService"
+import { Button } from "./ui/button"
 import toast from "react-hot-toast"
 
 interface ChatInterfaceProps {
@@ -271,13 +272,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
             className="flex-1 bg-transparent border-none focus:ring-0 focus:outline-none"
             disabled={loading}
           />
-          <button
+          <Button
             type="submit"
             disabled={loading || !inputMessage.trim()}
-            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed rounded-lg px-4 py-2"
+            className="rounded-lg px-4 py-2"
           >
             ارسال
-          </button>
+          </Button>
         </form>
       </div>
     </div>
