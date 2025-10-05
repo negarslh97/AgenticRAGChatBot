@@ -11,6 +11,7 @@ from app.domain.entities import (
 from app.infrastructure.rag_service import get_rag_service
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.use_cases.query_analyzer import analyze_query_complexity, generate_conversation_title
 
 logger = get_logger(__name__)
 
@@ -104,6 +105,10 @@ class ChatUseCases:
         """
         logger.info(f"🌊 Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
         
+        # 🧠 تحلیل پیچیدگی سوال
+        complexity_analysis = analyze_query_complexity(content)
+        logger.info(f"📊 Query complexity: {complexity_analysis['complexity_fa']} (score: {complexity_analysis['score']})")
+        
         # Create or get conversation (same logic as non-streaming)
         if conversation_id:
             try:
@@ -116,20 +121,23 @@ class ChatUseCases:
                 yield {"type": "error", "message": f"Error: {str(e)}"}
                 return
         else:
+            # 🎯 تولید عنوان هوشمند از اولین پیام
+            smart_title = generate_conversation_title(content, max_length=60)
+            
             conversation = Conversation(
                 customer_id=None,
                 admin_id=str(admin.id),
-                title=content[:50] + "..." if len(content) > 50 else content,
-                tags=[f"admin-{rag_type}-rag"],
+                title=smart_title,
+                tags=[f"admin-{rag_type}-rag", f"complexity-{complexity_analysis['complexity']}"],
                 guest_session_id=None
             )
             await conversation.insert()
-            logger.info(f"✅ Created admin conversation: {conversation.id}")
+            logger.info(f"✅ Created admin conversation: {conversation.id} - '{smart_title}'")
         
         # ✅ تشخیص نقش دقیق ادمین
         sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
         
-        # Save user message
+        # Save user message با complexity و model
         user_message = Message(
             conversation_id=str(conversation.id),
             content=content,
@@ -139,7 +147,12 @@ class ChatUseCases:
                 "rag_type": rag_type, 
                 "admin_email": admin.email,
                 "admin_name": admin.full_name,
-                "admin_role": admin.role_name
+                "admin_role": admin.role_name,
+                "complexity": complexity_analysis['complexity'],
+                "complexity_fa": complexity_analysis['complexity_fa'],
+                "complexity_score": complexity_analysis['score'],
+                "model": model or settings.rag_model_loaded,
+                "temperature": temperature
             }
         )
         await user_message.insert()
@@ -181,7 +194,8 @@ class ChatUseCases:
             )
             
             if relevant_docs:
-                sources = rag_service._format_sources_markdown(relevant_docs[:3])
+                # 🎯 دریافت 3 منبع unique (نه 3 document اول!)
+                sources = rag_service._format_sources_markdown(relevant_docs, max_sources=3)
                 confidence = 0.9
                 
                 # Send sources
@@ -191,10 +205,21 @@ class ChatUseCases:
                     "confidence": confidence
                 }
                 
-                # Build context
+                # Build context از unique articles (نه documents اول)
+                # 🎯 استخراج unique articles براساس ID
+                unique_articles = []
+                seen_article_ids = set()
+                for doc in relevant_docs:
+                    doc_id = str(doc.get("id", ""))
+                    if doc_id not in seen_article_ids:
+                        unique_articles.append(doc)
+                        seen_article_ids.add(doc_id)
+                        if len(unique_articles) >= 3:
+                            break
+                
                 context_text = "\n\n".join([
                     f"Document: {doc['title']}\nContent: {doc['content']}"
-                    for doc in relevant_docs[:3]
+                    for doc in unique_articles
                 ])
                 
                 # Stream response with custom model settings
@@ -217,7 +242,7 @@ class ChatUseCases:
                     "content": full_response
                 }
             
-            # Save AI message
+            # Save AI message با complexity و model
             ai_message = Message(
                 conversation_id=str(conversation.id),
                 content=full_response,
@@ -227,17 +252,24 @@ class ChatUseCases:
                     "sources": sources,
                     "confidence": confidence,
                     "rag_type": rag_type,
-                    "streaming": True
+                    "streaming": True,
+                    "complexity": complexity_analysis['complexity'],
+                    "complexity_fa": complexity_analysis['complexity_fa'],
+                    "model": model or settings.rag_model_loaded,
+                    "temperature": temperature
                 }
             )
             await ai_message.insert()
             
-            # Send complete event
+            # Send complete event با complexity
             yield {
                 "type": "complete",
                 "message_id": str(ai_message.id),
                 "full_response": full_response,
-                "confidence": confidence
+                "confidence": confidence,
+                "complexity": complexity_analysis['complexity'],
+                "complexity_fa": complexity_analysis['complexity_fa'],
+                "model": model or settings.rag_model_loaded
             }
             
         except Exception as e:
@@ -809,7 +841,8 @@ class ChatUseCases:
             logger.info(f"🔍 Found {len(relevant_docs)} relevant documents")
             
             if relevant_docs:
-                sources = rag_service._format_sources_markdown(relevant_docs[:3])
+                # 🎯 دریافت 3 منبع unique (نه 3 document اول!)
+                sources = rag_service._format_sources_markdown(relevant_docs, max_sources=3)
                 confidence = 0.9
                 
                 # Send sources event
@@ -819,10 +852,21 @@ class ChatUseCases:
                     "confidence": confidence
                 }
                 
-                # Build context
+                # Build context از unique articles (نه documents اول)
+                # 🎯 استخراج unique articles براساس ID
+                unique_articles = []
+                seen_article_ids = set()
+                for doc in relevant_docs:
+                    doc_id = str(doc.get("id", ""))
+                    if doc_id not in seen_article_ids:
+                        unique_articles.append(doc)
+                        seen_article_ids.add(doc_id)
+                        if len(unique_articles) >= 3:
+                            break
+                
                 context_text = "\n\n".join([
                     f"Document: {doc['title']}\nContent: {doc['content']}"
-                    for doc in relevant_docs[:3]
+                    for doc in unique_articles
                 ])
                 
                 # Stream RAG response (chunks are already split word-by-word in langchain_utils)

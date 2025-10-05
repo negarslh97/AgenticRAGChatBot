@@ -154,8 +154,17 @@ class RAGService(ABC):
         logger.info(f"✅ Enrichment completed: {len(enriched_docs)} documents ready (from {len(weaviate_results)} Weaviate results)")
         return enriched_docs
 
-    def _format_sources_markdown(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Format sources with rich metadata and relevant snippets for highlighting."""
+    def _format_sources_markdown(self, documents: List[Dict[str, Any]], max_sources: int = 5) -> List[Dict[str, Any]]:
+        """
+        Format sources with rich metadata and relevant snippets for highlighting.
+        
+        Args:
+            documents: لیست documents (می‌تواند شامل duplicate article IDs باشد)
+            max_sources: حداکثر تعداد منابع unique برای برگرداندن
+            
+        Returns:
+            لیست منابع unique با اولویت score
+        """
         formatted_sources = []
         seen_ids = set()  # برای جلوگیری از تکرار منابع
 
@@ -185,8 +194,12 @@ class RAGService(ABC):
                 "path": doc.get("path", ""),
                 "summary": doc.get("summary", "")
             })
+            
+            # 🎯 اگر به تعداد مورد نظر رسیدیم، متوقف می‌شویم
+            if len(formatted_sources) >= max_sources:
+                break
 
-        logger.info(f"📋 Formatted {len(formatted_sources)} unique sources with snippets")
+        logger.info(f"📋 Formatted {len(formatted_sources)} unique sources with snippets (from {len(documents)} documents)")
         
         # 🔥 DEBUG: نمایش منابع برگشتی
         for src in formatted_sources:

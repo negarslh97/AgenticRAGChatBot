@@ -66,10 +66,15 @@ interface Message {
       total_tokens?: number
     }
     rag_type?: 'simple' | 'agentic'
+    complexity?: string
+    complexity_fa?: string
+    model?: string
   }
   sources?: Array<{ title: string; id: string }>
   confidence?: number
   suggested_actions?: string[]
+  complexity_fa?: string
+  model?: string
 }
 
 interface Conversation {
@@ -303,7 +308,13 @@ const SuperAdminChatPage = () => {
                             const updated = { ...prev };
                             updated.messages = updated.messages.map(m =>
                                 m.id === assistantTempId
-                                    ? { ...m, id: evt.message_id || assistantTempId, content: evt.full_response || m.content }
+                                    ? { 
+                                        ...m, 
+                                        id: evt.message_id || assistantTempId, 
+                                        content: evt.full_response || m.content,
+                                        complexity_fa: evt.complexity_fa,
+                                        model: evt.model
+                                    }
                                     : m
                             );
                             return updated;
@@ -812,11 +823,29 @@ const SuperAdminChatPage = () => {
                                                 {conversation.title}
                                             </h3>
                                         </div>
-                                        <p className={`text-xs mb-1 ${
-                                            conversation.rag_type === 'agentic' ? 'text-purple-600' : 'text-blue-600'
-                                        }`}>
-                                            {getRagTypeLabel(conversation.rag_type || 'simple')}
-                                        </p>
+                                        <div className="flex flex-wrap items-center gap-1 mb-1">
+                                            <span className={`text-xs ${
+                                                conversation.rag_type === 'agentic' ? 'text-purple-600' : 'text-blue-600'
+                                            }`}>
+                                                {getRagTypeLabel(conversation.rag_type || 'simple')}
+                                            </span>
+                                            {/* Complexity */}
+                                            {conversation.messages.length > 0 && conversation.messages[conversation.messages.length - 1].complexity_fa && (
+                                                <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">
+                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa === 'ساده' && '🟢'}
+                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa === 'متوسط' && '🟡'}
+                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa === 'پیچیده' && '🔴'}
+                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa}
+                                                </span>
+                                            )}
+                                            {/* Model */}
+                                            {conversation.messages.length > 0 && conversation.messages[conversation.messages.length - 1].model && (
+                                                <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded truncate max-w-[120px]">
+                                                    {AVAILABLE_MODELS.find(m => m.id === conversation.messages[conversation.messages.length - 1].model)?.name || 
+                                                     conversation.messages[conversation.messages.length - 1].model?.split('/').pop()}
+                                                </span>
+                                            )}
+                                        </div>
                                         {conversation.messages.length > 0 && (
                                             <p className="text-xs text-gray-500 truncate">
                                                 {conversation.messages[conversation.messages.length - 1].content}
@@ -982,6 +1011,30 @@ const SuperAdminChatPage = () => {
                                                     </div>
                                                 ) : (
                                                     <p className="text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
+                                                )}
+                                                
+                                                {/* Metadata: Complexity & Model */}
+                                                {message.role === 'assistant' && (message.complexity_fa || message.model) && (
+                                                    <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center gap-2 text-xs">
+                                                        {message.complexity_fa && (
+                                                            <div className="flex items-center gap-1 px-2 py-1 bg-purple-50 rounded-md">
+                                                                <Brain className="w-3 h-3 text-purple-600" />
+                                                                <span className="text-purple-700 font-medium">
+                                                                    {message.complexity_fa === 'ساده' && '🟢 ساده'}
+                                                                    {message.complexity_fa === 'متوسط' && '🟡 متوسط'}
+                                                                    {message.complexity_fa === 'پیچیده' && '🔴 پیچیده'}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                        {message.model && (
+                                                            <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-md">
+                                                                <Cpu className="w-3 h-3 text-blue-600" />
+                                                                <span className="text-blue-700 font-medium">
+                                                                    {AVAILABLE_MODELS.find(m => m.id === message.model)?.name || message.model}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 )}
                                                 
                                                 {/* Confidence Score */}
