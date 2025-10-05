@@ -38,6 +38,8 @@ class AdminChatMessage(BaseModel):
     content: str
     conversation_id: Optional[str] = None
     rag_type: str = "simple"  # "simple", "agentic", or "advanced_agentic"
+    model: Optional[str] = None  # Model name (e.g., "gpt-4o", "ollama:llama3.2", "claude-3-5-sonnet")
+    temperature: Optional[float] = 0.7  # Temperature for text generation (0.0-2.0)
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -138,7 +140,9 @@ async def send_admin_message(
             content=message.content,
             admin=current_admin,
             conversation_id=message.conversation_id,
-            rag_type=message.rag_type
+            rag_type=message.rag_type,
+            model=message.model,
+            temperature=message.temperature
         )
         
         return ChatResponse(**response)
@@ -177,7 +181,9 @@ async def send_admin_message_stream(
                     content=message.content,
                     admin=current_admin,
                     conversation_id=message.conversation_id,
-                    rag_type=message.rag_type
+                    rag_type=message.rag_type,
+                    model=message.model,
+                    temperature=message.temperature
                 ):
                     yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
                     await asyncio.sleep(0.01)

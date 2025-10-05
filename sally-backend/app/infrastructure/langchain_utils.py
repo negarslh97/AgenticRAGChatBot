@@ -19,9 +19,10 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferMemory, ConversationSummaryMemory
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 import json
 import asyncio
+from enum import Enum
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -34,6 +35,46 @@ from app.core.logging_config import get_logger, PerformanceLogger
 from app.infrastructure.langchain_callbacks import get_default_callbacks
 
 logger = get_logger(__name__)
+
+
+class ModelProvider(str, Enum):
+    """Supported LLM providers"""
+    OPENAI = "openai"          # OpenAI رسمی (gpt-4o, gpt-3.5-turbo, ...)
+    OPENROUTER = "openrouter"  # OpenRouter (Grok, Gemini, Claude, Llama, Mistral, ...)
+    OLLAMA = "ollama"          # Ollama محلی
+
+
+def detect_model_provider(model_name: str) -> ModelProvider:
+    """
+    تشخیص provider از روی نام مدل
+    
+    🔍 منطق تشخیص:
+    - ollama:*       → Ollama (محلی)
+    - gpt-*          → OpenAI (رسمی)
+    - سایر مدل‌ها     → OpenRouter (Grok, Gemini, Claude, Llama, Mistral, DeepSeek, Qwen, ...)
+    
+    Args:
+        model_name: نام مدل (e.g., "gpt-4o", "x-ai/grok-beta", "google/gemini-2.0")
+    
+    Returns:
+        ModelProvider enum
+    """
+    if not model_name:
+        return ModelProvider.OPENAI  # Default
+    
+    model_lower = model_name.lower()
+    
+    # ✅ Ollama: prefix با "ollama:"
+    if model_lower.startswith("ollama:"):
+        return ModelProvider.OLLAMA
+    
+    # ✅ OpenAI رسمی: شروع با "gpt-" (gpt-4o, gpt-3.5-turbo, gpt-4-turbo, ...)
+    if model_lower.startswith("gpt-"):
+        return ModelProvider.OPENAI
+    
+    # ✅ OpenRouter: همه بقیه مدل‌ها
+    # (google/gemini, x-ai/grok, anthropic/claude, meta-llama/*, mistralai/*, deepseek/*, qwen/*, openai/o1-*, ...)
+    return ModelProvider.OPENROUTER
 
 
 class MetadataOutput(BaseModel):
@@ -75,28 +116,31 @@ class LangChainService:
         max_tokens: int = 500,
         temperature: float = 0.7,
         streaming: bool = False
-    ) -> ChatOpenAI:
+    ) -> Union[ChatOpenAI, Any]:
         """
-        دریافت یا ایجاد یک instance از ChatOpenAI model
+        دریافت یا ایجاد یک instance از LLM model (پشتیبانی از همه provider ها)
         
         Args:
-            model_name: نام مدل
-            force_json: فعال کردن JSON mode
+            model_name: نام مدل (e.g., "gpt-4o", "ollama:llama3.2", "claude-3-5-sonnet")
+            force_json: فعال کردن JSON mode (فقط برای OpenAI)
             max_tokens: حداکثر توکن‌های خروجی
             temperature: دمای sampling
             streaming: فعال کردن streaming
             
         Returns:
-            ChatOpenAI instance
+            LLM instance (ChatOpenAI, ChatOllama, ChatAnthropic, etc.)
         """
         cache_key = f"{model_name}_{'json' if force_json else 'text'}_{max_tokens}_{temperature}_{'stream' if streaming else 'batch'}"
         
         if cache_key not in self._models:
+            provider = detect_model_provider(model_name)
+            
             logger.info(
-                f"🤖 Loading model: {model_name}",
+                f"🤖 Loading model: {model_name} (Provider: {provider.value})",
                 extra={
                     'extra_data': {
                         'model': model_name,
+                        'provider': provider.value,
                         'max_tokens': max_tokens,
                         'temperature': temperature,
                         'json_mode': force_json,
@@ -105,22 +149,68 @@ class LangChainService:
                 }
             )
 
-            model_kwargs = {}
-            if force_json:
-                model_kwargs["response_format"] = {"type": "json_object"}
-                logger.info("📋 JSON mode enabled")
+            # بسته به provider، instance مناسب را بسازیم
+            if provider == ModelProvider.OLLAMA:
+                # ✅ Ollama محلی (using new langchain-ollama package)
+                try:
+                    from langchain_ollama import ChatOllama
+                    
+                    # حذف prefix "ollama:" از نام مدل
+                    actual_model_name = model_name.replace("ollama:", "").replace("Ollama:", "")
+                    
+                    ollama_url = settings.ollama_url_loaded
+                    
+                    self._models[cache_key] = ChatOllama(
+                        model=actual_model_name,
+                        base_url=ollama_url,
+                        temperature=temperature,
+                        num_predict=max_tokens,  # Ollama uses num_predict instead of max_tokens
+                    )
+                    logger.info(f"✅ Ollama model {actual_model_name} ready at {ollama_url}")
+                    
+                except ImportError:
+                    logger.error("❌ langchain-ollama not installed. Install with: pip install -U langchain-ollama")
+                    raise Exception("Ollama support requires langchain-ollama package")
+            
+            elif provider == ModelProvider.OPENROUTER:
+                # ✅ OpenRouter (Grok, Gemini, Claude, Llama, Mistral, DeepSeek, Qwen, O1, ...)
+                # 🔑 از OPENAI_API_KEY و OPENAI_BASE_URL استفاده می‌کند
+                model_kwargs = {}
+                if force_json:
+                    model_kwargs["response_format"] = {"type": "json_object"}
+                    logger.info("📋 JSON mode enabled")
 
-            self._models[cache_key] = ChatOpenAI(
-                model_name=model_name,
-                openai_api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                streaming=streaming,
-                callbacks=self._callbacks,
-                model_kwargs=model_kwargs
-            )
-            logger.info(f"✅ Model {model_name} ready")
+                self._models[cache_key] = ChatOpenAI(
+                    model_name=model_name,
+                    openai_api_key=settings.openai_api_key_loaded,      # 🔑 OpenRouter API Key
+                    base_url=settings.openai_base_url_loaded,           # 🔗 OpenRouter Base URL
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    streaming=streaming,
+                    callbacks=self._callbacks,
+                    model_kwargs=model_kwargs
+                )
+                logger.info(f"✅ OpenRouter model {model_name} ready (via {settings.openai_base_url_loaded})")
+            
+            else:  # ModelProvider.OPENAI (رسمی)
+                # ✅ OpenAI رسمی (gpt-4o, gpt-3.5-turbo, ...)
+                # 🔑 از Embedder_API_KEY و Embedder_OPENAI_BASE_URL استفاده می‌کند
+                model_kwargs = {}
+                if force_json:
+                    model_kwargs["response_format"] = {"type": "json_object"}
+                    logger.info("📋 JSON mode enabled")
+
+                self._models[cache_key] = ChatOpenAI(
+                    model_name=model_name,
+                    openai_api_key=settings.embedder_api_key_loaded or settings.openai_api_key_loaded,        # 🔑 OpenAI Official API Key
+                    base_url=settings.embedder_openai_base_url_loaded or settings.openai_base_url_loaded,     # 🔗 OpenAI Official Base URL
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    streaming=streaming,
+                    callbacks=self._callbacks,
+                    model_kwargs=model_kwargs
+                )
+                logger.info(f"✅ OpenAI model {model_name} ready (Official API)")
         else:
             logger.debug(f"♻️ Using cached model: {cache_key}")
         
@@ -236,52 +326,52 @@ class LangChainService:
                 logger.info(f"✅ Model loaded successfully: {selected_model}")
 
                 prompt = ChatPromptTemplate.from_template("""
-شما یک متخصص تولید متادیتای مقالات هستید. برای مقاله زیر، متادیتای کامل تولید کنید.
+                    شما یک متخصص تولید متادیتای مقالات هستید. برای مقاله زیر، متادیتای کامل تولید کنید.
 
-**عنوان مقاله:** {title}
-**محتوای مقاله:** {content}
+                    **عنوان مقاله:** {title}
+                    **محتوای مقاله:** {content}
 
-**دستورالعمل‌های مهم برای تولید خلاصه:**
-1. خلاصه باید یک پاراگراف منسجم و روان باشد (نه فهرست یا نقطه‌چین)
-2. خلاصه باید در 2-4 جمله، محتوای اصلی مقاله را توضیح دهد
-3. خلاصه باید مفید و قابل فهم باشد حتی اگر مقاله کامل خوانده نشده باشد
-4. از کلمات کلیدی مهم مقاله استفاده کنید
-5. خلاصه باید به زبان فارسی روان باشد
+                    **دستورالعمل‌های مهم برای تولید خلاصه:**
+                    1. خلاصه باید یک پاراگراف منسجم و روان باشد (نه فهرست یا نقطه‌چین)
+                    2. خلاصه باید در 2-4 جمله، محتوای اصلی مقاله را توضیح دهد
+                    3. خلاصه باید مفید و قابل فهم باشد حتی اگر مقاله کامل خوانده نشده باشد
+                    4. از کلمات کلیدی مهم مقاله استفاده کنید
+                    5. خلاصه باید به زبان فارسی روان باشد
 
-**مثال خلاصه خوب:**
-"این راهنما نحوه استقرار و راه‌اندازی نرم‌افزار مدیریت فروش را شرح می‌دهد. ابتدا تنظیمات اولیه سیستم انجام می‌شود و سپس کاربران و محصولات به سیستم اضافه می‌گردند."
+                    **مثال خلاصه خوب:**
+                    "این راهنما نحوه استقرار و راه‌اندازی نرم‌افزار مدیریت فروش را شرح می‌دهد. ابتدا تنظیمات اولیه سیستم انجام می‌شود و سپس کاربران و محصولات به سیستم اضافه می‌گردند."
 
-**مثال خلاصه بد (استفاده نکنید):**
-"استقرار نرم افزار مدیریت فروش
-1. تنظیمات
-2. راه‌اندازی"
+                    **مثال خلاصه بد (استفاده نکنید):**
+                    "استقرار نرم افزار مدیریت فروش
+                    1. تنظیمات
+                    2. راه‌اندازی"
 
-**دستورالعمل‌های تگ‌ها:**
-- 3 تا 5 تگ کلیدی و مرتبط انتخاب کنید
-- تگ‌ها باید مفاهیم اصلی مقاله را پوشش دهند
-- از کلمات ساده و قابل جستجو استفاده کنید
+                    **دستورالعمل‌های تگ‌ها:**
+                    - 3 تا 5 تگ کلیدی و مرتبط انتخاب کنید
+                    - تگ‌ها باید مفاهیم اصلی مقاله را پوشش دهند
+                    - از کلمات ساده و قابل جستجو استفاده کنید
 
-**دستورالعمل‌های دسته‌بندی:**
-- یکی از دسته‌بندی‌های زیر را انتخاب کنید:
-  * "راهنمای محصول" - برای آموزش استفاده از محصول
-  * "مشکلات فنی" - برای حل مشکلات و عیب‌یابی
-  * "حساب کاربری و صورتحساب" - برای مسائل مالی و حساب کاربری
-  * "عمومی" - برای سایر موضوعات
+                    **دستورالعمل‌های دسته‌بندی:**
+                    - یکی از دسته‌بندی‌های زیر را انتخاب کنید:
+                    * "راهنمای محصول" - برای آموزش استفاده از محصول
+                    * "مشکلات فنی" - برای حل مشکلات و عیب‌یابی
+                    * "حساب کاربری و صورتحساب" - برای مسائل مالی و حساب کاربری
+                    * "عمومی" - برای سایر موضوعات
 
-**دستورالعمل‌های سطح دسترسی:**
-- یکی از موارد زیر را انتخاب کنید:
-  * "public" - برای اطلاعات عمومی و غیرمحرمانه
-  * "customer" - فقط برای مشتریان وارد شده
-  * "internal" - فقط برای کارمندان و تیم داخلی
+                    **دستورالعمل‌های سطح دسترسی:**
+                    - یکی از موارد زیر را انتخاب کنید:
+                    * "public" - برای اطلاعات عمومی و غیرمحرمانه
+                    * "customer" - فقط برای مشتریان وارد شده
+                    * "internal" - فقط برای کارمندان و تیم داخلی
 
-**فقط JSON زیر را برگردانید (بدون توضیح اضافی):**
-{{
-  "summary": "خلاصه کامل به صورت پاراگراف منسجم",
-  "tags": ["تگ1", "تگ2", "تگ3"],
-  "suggested_category": "دسته‌بندی",
-  "suggested_visibility": "دسترسی"
-}}
-""")
+                    **فقط JSON زیر را برگردانید (بدون توضیح اضافی):**
+                    {{
+                    "summary": "خلاصه کامل به صورت پاراگراف منسجم",
+                    "tags": ["تگ1", "تگ2", "تگ3"],
+                    "suggested_category": "دسته‌بندی",
+                    "suggested_visibility": "دسترسی"
+                    }}
+                """)
 
                 # Create the chain with JSON parser
                 parser = JsonOutputParser()
@@ -362,25 +452,25 @@ class LangChainService:
             logger.info(f"✅ مدل {selected_model} برای تبدیل Markdown بارگذاری شد (max_tokens: 4096)")
 
             prompt = ChatPromptTemplate.from_template("""
-شما یک متخصص تبدیل متن به فرمت Markdown هستید. متن ساده زیر را به فرمت Markdown تبدیل کنید:
+                شما یک متخصص تبدیل متن به فرمت Markdown هستید. متن ساده زیر را به فرمت Markdown تبدیل کنید:
 
-**عنوان مقاله:** {title}
+                **عنوان مقاله:** {title}
 
-**محتوای متن:**
-{content}
+                **محتوای متن:**
+                {content}
 
-**دستورالعمل‌ها:**
-1. عنوان اصلی را با # مشخص کنید
-2. زیرعنوان‌ها را با ##، ###، #### مشخص کنید
-3. فهرست‌ها را با - یا 1. مشخص کنید
-4. متن مهم را با **bold** یا *italic* مشخص کنید
-5. کدها را با ``` مشخص کنید
-6. جداول را با فرمت Markdown ایجاد کنید
-7. لینک‌ها را با [متن](URL) مشخص کنید
-8. نقل قول‌ها را با > مشخص کنید
+                **دستورالعمل‌ها:**
+                1. عنوان اصلی را با # مشخص کنید
+                2. زیرعنوان‌ها را با ##، ###، #### مشخص کنید
+                3. فهرست‌ها را با - یا 1. مشخص کنید
+                4. متن مهم را با **bold** یا *italic* مشخص کنید
+                5. کدها را با ``` مشخص کنید
+                6. جداول را با فرمت Markdown ایجاد کنید
+                7. لینک‌ها را با [متن](URL) مشخص کنید
+                8. نقل قول‌ها را با > مشخص کنید
 
-**فقط محتوای Markdown را برگردانید، بدون توضیح اضافی:**
-""")
+                **فقط محتوای Markdown را برگردانید، بدون توضیح اضافی:**
+            """)
 
             # Create the chain
             chain = prompt | model
@@ -494,7 +584,14 @@ class LangChainService:
             logger.error(f"❌ Streaming chat response failed: {e}", exc_info=True)
             yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم."
 
-    async def generate_rag_response(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
+    async def generate_rag_response(
+        self, 
+        query: str, 
+        context: str, 
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        custom_model: Optional[str] = None,
+        custom_temperature: Optional[float] = None
+    ) -> str:
         """
         Generate a RAG response using AI - uses provided context and conversation history.
 
@@ -502,16 +599,23 @@ class LangChainService:
             query: User query
             context: Retrieved context from vector database
             conversation_history: Previous messages in the conversation
+            custom_model: Optional custom model name (overrides default)
+            custom_temperature: Optional custom temperature (overrides default)
 
         Returns:
             AI response string
         """
         try:
+            model_name = custom_model or settings.rag_model_loaded
+            temperature = custom_temperature if custom_temperature is not None else 0.3
+            
             model = self._get_model(
-                settings.rag_model_loaded, 
+                model_name, 
                 force_json=False,
-                temperature=0.3  # Lower temperature for more focused responses
+                temperature=temperature
             )
+            
+            logger.info(f"🤖 Using model: {model_name} with temperature: {temperature}")
 
             # 🔥 DEBUG: Log context preview
             logger.info(f"📝 Context preview (first 500 chars): {context[:500]}...")
@@ -530,23 +634,23 @@ class LangChainService:
 
             prompt = ChatPromptTemplate.from_template("""شما یک دستیار هوشمند پشتیبانی مشتریان به نام "سالی" هستید.
 
-**دستورالعمل‌های پاسخ‌دهی:**
+                **دستورالعمل‌های پاسخ‌دهی:**
 
-1. از اطلاعات موجود در Context و تاریخچه مکالمه برای پاسخ استفاده کنید
-2. اگر در تاریخچه مکالمه قبلاً چیزی گفته شده، به آن توجه کنید
-3. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
-4. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
-5. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
-6. از جملات روان و طبیعی استفاده کنید و در صورت لزوم به پیام‌های قبلی اشاره کنید
+                1. از اطلاعات موجود در Context و تاریخچه مکالمه برای پاسخ استفاده کنید
+                2. اگر در تاریخچه مکالمه قبلاً چیزی گفته شده، به آن توجه کنید
+                3. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
+                4. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
+                5. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
+                6. از جملات روان و طبیعی استفاده کنید و در صورت لزوم به پیام‌های قبلی اشاره کنید
 
-{history}
+                {history}
 
-**Context (اطلاعات موجود):**
-{context}
+                **Context (اطلاعات موجود):**
+                {context}
 
-**سوال جدید کاربر:** {query}
+                **سوال جدید کاربر:** {query}
 
-**پاسخ شما:**""")
+                **پاسخ شما:**""")
 
             chain = prompt | model
 
@@ -563,24 +667,37 @@ class LangChainService:
             logger.error(f"❌ RAG response generation failed: {e}", exc_info=True)
             return "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید."
     
-    async def generate_rag_response_stream(self, query: str, context: str):
+    async def generate_rag_response_stream(
+        self, 
+        query: str, 
+        context: str,
+        custom_model: Optional[str] = None,
+        custom_temperature: Optional[float] = None
+    ):
         """
         Generate a streaming RAG response using AI - STRICT MODE: Only use provided context.
         
         Args:
             query: User query
             context: Retrieved context from vector database
+            custom_model: Optional custom model name (overrides default)
+            custom_temperature: Optional custom temperature (overrides default)
             
         Yields:
             Chunks of the AI response as they are generated
         """
         try:
-            # استفاده از مدل با streaming enabled و temperature پایین‌تر
+            model_name = custom_model or settings.rag_model_loaded
+            temperature = custom_temperature if custom_temperature is not None else 0.3
+            
+            logger.info(f"🌊 Streaming with model: {model_name}, temperature: {temperature}")
+            
+            # استفاده از مدل با streaming enabled
             model = self._get_model(
-                settings.rag_model_loaded, 
+                model_name, 
                 force_json=False,
                 streaming=True,
-                temperature=0.3  # Lower temperature for more focused responses
+                temperature=temperature
             )
             
             # 🔥 DEBUG: Log context preview
@@ -590,20 +707,20 @@ class LangChainService:
             
             prompt = ChatPromptTemplate.from_template("""شما یک دستیار هوشمند پشتیبانی مشتریان به نام "سالی" هستید.
 
-**دستورالعمل‌های پاسخ‌دهی:**
+                **دستورالعمل‌های پاسخ‌دهی:**
 
-1. از اطلاعات موجود در Context زیر برای پاسخ استفاده کنید
-2. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
-3. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
-4. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
-5. از جملات روان و طبیعی استفاده کنید
+                1. از اطلاعات موجود در Context زیر برای پاسخ استفاده کنید
+                2. اگر پاسخ در Context وجود دارد، پاسخ کامل و واضح بدهید
+                3. اگر Context شامل اطلاعات کافی نیست، این موضوع را اعلام کنید
+                4. پاسخ را به زبان فارسی و به صورت متن ساده بنویسید
+                5. از جملات روان و طبیعی استفاده کنید
 
-**Context (اطلاعات موجود):**
-{context}
+                **Context (اطلاعات موجود):**
+                {context}
 
-**سوال کاربر:** {query}
+                **سوال کاربر:** {query}
 
-**پاسخ شما:**""")
+                **پاسخ شما:**""")
             
             chain = prompt | model
             
@@ -626,6 +743,9 @@ class LangChainService:
                         # Skip empty chunks but log them
                         if empty_chunk_count == 1:
                             logger.info(f"⏭️ Skipping initial empty chunks...")
+                        # هشدار برای chunk های خالی زیاد (احتمال مشکل مدل)
+                        if empty_chunk_count % 100 == 0:
+                            logger.warning(f"⚠️ Still getting empty chunks: {empty_chunk_count} so far (chunk #{chunk_num})")
                         continue
                     else:
                         # اولین محتوای معنادار پیدا شد
@@ -645,6 +765,12 @@ class LangChainService:
                         await asyncio.sleep(0.01)
                     
             logger.info(f"✅ Streaming completed: {chunk_num} total chunks, {empty_chunk_count} empty chunks skipped")
+            
+            # 🔥 اگر همه chunks خالی بودن، یعنی مدل مشکل داره
+            if chunk_num > 0 and empty_chunk_count == chunk_num:
+                error_msg = f"⚠️ مدل '{custom_model or settings.rag_model_loaded}' پاسخ معتبری برنگرداند. لطفاً مدل دیگری انتخاب کنید (مثل gpt-4o-mini یا google/gemini-2.0-flash-exp:free)."
+                logger.error(error_msg)
+                yield error_msg
                     
         except Exception as e:
             logger.error(f"❌ Streaming RAG response failed: {e}", exc_info=True)

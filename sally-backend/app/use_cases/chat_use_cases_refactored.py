@@ -94,13 +94,15 @@ class ChatUseCases:
         content: str,
         admin: Admin,
         conversation_id: Optional[str] = None,
-        rag_type: str = "simple"
+        rag_type: str = "simple",
+        model: Optional[str] = None,
+        temperature: Optional[float] = 0.7
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Process admin chat message with streaming support.
-        Similar to send_message_stream but for admin users.
+        Process admin chat message with streaming support and custom model settings.
+        Similar to send_message_stream but for admin users with full control over AI settings.
         """
-        logger.info(f"🌊 Starting admin streaming chat")
+        logger.info(f"🌊 Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
         
         # Create or get conversation (same logic as non-streaming)
         if conversation_id:
@@ -161,7 +163,9 @@ class ChatUseCases:
             "user_id": str(admin.id),
             "user_type": "Admin",
             "conversation_id": str(conversation.id),
-            "rag_type": rag_type
+            "rag_type": rag_type,
+            "custom_model": model,  # مدل دلخواه ادمین
+            "custom_temperature": temperature  # دمای دلخواه ادمین
         }
         
         # Stream response
@@ -193,9 +197,14 @@ class ChatUseCases:
                     for doc in relevant_docs[:3]
                 ])
                 
-                # Stream response
+                # Stream response with custom model settings
                 from app.infrastructure.langchain_utils import langchain_service
-                async for chunk in langchain_service.generate_rag_response_stream(content, context_text):
+                async for chunk in langchain_service.generate_rag_response_stream(
+                    content, 
+                    context_text,
+                    custom_model=model,
+                    custom_temperature=temperature
+                ):
                     full_response += chunk
                     yield {
                         "type": "chunk",
@@ -256,9 +265,11 @@ class ChatUseCases:
         content: str,
         admin: Admin,
         conversation_id: Optional[str] = None,
-        rag_type: str = "simple"
+        rag_type: str = "simple",
+        model: Optional[str] = None,
+        temperature: Optional[float] = 0.7
     ) -> Dict[str, Any]:
-        """Process an admin chat message with RAG type selection."""
+        """Process an admin chat message with RAG type selection and custom model settings."""
         
         # Create or get conversation
         if conversation_id:
@@ -303,12 +314,14 @@ class ChatUseCases:
         await user_message.insert()
         logger.info(f"Saved admin message: {user_message.id}")
 
-        # Prepare context for RAG service
+        # Prepare context for RAG service with custom model settings
         context = {
             "user_id": str(admin.id),
             "user_type": "Admin",
             "conversation_id": str(conversation.id),
-            "rag_type": rag_type
+            "rag_type": rag_type,
+            "custom_model": model,  # مدل دلخواه ادمین
+            "custom_temperature": temperature  # دمای دلخواه ادمین
         }
 
         # Get appropriate RAG service based on type
@@ -318,6 +331,12 @@ class ChatUseCases:
         else:  # agentic
             from app.infrastructure.rag_service import AgenticRAGService
             rag_service = AgenticRAGService()
+
+        # تشخیص provider از روی مدل
+        from app.infrastructure.langchain_utils import detect_model_provider
+        used_model = model or settings.rag_model_loaded
+        provider = detect_model_provider(used_model) if used_model else "OpenAI"
+        provider_name = provider.value if hasattr(provider, 'value') else str(provider)
 
         # Generate AI response
         ai_message = None
@@ -334,10 +353,10 @@ class ChatUseCases:
                 "confidence": confidence,
                 "suggested_actions": suggested_actions,
                 "rag_type": rag_type,
-                "model_name": settings.rag_model_loaded,
-                "provider": "OpenAI",
+                "model_name": used_model,
+                "provider": provider_name,
                 "api_base_url": settings.openai_base_url_loaded,
-                "temperature": 0.7,
+                "temperature": temperature or 0.7,
                 "max_tokens": 1000,
                 "response_time": None,
                 "token_usage": {

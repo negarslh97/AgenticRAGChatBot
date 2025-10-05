@@ -85,23 +85,31 @@ type RAGType = 'simple' | 'agentic'
 
 // 🤖 لیست مدل‌های موجود
 const AVAILABLE_MODELS = [
-  // OpenAI Models
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', description: 'قدرتمندترین مدل OpenAI' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI', description: 'سریع و کارآمد' },
+  // 🏆 بهترین مدل‌ها برای RAG (براساس تست‌های واقعی - مرتب شده براساس سرعت)
+  
+  // 🥇 سریع‌ترین (264 ch/s، 0% empty chunks)
+  { id: 'google/gemini-2.5-flash', name: '🏆 Gemini 2.5 Flash', provider: 'Google', description: '✅ سریع‌ترین - 264 ch/s، رایگان' },
+  
+  // 🥈 مدل‌های رایگان عالی
+  { id: 'deepseek/deepseek-chat-v3.1:free', name: '⭐ DeepSeek V3.1 (Free)', provider: 'DeepSeek', description: '✅ 117 ch/s، 0% empty، رایگان' },
+  
+  // 🥉 OpenAI رسمی (از Embedder API استفاده می‌کند)
+  { id: 'gpt-4o-mini', name: '⭐ GPT-4o Mini', provider: 'OpenAI', description: '✅ 89 ch/s، پایدار، کیفیت بالا' },
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', description: 'قدرتمندترین OpenAI' },
   { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI', description: 'نسخه توربو GPT-4' },
-  { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI', description: 'سریع و اقتصادی' },
+  
+  // ⚠️ مدل‌های با chunks زیاد (کار می‌کنند اما بهینه نیستند)
+  { id: 'x-ai/grok-4-fast', name: 'Grok 4 Fast ⚠️', provider: 'xAI', description: '143 ch/s، اما 70% empty chunks' },
+  { id: 'x-ai/grok-3-mini-beta', name: 'Grok 3 Mini Beta ⚠️', provider: 'xAI', description: '149 ch/s، اما 65% empty chunks' },
+  
+  // سایر مدل‌ها
+  { id: 'deepseek/deepseek-r1-0528', name: 'DeepSeek R1', provider: 'DeepSeek', description: 'مدل قدرتمند DeepSeek' },
+  { id: 'qwen/qwen3-235b-a22b-2507', name: 'Qwen 3', provider: 'Qwen', description: 'مدل Alibaba' },
   
   // Ollama Local Models
-  { id: 'ollama:llama3.2', name: 'Llama 3.2', provider: 'Ollama', description: 'مدل محلی Meta' },
-  { id: 'ollama:llama3.1', name: 'Llama 3.1', provider: 'Ollama', description: 'مدل محلی قدرتمند Meta' },
-  { id: 'ollama:mistral', name: 'Mistral', provider: 'Ollama', description: 'مدل محلی Mistral AI' },
-  { id: 'ollama:gemma2', name: 'Gemma 2', provider: 'Ollama', description: 'مدل محلی Google' },
-  { id: 'ollama:qwen2.5', name: 'Qwen 2.5', provider: 'Ollama', description: 'مدل محلی Alibaba' },
-  { id: 'ollama:phi3', name: 'Phi-3', provider: 'Ollama', description: 'مدل کوچک و سریع Microsoft' },
-  
-  // Other Providers
-  { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', description: 'بهترین مدل Claude' },
-  { id: 'gemini-pro', name: 'Gemini Pro', provider: 'Google', description: 'مدل پیشرفته Google' }
+  { id: 'ollama:gpt-oss:20b', name: 'GPT-OSS 20B', provider: 'Ollama', description: 'مدل محلی OpenAI' },
+  { id: 'ollama:gemma3n:e4b', name: 'Gemma 3N E4B', provider: 'Ollama', description: 'مدل محلی قدرتمند Google' },
+  { id: 'ollama:llama3.1:8b-instruct-q4_0', name: 'Llama 3.1 8B', provider: 'Ollama', description: 'مدل محلی Meta' },
 ]
 
 const SuperAdminChatPage = () => {
@@ -118,7 +126,7 @@ const SuperAdminChatPage = () => {
     const [ragType, setRagType] = useState<RAGType>('simple')
     const [selectedArticle, setSelectedArticle] = useState<{id: string, title: string, content: string} | null>(null)
     const [showSettingsModal, setShowSettingsModal] = useState(false)
-    const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini')
+    const [selectedModel, setSelectedModel] = useState<string>('google/gemini-2.5-flash')  // 🏆 سریع‌ترین و بهترین مدل برای RAG
     const [temperature, setTemperature] = useState<number>(0.7)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const initializationRef = useRef(false)
@@ -480,12 +488,12 @@ const SuperAdminChatPage = () => {
                     onClose={() => setHighlightModal({ isOpen: false, articleId: '', userQuery: '' })}
                 />
             )}
-
+            
             {/* ⚙️ Settings Modal */}
             {showSettingsModal && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSettingsModal(false)}>
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                        {/* Header */}
+                {/* Header */}
                         <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white p-6 rounded-t-2xl">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
@@ -499,16 +507,16 @@ const SuperAdminChatPage = () => {
                                     <X className="w-5 h-5" />
                                 </button>
                             </div>
-                        </div>
+                    </div>
 
                         {/* Content */}
                         <div className="p-6 space-y-6">
-                            {/* RAG Type Selection */}
+                    {/* RAG Type Selection */}
                             <div>
                                 <label className="block text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
                                     <Brain className="w-4 h-4 text-purple-600" />
                                     نوع سیستم RAG
-                                </label>
+                        </label>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button
                                         onClick={() => setRagType('simple')}
@@ -523,7 +531,7 @@ const SuperAdminChatPage = () => {
                                             <span className={`font-bold ${ragType === 'simple' ? 'text-blue-900' : 'text-gray-700'}`}>
                                                 Simple RAG
                                             </span>
-                                        </div>
+                                </div>
                                         <p className="text-xs text-gray-600 text-right">
                                             جستجوی ساده و سریع در پایگاه دانش
                                         </p>
@@ -554,7 +562,7 @@ const SuperAdminChatPage = () => {
                                 <label className="block text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
                                     <Cpu className="w-4 h-4 text-purple-600" />
                                     انتخاب مدل هوش مصنوعی
-                                </label>
+                            </label>
                                 <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto border border-gray-200 rounded-lg p-3">
                                     {AVAILABLE_MODELS.map((model) => (
                                         <button
@@ -604,7 +612,7 @@ const SuperAdminChatPage = () => {
                                     دمای تولید (Temperature): {temperature.toFixed(1)}
                                 </label>
                                 <div className="space-y-2">
-                                    <input
+                                <input
                                         type="range"
                                         min="0"
                                         max="2"
@@ -617,11 +625,11 @@ const SuperAdminChatPage = () => {
                                         <span>دقیق (0.0)</span>
                                         <span>متعادل (1.0)</span>
                                         <span>خلاق (2.0)</span>
-                                    </div>
+                                </div>
                                     <p className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
                                         💡 <strong>راهنما:</strong> مقادیر پایین‌تر برای پاسخ‌های دقیق‌تر و مقادیر بالاتر برای پاسخ‌های خلاقانه‌تر
                                     </p>
-                                </div>
+                        </div>
                             </div>
 
                             {/* Current Settings Display */}
@@ -798,7 +806,7 @@ const SuperAdminChatPage = () => {
                                                     ? 'bg-gradient-to-r from-purple-100 to-blue-100'
                                                     : 'bg-blue-100'
                                             }`}>
-                                                {getRagTypeIcon(conversation.rag_type || 'simple')}
+                                            {getRagTypeIcon(conversation.rag_type || 'simple')}
                                             </div>
                                             <h3 className="text-sm font-medium text-gray-900 truncate flex-1">
                                                 {conversation.title}
@@ -990,18 +998,18 @@ const SuperAdminChatPage = () => {
                                                         </div>
                                                         <span className="text-xs text-gray-600">
                                                             {Math.round(message.confidence * 100)}% اطمینان
-                                                        </span>
+                                                    </span>
                                                     </div>
                                                 )}
                                                 
                                                 {/* RAG Type Badge */}
-                                                {message.metadata?.rag_type && (
+                                                    {message.metadata?.rag_type && (
                                                     <div className="mt-2 flex items-center gap-1 text-xs text-gray-600">
-                                                        {getRagTypeIcon(message.metadata.rag_type)}
+                                                            {getRagTypeIcon(message.metadata.rag_type)}
                                                         <span>{getRagTypeLabel(message.metadata.rag_type)}</span>
-                                                    </div>
-                                                )}
-                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
 
                                             {/* Sources */}
                                             {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
@@ -1011,27 +1019,27 @@ const SuperAdminChatPage = () => {
                                                         منابع مرتبط:
                                                     </p>
                                                     <div className="flex flex-wrap gap-2">
-                                                        {message.sources.map((source, index) => (
-                                                            <button
-                                                                key={index}
-                                                                onClick={() => handleSourceClick(source.id, message.id)}
+                                                            {message.sources.map((source, index) => (
+                                                                <button
+                                                                    key={index}
+                                                                    onClick={() => handleSourceClick(source.id, message.id)}
                                                                 className="inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border border-blue-200 rounded-full text-xs text-blue-700 hover:text-blue-900 transition-all"
-                                                            >
+                                                                >
                                                                 <ExternalLink className="w-3 h-3" />
                                                                 {source.title}
-                                                            </button>
-                                                        ))}
+                                                                </button>
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )}
+                                                )}
                                             
                                             {/* Timestamp */}
                                             <p className={`text-xs text-gray-500 mt-2 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                                                 {formatTime(message.timestamp)}
                                             </p>
+                                                    </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
                                 )
                             })}
                             <div ref={messagesEndRef} />
