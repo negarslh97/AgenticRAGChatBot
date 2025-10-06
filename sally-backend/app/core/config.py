@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Ollama Configuration for local embeddings fallback
     ollama_url: Optional[str] = None
     ollama_embedding_model: Optional[str] = None
+    
+    # 🆕 Reranker API Configuration (External Colab)
+    reranker_api_url: Optional[str] = None
 
     # Docs-as-Code Git Configuration
     kb_git_repo_url: Optional[str] = None
@@ -110,6 +113,12 @@ class Settings(BaseSettings):
     def ollama_embedding_model_loaded(self) -> Optional[str]:
         import os
         return self.ollama_embedding_model or os.getenv("OLLAMA_EMBEDDING_MODEL")
+
+    @property
+    def RERANKER_API_URL(self) -> Optional[str]:
+        """🆕 URL for external Reranker API (Colab)"""
+        import os
+        return self.reranker_api_url or os.getenv("RERANKER_API_URL")
 
     # App settings
     app_name: str = "Sally Customer Support"

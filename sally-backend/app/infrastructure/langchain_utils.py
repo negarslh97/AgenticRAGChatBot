@@ -616,7 +616,7 @@ class LangChainService:
             elif query_type == "explanation":
                 max_tokens = 1500  # توضیحات: پاسخ متوسط
             else:  # general
-                max_tokens = 3000  # سوالات عمومی: پاسخ جامع
+                max_tokens = 4000  # سوالات عمومی: پاسخ جامع (افزایش یافته)
             
             logger.info(f"🎯 Max Tokens for query type '{query_type}': {max_tokens}")
             
@@ -703,6 +703,14 @@ class LangChainService:
    - پاسخ را به صورت منطقی و سلسله مراتبی سازماندهی کنید
    - برای هر مفهوم اصلی یک بخش جداگانه بسازید
 
+🎓 **CRITICAL - آموزش‌دهنده باشید، نه فقط پاسخ‌دهنده:**
+   - ⭐ **اجباری:** برای هر مفهوم کلیدی، حتماً یک **مثال عملی** با سناریوی واقعی بیاورید
+   - ⭐ **اجباری:** هر فرآیند را با توضیح **نتیجه نهایی** تکمیل کنید (مثلاً "در نتیجه، سیستم...")
+   - ⭐ **اجباری:** برای هر قابلیت، **چرا مهم است** را توضیح دهید (مثلاً "این به شما کمک می‌کند...")
+   - ⭐ **قالب مثال:**
+     * ❌ ضعیف: "گزینه X برای Y است."
+     * ✅ قوی: "گزینه X برای Y است. **مثال عملی:** فرض کنید شما یک فروشگاه لوازم خانگی دارید و می‌خواهید... [سناریو]. با فعال کردن این گزینه... [نحوه کار]. در نتیجه، سیستم... [نتیجه]. **فایده:** این کار به شما کمک می‌کند تا... [مزیت تجاری]."
+
 ✅ **فقط بر اساس Context:**
    - Context شامل چندین بخش است - همه را بررسی کنید
    - هرگز اطلاعات خارج از Context اضافه نکنید
@@ -773,6 +781,7 @@ class LangChainService:
         self, 
         query: str, 
         context: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
         custom_model: Optional[str] = None,
         custom_temperature: Optional[float] = None,
         query_type: str = "general"  # 🎯 نوع سوال: specific, general, explanation
@@ -783,6 +792,7 @@ class LangChainService:
         Args:
             query: User query
             context: Retrieved context from vector database
+            conversation_history: Previous messages in the conversation
             custom_model: Optional custom model name (overrides default)
             custom_temperature: Optional custom temperature (overrides default)
             
@@ -801,7 +811,7 @@ class LangChainService:
             elif query_type == "explanation":
                 max_tokens = 1500  # توضیحات: پاسخ متوسط
             else:  # general
-                max_tokens = 3000  # سوالات عمومی: پاسخ جامع
+                max_tokens = 4000  # سوالات عمومی: پاسخ جامع (افزایش یافته)
             
             logger.info(f"🎯 Max Tokens for query type '{query_type}': {max_tokens}")
             
@@ -878,6 +888,14 @@ class LangChainService:
    - پاسخ را به صورت منطقی و سلسله مراتبی سازماندهی کنید
    - برای هر مفهوم اصلی یک بخش جداگانه بسازید
 
+🎓 **CRITICAL - آموزش‌دهنده باشید، نه فقط پاسخ‌دهنده:**
+   - ⭐ **اجباری:** برای هر مفهوم کلیدی، حتماً یک **مثال عملی** با سناریوی واقعی بیاورید
+   - ⭐ **اجباری:** هر فرآیند را با توضیح **نتیجه نهایی** تکمیل کنید (مثلاً "در نتیجه، سیستم...")
+   - ⭐ **اجباری:** برای هر قابلیت، **چرا مهم است** را توضیح دهید (مثلاً "این به شما کمک می‌کند...")
+   - ⭐ **قالب مثال:**
+     * ❌ ضعیف: "گزینه X برای Y است."
+     * ✅ قوی: "گزینه X برای Y است. **مثال عملی:** فرض کنید شما یک فروشگاه لوازم خانگی دارید و می‌خواهید... [سناریو]. با فعال کردن این گزینه... [نحوه کار]. در نتیجه، سیستم... [نتیجه]. **فایده:** این کار به شما کمک می‌کند تا... [مزیت تجاری]."
+
 ✅ **فقط بر اساس Context:**
    - Context شامل چندین بخش است - همه را بررسی کنید
    - هرگز اطلاعات خارج از Context اضافه نکنید
@@ -920,7 +938,23 @@ class LangChainService:
    - نتیجه‌گیری باید خلاصه ارزش و کاربرد اصلی موضوع باشد
    - نتیجه‌گیری را حتماً تمام کنید و در نیمه‌راه متوقف نشوید
 
+**تاریخچه مکالمه (برای درک بهتر context سوالات قبلی):**
+{conversation_history}
+
 **پاسخ جامع و کامل شما (به صورت یک راهنمای فنی مفصل):**""")
+            
+            # Build conversation history text
+            history_text = ""
+            if conversation_history and len(conversation_history) > 0:
+                history_text = "\n**تاریخچه مکالمه:**\n"
+                for msg in conversation_history:
+                    role_fa = "کاربر" if msg["role"] == "user" else "سالی"
+                    history_text += f"{role_fa}: {msg['content']}\n"
+                history_text += "\n"
+            else:
+                history_text = "هیچ تاریخچه‌ای موجود نیست. این اولین پیام است.\n\n"
+            
+            logger.info(f"📚 Conversation history: {len(conversation_history) if conversation_history else 0} messages")
             
             chain = prompt | model
             
@@ -932,6 +966,7 @@ class LangChainService:
             async for chunk in chain.astream({
                 "response_guide": response_guide,
                 "context": context,
+                "conversation_history": history_text,
                 "query": query
             }):
                 chunk_num += 1

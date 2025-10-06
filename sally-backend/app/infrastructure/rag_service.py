@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 import logging
+import requests  # 🆕 برای ارتباط با API خارجی reranker
 from app.core.config import settings
 from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility, Customer, Admin, ArticleCategory, ArticleTag
 
@@ -15,6 +16,13 @@ class RAGService(ABC):
         self.client = None
         # OpenAI client initialization moved to langchain_utils.py
         # No direct client needed here as we use LangChain service
+        
+        # 🆕 تنظیمات Reranker API (Colab)
+        self.reranker_api_url = getattr(settings, 'RERANKER_API_URL', None)
+        if self.reranker_api_url:
+            logger.info(f"🔗 Reranker API configured: {self.reranker_api_url}")
+        else:
+            logger.warning("⚠️ Reranker API URL not configured - will use fallback scoring")
     
     @abstractmethod
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -99,10 +107,14 @@ class RAGService(ABC):
                     # محتوای Weaviate شامل node content کامل است (1500-2000 کاراکتر)
                     weaviate_content = weaviate_doc.get("content", "")
                     
+                    # 🎯 استفاده از title chunk (نه title article)
+                    chunk_title = weaviate_doc.get("title", article.title)
+                    
                     # Create enriched document with MongoDB metadata + Weaviate content
                     enriched_doc = {
                         "id": str(article.id),
-                        "title": article.title,
+                        "article_title": article.title,  # 🆕 title اصلی article
+                        "title": chunk_title,  # 🎯 title chunk (برای نمایش منحصر به فرد)
                         "content": weaviate_content,  # 🔥 از Weaviate (کامل)
                         "summary": article.summary,
                         "score": weaviate_doc.get("score", 0.5),
@@ -116,7 +128,7 @@ class RAGService(ABC):
                         "raw_content": weaviate_doc.get("raw_content", weaviate_content),
                         "full_article_content": weaviate_doc.get("full_article_content", "")
                     }
-                    logger.info(f"✅ Enriched with MongoDB: '{article.title[:50]}...' (Score: {enriched_doc['score']:.3f})")
+                    logger.info(f"✅ Enriched with MongoDB: '{chunk_title[:40]}...' at {enriched_doc['path']} (Score: {enriched_doc['score']:.3f})")
                 else:
                     # Article not in MongoDB - use Weaviate data directly
                     logger.debug(f"📄 Using Weaviate data for {article_id} (not found in MongoDB)")
@@ -163,42 +175,49 @@ class RAGService(ABC):
 
     def _format_sources_markdown(self, documents: List[Dict[str, Any]], max_sources: int = 5) -> List[Dict[str, Any]]:
         """
-        Format sources with rich metadata and relevant snippets for highlighting.
+        Format sources as unique articles (not chunks).
+        🎯 نمایش مقالات یکتا (نه چندین chunk از یک مقاله)
         
         Args:
-            documents: لیست documents (می‌تواند شامل duplicate article IDs باشد)
-            max_sources: حداکثر تعداد منابع unique برای برگرداندن
+            documents: لیست documents (chunks)
+            max_sources: حداکثر تعداد مقالات یکتا برای برگرداندن
             
         Returns:
-            لیست منابع unique با اولویت score
+            لیست مقالات یکتا با اولویت بالاترین score
         """
         formatted_sources = []
-        seen_ids = set()  # برای جلوگیری از تکرار منابع
+        seen_article_ids = set()  # 🎯 برای جلوگیری از تکرار مقالات
 
-        for i, doc in enumerate(documents, 1):
-            # چک کردن ID تکراری
-            doc_id = str(doc.get("id", ""))
-            if doc_id in seen_ids:
-                logger.debug(f"⏭️ Skipping duplicate source: {doc_id}")
+        for doc in documents:
+            article_id = str(doc.get("id", ""))
+            
+            # اگر این مقاله قبلاً اضافه شده، رد کن
+            if article_id in seen_article_ids:
+                logger.debug(f"⏭️ Skipping duplicate article: {article_id}")
                 continue
             
-            seen_ids.add(doc_id)
+            seen_article_ids.add(article_id)
+            
+            chunk_title = doc.get("title", "بدون عنوان")
+            article_title = doc.get("article_title", chunk_title)  # fallback به chunk_title
+            path = doc.get("path", "")
             
             # استخراج snippet (بخش مرتبط) برای highlighting
             content = doc.get("content", "")
             snippet = content[:300] + "..." if len(content) > 300 else content
             
-            # Create source with snippet for highlighting
+            # 🎯 نمایش فقط عنوان مقاله اصلی
             formatted_sources.append({
-                "id": doc_id,
-                "title": doc.get("title", "بدون عنوان"),
+                "id": article_id,
+                "title": article_title,  # 🎯 فقط title مقاله اصلی
+                "chunk_title": chunk_title,  # title chunk (برای reference)
+                "path": path,  # مسیر chunk برای اطلاعات بیشتر
                 "score": doc.get("score", 0),
                 "category": doc.get("category"),
                 "tags": doc.get("tags", []),
                 "url": doc.get("url"),
                 "snippet": snippet,  # 🔥 بخش مرتبط برای preview
                 "full_content": content,  # 🔥 محتوای کامل برای highlighting
-                "path": doc.get("path", ""),
                 "summary": doc.get("summary", "")
             })
             
@@ -206,21 +225,22 @@ class RAGService(ABC):
             if len(formatted_sources) >= max_sources:
                 break
 
-        logger.info(f"📋 Formatted {len(formatted_sources)} unique sources with snippets (from {len(documents)} documents)")
+        logger.info(f"📋 Formatted {len(formatted_sources)} unique articles (from {len(documents)} chunks)")
         
         # 🔥 DEBUG: نمایش منابع برگشتی
-        for src in formatted_sources:
-            logger.info(f"   🔖 Source: ID={src['id']}, Title={src['title'][:50]}...")
+        for idx, src in enumerate(formatted_sources, 1):
+            logger.info(f"   🔖 Article #{idx}: {src['title'][:50]}... (Best chunk path: {src['path']}, Score: {src['score']:.3f})")
         
         return formatted_sources
 
-    async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True, limit: int = 20) -> List[Dict[str, Any]]:
+    async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True, limit: int = 30) -> List[Dict[str, Any]]:
         """
         Retrieve documents using Enhanced Weaviate vector search with:
         1. Query Expansion برای coverage بهتر
         2. Hybrid Search (vector + keyword)
-        3. تعداد بیشتر documents (20 به جای 10)
+        3. تعداد بیشتر documents (30 برای پوشش کامل‌تر)
         4. Content غنی‌تر (2000 کاراکتر به جای 1000)
+        5. Powerful Reranking (BAAI/bge-reranker-v2-m3)
         """
         logger.info("🔗 Connecting to Weaviate vector database...")
         
@@ -357,7 +377,7 @@ class RAGService(ABC):
                 logger.info(f"🎯 Query: '{query[:50]}{'...' if len(query) > 50 else ''}'")
                 
                 # 🔥 STEP 4: Reranking - مرتب‌سازی مجدد بر اساس relevance
-                reranked_docs = await self._rerank_documents(query, relevant_docs)
+                reranked_docs = await self._rerank_documents(query, relevant_docs, top_k=20)  # 🎯 افزایش به 20
                 logger.info(f"🎯 Reranked {len(reranked_docs)} documents by relevance")
                 
                 # 🔍 DEBUG: نمایش محتوای دقیق top 5 documents برای بررسی کیفیت retrieval
@@ -418,12 +438,11 @@ class RAGService(ABC):
     
     async def _rerank_documents(self, query: str, documents: List[Dict[str, Any]], top_k: int = 15) -> List[Dict[str, Any]]:
         """
-        Rerank documents بر اساس relevance با query
+        Rerank documents using external Reranker API (Colab) with fallback to local scoring.
         
-        این متد از scoring ساده استفاده می‌کند:
-        1. Vector similarity score (از Weaviate)
-        2. Keyword matching score
-        3. Title matching score
+        🎯 استراتژی:
+        1. اگر API موجود باشد: استفاده از BAAI/bge-reranker-v2-m3
+        2. در غیر این صورت: fallback به scoring محلی
         
         Args:
             query: سوال کاربر
@@ -433,6 +452,59 @@ class RAGService(ABC):
         Returns:
             لیست مرتب شده documents
         """
+        # 🎯 تلاش برای استفاده از API خارجی
+        if self.reranker_api_url:
+            try:
+                logger.info(f"🚀 Reranking {len(documents)} documents with external API...")
+                
+                # 1️⃣ آماده‌سازی داده‌ها
+                doc_contents = [doc.get("raw_content", doc.get("content", "")) for doc in documents]
+                
+                # 2️⃣ ساخت payload برای API
+                payload = {
+                    "query": query,
+                    "documents": doc_contents
+                }
+                
+                # 3️⃣ ارسال درخواست به API
+                response = requests.post(
+                    self.reranker_api_url,
+                    json=payload,
+                    timeout=60  # 60 ثانیه timeout
+                )
+                
+                # 4️⃣ بررسی موفقیت
+                response.raise_for_status()
+                
+                # 5️⃣ دریافت امتیازات
+                result = response.json()
+                scores = result.get("scores", [])
+                
+                if len(scores) != len(documents):
+                    raise ValueError(f"Score count mismatch: got {len(scores)}, expected {len(documents)}")
+                
+                # 6️⃣ اعمال امتیازات جدید
+                for idx, (doc, score) in enumerate(zip(documents, scores)):
+                    doc["rerank_score"] = float(score)
+                    doc["score"] = float(score)  # بروزرسانی score اصلی
+                
+                # 7️⃣ مرتب‌سازی بر اساس امتیازات جدید
+                documents.sort(key=lambda x: x.get("rerank_score", -999), reverse=True)
+                
+                logger.info(f"✅ API Reranking completed. Top score: {documents[0]['score']:.4f}")
+                
+                return documents[:top_k]
+                
+            except requests.exceptions.Timeout:
+                logger.error("❌ Reranker API timeout - falling back to local scoring")
+            except requests.exceptions.ConnectionError:
+                logger.error("❌ Reranker API connection failed - falling back to local scoring")
+            except Exception as e:
+                logger.error(f"❌ Reranker API error: {e} - falling back to local scoring")
+        
+        # 🔄 Fallback: scoring محلی
+        logger.info(f"⚙️ Using fallback local scoring for {len(documents)} documents...")
+        
         try:
             query_lower = query.lower()
             query_keywords = set(query_lower.split())
@@ -450,29 +522,30 @@ class RAGService(ABC):
                 keyword_overlap = len(query_keywords & content_keywords)
                 keyword_score = min(keyword_overlap / max(len(query_keywords), 1), 1.0)
                 
-                # Title matching (اگر کلمات query در title باشد، امتیاز بیشتر)
+                # Title matching
                 title_score = 0.0
                 for keyword in query_keywords:
-                    if len(keyword) > 2 and keyword in title_lower:  # فقط کلمات بلندتر
+                    if len(keyword) > 2 and keyword in title_lower:
                         title_score += 0.2
                 title_score = min(title_score, 1.0)
                 
-                # ترکیب امتیازات با وزن‌های مختلف
-                # 60% vector, 25% keyword, 15% title
+                # ترکیب امتیازات: 60% vector, 25% keyword, 15% title
                 combined_score = (0.60 * vector_score) + (0.25 * keyword_score) + (0.15 * title_score)
                 
                 doc["rerank_score"] = combined_score
-                doc["score"] = combined_score  # بروزرسانی score اصلی
+                doc["score"] = combined_score
             
-            # مرتب‌سازی بر اساس combined score
+            # مرتب‌سازی
             documents.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
             
-            # برگرداندن top_k
+            logger.info(f"✅ Fallback reranking completed. Top score: {documents[0]['score']:.4f}")
+            
             return documents[:top_k]
             
         except Exception as e:
-            logger.error(f"❌ Reranking failed: {e}")
-            # در صورت خطا، documents اصلی را برمی‌گردانیم
+            logger.error(f"❌ Fallback reranking failed: {e}")
+            # آخرین راه: برگرداندن documents با ترتیب اصلی
+            documents.sort(key=lambda x: x.get("score", 0), reverse=True)
             return documents[:top_k]
     
     def _calculate_advanced_confidence(
@@ -480,16 +553,19 @@ class RAGService(ABC):
         query: str, 
         retrieved_docs: List[Dict[str, Any]], 
         answer: str = None,
-        verification_result: Dict[str, Any] = None
+        verification_result: Dict[str, Any] = None,
+        query_type: str = "general"  # 🎯 تطبیق با نوع سوال
     ) -> Dict[str, float]:
         """
         محاسبه پیشرفته درصد اطمینان بر اساس multiple factors
+        🔥 RECALIBRATED: تطابق بهتر با کیفیت واقعی خروجی‌ها
         
         Args:
             query: سوال کاربر
             retrieved_docs: اسناد بازیابی شده
             answer: پاسخ تولید شده (اختیاری)
             verification_result: نتیجه کیفیت پاسخ (اختیاری)
+            query_type: نوع سوال (specific/general/explanation)
             
         Returns:
             Dict شامل confidence_score و breakdown جزئیات
@@ -504,7 +580,8 @@ class RAGService(ABC):
                     "context_richness": 0.0,
                     "answer_quality": 0.0
                 },
-                "confidence_level": "بسیار پایین"
+                "confidence_level": "بسیار پایین",
+                "query_type": query_type
             }
         
         factors = {}
@@ -513,105 +590,171 @@ class RAGService(ABC):
         scores = [doc.get('score', 0) for doc in retrieved_docs[:10]]
         avg_score = sum(scores) / len(scores) if scores else 0
         max_score = max(scores) if scores else 0
+        top_doc_score = scores[0] if scores else 0
         
-        # ترکیب میانگین و حداکثر
-        retrieval_quality = (avg_score * 0.6) + (max_score * 0.4)
-        factors['retrieval_quality'] = min(retrieval_quality, 1.0)
+        # 🔥 IMPROVED: ترکیب هوشمندتر با وزن بیشتر برای top score
+        # top score نشان‌دهنده بهترین match است
+        retrieval_quality = (top_doc_score * 0.5) + (avg_score * 0.3) + (max_score * 0.2)
+        
+        # 🔥 CALIBRATED: نرمال‌سازی بر اساس query type
+        if query_type == "general":
+            # سوالات general معمولاً scores پایین‌تری دارند، پس boost می‌زنیم
+            retrieval_quality = min(retrieval_quality * 1.3, 1.0)
+        else:
+            # سوالات specific معمولاً scores بالاتری دارند
+            retrieval_quality = min(retrieval_quality * 1.1, 1.0)
+        
+        factors['retrieval_quality'] = retrieval_quality
         
         # 2️⃣ تنوع منابع (0-1): چند article یکتا؟
         unique_article_ids = set(doc.get('id') for doc in retrieved_docs if doc.get('id'))
-        source_diversity = min(len(unique_article_ids) / 5, 1.0)  # بهینه: 5 article یکتا
+        source_diversity = min(len(unique_article_ids) / 4, 1.0)  # 🔥 تغییر از 5 به 4 (واقع‌بینانه‌تر)
         factors['source_diversity'] = source_diversity
         
         # 3️⃣ تطابق معنایی (0-1): آیا top document واقعاً مرتبط است؟
-        # بر اساس score اولین document
-        top_doc_score = scores[0] if scores else 0
-        if top_doc_score >= 0.85:
-            semantic_match = 1.0
-        elif top_doc_score >= 0.75:
-            semantic_match = 0.8
-        elif top_doc_score >= 0.65:
-            semantic_match = 0.6
-        elif top_doc_score >= 0.55:
-            semantic_match = 0.4
-        else:
-            semantic_match = 0.2
+        # 🔥 RECALIBRATED: thresholds واقع‌بینانه‌تر برای rerank scores
+        
+        if query_type == "general":
+            # برای سوالات عمومی: معیار ملایم‌تر اما calibrated
+            # Rerank API scores معمولاً بین 0 تا 1 هستند
+            if top_doc_score >= 0.7:
+                semantic_match = 1.0
+            elif top_doc_score >= 0.55:
+                semantic_match = 0.95
+            elif top_doc_score >= 0.4:
+                semantic_match = 0.90
+            elif top_doc_score >= 0.25:
+                semantic_match = 0.85
+            elif top_doc_score >= 0.1:
+                semantic_match = 0.75
+            else:
+                semantic_match = 0.65
+        else:  # specific or explanation
+            # برای سوالات خاص: معیار دقیق‌تر
+            if top_doc_score >= 0.9:
+                semantic_match = 1.0
+            elif top_doc_score >= 0.8:
+                semantic_match = 0.95
+            elif top_doc_score >= 0.7:
+                semantic_match = 0.90
+            elif top_doc_score >= 0.6:
+                semantic_match = 0.85
+            elif top_doc_score >= 0.5:
+                semantic_match = 0.75
+            elif top_doc_score >= 0.4:
+                semantic_match = 0.65
+            else:
+                semantic_match = 0.50
         factors['semantic_match'] = semantic_match
         
         # 4️⃣ غنای Context (0-1): تعداد و کیفیت اسناد
         doc_count = len(retrieved_docs)
-        if doc_count >= 10:
-            context_richness = 1.0
-        elif doc_count >= 5:
-            context_richness = 0.8
-        elif doc_count >= 3:
-            context_richness = 0.6
-        else:
-            context_richness = 0.4
         
-        # اضافه کردن وزن برای documents با score بالا
-        high_quality_docs = sum(1 for s in scores if s >= 0.7)
-        context_richness *= (0.5 + (high_quality_docs / len(scores) * 0.5))
+        # 🔥 IMPROVED: Base richness با thresholds واقع‌بینانه‌تر
+        if doc_count >= 15:
+            base_richness = 1.0
+        elif doc_count >= 10:
+            base_richness = 0.95
+        elif doc_count >= 7:
+            base_richness = 0.90
+        elif doc_count >= 5:
+            base_richness = 0.85
+        elif doc_count >= 3:
+            base_richness = 0.75
+        else:
+            base_richness = 0.60
+        
+        # 🔥 IMPROVED: اضافه کردن وزن برای documents با score بالا (calibrated)
+        # تعداد documents با کیفیت بالا
+        high_quality_docs = sum(1 for s in scores if s >= 0.6)  # threshold کاهش یافت
+        medium_quality_docs = sum(1 for s in scores if 0.3 <= s < 0.6)
+        
+        # محاسبه ضریب کیفیت
+        quality_factor = (high_quality_docs * 1.0 + medium_quality_docs * 0.5) / len(scores) if scores else 0
+        
+        # ترکیب base richness با quality factor
+        context_richness = base_richness * (0.6 + quality_factor * 0.4)
         factors['context_richness'] = min(context_richness, 1.0)
         
         # 5️⃣ کیفیت پاسخ (0-1): از verification اگر موجود باشد
         if verification_result and 'quality_score' in verification_result:
             answer_quality = verification_result['quality_score']
         elif answer:
-            # تخمین ساده بر اساس طول پاسخ
+            # 🔥 IMPROVED: تخمین بهتر بر اساس طول پاسخ
             answer_length = len(answer)
-            if answer_length >= 300:
-                answer_quality = 0.9
+            if answer_length >= 500:
+                answer_quality = 0.95
+            elif answer_length >= 300:
+                answer_quality = 0.90
             elif answer_length >= 150:
-                answer_quality = 0.7
-            elif answer_length >= 50:
-                answer_quality = 0.5
+                answer_quality = 0.85
+            elif answer_length >= 75:
+                answer_quality = 0.75
             else:
-                answer_quality = 0.3
+                answer_quality = 0.60
         else:
-            answer_quality = 0.7  # پیش‌فرض
+            answer_quality = 0.80  # 🔥 پیش‌فرض بالاتر
         factors['answer_quality'] = answer_quality
         
-        # 🎯 محاسبه نمره نهایی با وزن‌های متوازن
-        weights = {
-            'retrieval_quality': 0.25,    # 25% - کیفیت جستجو
-            'source_diversity': 0.15,     # 15% - تنوع منابع
-            'semantic_match': 0.25,       # 25% - تطابق معنایی
-            'context_richness': 0.15,     # 15% - غنای context
-            'answer_quality': 0.20        # 20% - کیفیت پاسخ
-        }
+        # 🎯 محاسبه نمره نهایی با وزن‌های تطبیقی بر اساس نوع سوال
+        # 🔥 RECALIBRATED: وزن‌های بهتر برای balance بین factors
+        if query_type == "general":
+            # برای سوالات عمومی/پیچیده: تأکید بر context و quality
+            weights = {
+                'retrieval_quality': 0.18,    # 18% - کیفیت جستجو (افزایش)
+                'source_diversity': 0.12,     # 12% - تنوع منابع
+                'semantic_match': 0.25,       # 25% - تطابق معنایی (مهم‌ترین)
+                'context_richness': 0.22,     # 22% - غنای context
+                'answer_quality': 0.23        # 23% - کیفیت پاسخ
+            }
+        else:  # specific or explanation
+            # برای سوالات خاص: semantic و retrieval مهم‌تر
+            weights = {
+                'retrieval_quality': 0.28,    # 28% - کیفیت جستجو (افزایش)
+                'source_diversity': 0.10,     # 10% - تنوع منابع
+                'semantic_match': 0.30,       # 30% - تطابق معنایی (بسیار مهم)
+                'context_richness': 0.14,     # 14% - غنای context
+                'answer_quality': 0.18        # 18% - کیفیت پاسخ
+            }
         
         confidence_score = sum(factors[k] * weights[k] for k in weights.keys())
         
-        # تعیین سطح confidence
-        if confidence_score >= 0.85:
+        # 🔥 RECALIBRATED: سطوح confidence واقع‌بینانه‌تر
+        if confidence_score >= 0.90:
             confidence_level = "بسیار بالا"
-        elif confidence_score >= 0.70:
+        elif confidence_score >= 0.80:
             confidence_level = "بالا"
+        elif confidence_score >= 0.65:
+            confidence_level = "خوب"
         elif confidence_score >= 0.50:
             confidence_level = "متوسط"
-        elif confidence_score >= 0.30:
+        elif confidence_score >= 0.35:
             confidence_level = "پایین"
         else:
             confidence_level = "بسیار پایین"
         
-        logger.info(f"🎯 Advanced Confidence Calculated:")
+        logger.info(f"🎯 Advanced Confidence Calculated ({query_type} query):")
         logger.info(f"   📊 Final Score: {confidence_score:.2f} ({confidence_level})")
         logger.info(f"   🔍 Factors: retrieval={factors['retrieval_quality']:.2f}, "
                    f"diversity={factors['source_diversity']:.2f}, "
-                   f"semantic={factors['semantic_match']:.2f}, "
+                   f"semantic={factors['semantic_match']:.2f} [top_score={top_doc_score:.2f}], "
                    f"richness={factors['context_richness']:.2f}, "
                    f"quality={factors['answer_quality']:.2f}")
+        logger.info(f"   ⚖️ Weights: semantic={weights['semantic_match']:.0%}, "
+                   f"context={weights['context_richness']:.0%}, "
+                   f"answer={weights['answer_quality']:.0%}")
         
         return {
             "confidence_score": round(confidence_score, 2),
             "confidence_level": confidence_level,
             "factors": {k: round(v, 2) for k, v in factors.items()},
             "weights": weights,
+            "query_type": query_type,
             "total_documents": doc_count,
             "unique_sources": len(unique_article_ids),
             "avg_retrieval_score": round(avg_score, 2),
-            "max_retrieval_score": round(max_score, 2)
+            "max_retrieval_score": round(max_score, 2),
+            "top_doc_score": round(top_doc_score, 2)
         }
 
     def _verify_answer_quality(self, query: str, answer: str, context: str, sources: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -803,10 +946,16 @@ class SimpleRAGService(RAGService):
 
         import time
         start_time = time.time()
+        
+        # 🎯 تحلیل نوع سوال برای confidence و prompt بهتر
+        from app.use_cases.query_analyzer import analyze_query_type
+        query_type_analysis = analyze_query_type(query)
+        query_type = query_type_analysis['query_type']
 
         logger.info("=" * 60)
         logger.info("🤖 SimpleRAGService: Starting STRICT RAG operation")
         logger.info(f"📝 Query: '{query[:100]}{'...' if len(query) > 100 else ''}'")
+        logger.info(f"🎯 Query Type: {query_type_analysis['query_type_fa']}")
         logger.info(f"🔒 Access Level: Public documents only")
         logger.info(f"🧠 LLM Model: {settings.rag_model_loaded}")
         logger.info(f"⚠️  STRICT MODE: Only knowledge base answers")
@@ -889,7 +1038,8 @@ class SimpleRAGService(RAGService):
                     query=query,
                     retrieved_docs=relevant_docs,
                     answer=rag_response,
-                    verification_result=verification_result
+                    verification_result=verification_result,
+                    query_type=query_type  # 🎯 تطبیق با نوع سوال
                 )
                 
                 # 🔥 ENHANCED: برگرداندن 5 source به جای 3 + quality metrics + confidence analysis
@@ -966,6 +1116,11 @@ class AgenticRAGService(RAGService):
 
         import time
         start_time = time.time()
+        
+        # 🎯 تحلیل نوع سوال برای confidence و prompt بهتر
+        from app.use_cases.query_analyzer import analyze_query_type
+        query_type_analysis = analyze_query_type(query)
+        query_type = query_type_analysis['query_type']
 
         user_context = context or {}
         user_id = user_context.get("user_id")
@@ -973,6 +1128,7 @@ class AgenticRAGService(RAGService):
         logger.info("=" * 60)
         logger.info("🧠 AgenticRAGService: Starting STRICT advanced RAG operation")
         logger.info(f"📝 Query: '{query[:100]}{'...' if len(query) > 100 else ''}'")
+        logger.info(f"🎯 Query Type: {query_type_analysis['query_type_fa']}")
         logger.info(f"👤 User ID: {user_id if user_id else 'Anonymous'}")
         logger.info(f"🔓 Access Level: Full knowledge base")
         logger.info(f"🧠 LLM Model: {settings.rag_model_loaded}")
@@ -1087,7 +1243,8 @@ class AgenticRAGService(RAGService):
                         query=query,
                         retrieved_docs=relevant_docs,
                         answer=response,
-                        verification_result=verification_result
+                        verification_result=verification_result,
+                        query_type=query_type  # 🎯 تطبیق با نوع سوال
                     )
                     
                     # 🔥 ENHANCED: برگرداندن 5 source به جای 3 + quality metrics + confidence analysis

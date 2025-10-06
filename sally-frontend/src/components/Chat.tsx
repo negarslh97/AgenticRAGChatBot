@@ -266,6 +266,27 @@ const Chat: React.FC = () => {
               return next;
             });
             setIsLoading(false);
+            
+            // 🔥 Fetch updated conversation with new title
+            if (evt.conversation_id) {
+              setTimeout(async () => {
+                try {
+                  const updatedConv = await chatService.getConversation(evt.conversation_id);
+                  if (updatedConv && updatedConv.title) {
+                    // Update conversations list
+                    setConversations(prev => prev.map(c => 
+                      c.id === evt.conversation_id ? updatedConv : c
+                    ));
+                    // Update selected conversation
+                    setSelectedConversation(prev => prev && prev.id === evt.conversation_id ? 
+                      { ...prev, ...updatedConv } : prev
+                    );
+                  }
+                } catch (error) {
+                  console.error('Failed to fetch updated conversation:', error);
+                }
+              }, 1500); // Wait 1.5s for backend to generate title
+            }
           }
 
           if (evt.type === 'error') {
@@ -554,21 +575,34 @@ const Chat: React.FC = () => {
                                   <h4 className="font-medium text-gray-900 truncate text-right">
                                       {conversation.title}
                                   </h4>
+                                  {/* 🆕 نمایش metadata */}
+                                  <div className="flex flex-wrap gap-1 mt-1 text-right">
+                                    {conversation.rag_type && (
+                                      <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">
+                                        {conversation.rag_type === 'agentic' ? '🧠 Agentic RAG' : '📚 Simple RAG'}
+                                      </span>
+                                    )}
+                                    {conversation.model_name && (
+                                      <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full" title={conversation.model_name}>
+                                        🤖 {conversation.model_name.split('/').pop()?.split(':')[0] || conversation.model_name}
+                                      </span>
+                                    )}
+                                  </div>
                                   {conversation.tags && conversation.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-1">
-                                      {conversation.tags.slice(0, 3).map((tag, index) => (
+                                      {conversation.tags.slice(0, 2).map((tag, index) => (
                                         <span key={index} className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
                                           {tag}
                                         </span>
                                       ))}
-                                      {conversation.tags.length > 3 && (
+                                      {conversation.tags.length > 2 && (
                                         <span className="text-xs text-gray-500">
-                                          +{conversation.tags.length - 3} بیشتر
+                                          +{conversation.tags.length - 2}
                                         </span>
                                       )}
                                     </div>
                                   )}
-                                  <p className="text-xs text-gray-500 text-right">
+                                  <p className="text-xs text-gray-500 text-right mt-1">
                                       {formatTime(new Date(conversation.created_at))}
                                   </p>
                               </div>

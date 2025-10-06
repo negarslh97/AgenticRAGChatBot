@@ -70,6 +70,10 @@ export interface Conversation {
   tags: string[]
   created_at: string
   updated_at: string
+  // 🆕 Conversation metadata
+  rag_type?: string  // "simple" or "agentic"
+  model_name?: string  // LLM model used
+  temperature?: number  // Temperature setting
 }
 
 export const chatService = {
@@ -260,6 +264,11 @@ export const chatService = {
   async getConversations(): Promise<Conversation[]> {
     const response = await api.get("/api/conversations")
     return response.data.conversations
+  },
+
+  async getConversation(conversationId: string): Promise<Conversation> {
+    const response = await api.get(`/api/conversations/${conversationId}`)
+    return response.data
   },
 
   async deleteConversation(conversationId: string): Promise<void> {

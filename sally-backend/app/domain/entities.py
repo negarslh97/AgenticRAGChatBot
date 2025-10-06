@@ -131,6 +131,12 @@ class Conversation(Document):
     guest_session_id: Optional[str] = None
     title: Optional[str] = None  # AI-generated title for the conversation
     tags: List[str] = []  # AI-generated tags for categorizing the conversation
+    
+    # 🆕 Conversation metadata (settings used for this conversation)
+    rag_type: Optional[str] = "simple"  # "simple" or "agentic"
+    model_name: Optional[str] = None  # LLM model used
+    temperature: Optional[float] = 0.7  # Temperature setting
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     

@@ -139,7 +139,11 @@ class ChatUseCases:
                 admin_id=str(admin.id),
                 title=smart_title,
                 tags=[f"admin-{rag_type}-rag", f"complexity-{complexity_analysis['complexity']}"],
-                guest_session_id=None
+                guest_session_id=None,
+                # 🆕 ذخیره metadata مکالمه
+                rag_type=rag_type,
+                model_name=model or settings.rag_model_loaded,
+                temperature=temperature
             )
             await conversation.insert()
             logger.info(f"✅ Created admin conversation: {conversation.id} - '{smart_title}'")
@@ -196,6 +200,24 @@ class ChatUseCases:
         sources = []
         confidence = 0.5
         
+        # 💾 Load conversation history for context
+        conversation_history = []
+        try:
+            # Load previous messages from this conversation (last 10 messages)
+            messages = await Message.find(
+                {"conversation_id": str(conversation.id)}
+            ).sort("created_at", 1).to_list()
+            
+            for msg in messages[-10:]:  # Last 10 messages
+                conversation_history.append({
+                    "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
+                    "content": msg.content
+                })
+            
+            logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load conversation history: {e}")
+        
         try:
             # Retrieve documents
             relevant_docs = await rag_service.retrieve_relevant_documents(
@@ -210,7 +232,8 @@ class ChatUseCases:
                 # 🎯 محاسبه پیشرفته confidence (قبل از generate کردن پاسخ)
                 confidence_analysis = rag_service._calculate_advanced_confidence(
                     query=content,
-                    retrieved_docs=relevant_docs
+                    retrieved_docs=relevant_docs,
+                    query_type=query_type_analysis['query_type']  # 🎯 تطبیق با نوع سوال
                 )
                 confidence = confidence_analysis['confidence_score']
                 logger.info(f"🎯 Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
@@ -225,7 +248,7 @@ class ChatUseCases:
                 # 🔥 ENHANCED: Build context از تمام documents مرتبط (نه فقط unique articles)
                 # چون ممکن است تمام documents از یک article باشند اما sections مختلف
                 context_parts = []
-                for i, doc in enumerate(relevant_docs[:15], 1):  # 🎯 استفاده از 15 document برتر (افزایش یافته!)
+                for i, doc in enumerate(relevant_docs[:20], 1):  # 🎯 استفاده از 20 document برتر (بیشتر برای پوشش کامل‌تر!)
                     doc_context = f"""
 === بخش {i} ===
 عنوان: {doc['title']}
@@ -256,6 +279,7 @@ class ChatUseCases:
                 async for chunk in langchain_service.generate_rag_response_stream(
                     content, 
                     context_text,
+                    conversation_history=conversation_history,  # 💾 ارسال تاریخچه مکالمه
                     custom_model=model,
                     custom_temperature=temperature,
                     query_type=query_type_analysis['query_type']  # 🎯 نوع سوال برای تطبیق طول پاسخ
@@ -522,7 +546,11 @@ class ChatUseCases:
                 conversation = Conversation(
                     customer_id=str(user.id) if user_type == "Customer" else None,
                     guest_session_id=None,
-                    title=content[:50] + "..." if len(content) > 50 else content
+                    title=content[:50] + "..." if len(content) > 50 else content,
+                    # 🆕 ذخیره metadata مکالمه (default برای customer/guest)
+                    rag_type="simple" if user_type == "Customer" else "agentic",
+                    model_name=settings.rag_model_loaded,
+                    temperature=0.7
                 )
                 try:
                     await conversation.insert()
@@ -543,7 +571,11 @@ class ChatUseCases:
                     conversation = Conversation(
                         customer_id=None,
                         guest_session_id=guest_session_id,
-                        title=content[:50] + "..." if len(content) > 50 else content
+                        title=content[:50] + "..." if len(content) > 50 else content,
+                        # 🆕 ذخیره metadata مکالمه (default برای guest)
+                        rag_type="simple",
+                        model_name=settings.rag_model_loaded,
+                        temperature=0.7
                     )
                     try:
                         await conversation.insert()
@@ -789,7 +821,11 @@ class ChatUseCases:
                 conversation = Conversation(
                     customer_id=str(user.id) if user_type == "Customer" else None,
                     guest_session_id=None,
-                    title=content[:50] + "..." if len(content) > 50 else content
+                    title=content[:50] + "..." if len(content) > 50 else content,
+                    # 🆕 ذخیره metadata مکالمه
+                    rag_type="simple" if user_type == "Customer" else "agentic",
+                    model_name=settings.rag_model_loaded,
+                    temperature=0.7
                 )
                 try:
                     await conversation.insert()
@@ -808,7 +844,11 @@ class ChatUseCases:
                     conversation = Conversation(
                         customer_id=None,
                         guest_session_id=guest_session_id,
-                        title=content[:50] + "..." if len(content) > 50 else content
+                        title=content[:50] + "..." if len(content) > 50 else content,
+                        # 🆕 ذخیره metadata مکالمه (default برای guest)
+                        rag_type="simple",
+                        model_name=settings.rag_model_loaded,
+                        temperature=0.7
                     )
                     await conversation.insert()
             else:
@@ -863,6 +903,24 @@ class ChatUseCases:
                 "conversation_id": str(conversation.id)
             }
         
+        # 💾 Load conversation history for context
+        conversation_history = []
+        try:
+            # Load previous messages from this conversation (last 10 messages)
+            messages = await Message.find(
+                {"conversation_id": str(conversation.id)}
+            ).sort("created_at", 1).to_list()
+            
+            for msg in messages[-10:]:  # Last 10 messages
+                conversation_history.append({
+                    "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
+                    "content": msg.content
+                })
+            
+            logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load conversation history: {e}")
+        
         # Stream AI response
         full_response = ""
         sources = []
@@ -885,7 +943,8 @@ class ChatUseCases:
                 # 🎯 محاسبه پیشرفته confidence
                 confidence_analysis = rag_service._calculate_advanced_confidence(
                     query=content,
-                    retrieved_docs=relevant_docs
+                    retrieved_docs=relevant_docs,
+                    query_type=query_type_analysis['query_type']  # 🎯 تطبیق با نوع سوال
                 )
                 confidence = confidence_analysis['confidence_score']
                 logger.info(f"🎯 Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
@@ -900,7 +959,7 @@ class ChatUseCases:
                 # 🔥 ENHANCED: Build context از تمام documents مرتبط (نه فقط unique articles)
                 # چون ممکن است تمام documents از یک article باشند اما sections مختلف
                 context_parts = []
-                for i, doc in enumerate(relevant_docs[:15], 1):  # 🎯 استفاده از 15 document برتر (افزایش یافته!)
+                for i, doc in enumerate(relevant_docs[:20], 1):  # 🎯 استفاده از 20 document برتر (بیشتر برای پوشش کامل‌تر!)
                     doc_context = f"""
 === بخش {i} ===
 عنوان: {doc['title']}
@@ -933,6 +992,7 @@ class ChatUseCases:
                 async for chunk in langchain_service.generate_rag_response_stream(
                     content, 
                     context_text,
+                    conversation_history=conversation_history,  # 💾 ارسال تاریخچه مکالمه
                     query_type=query_type_analysis['query_type']  # 🎯 نوع سوال برای تطبیق طول پاسخ
                 ):
                     full_response += chunk

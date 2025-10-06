@@ -232,6 +232,49 @@ async def get_conversations(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: str,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Get a single conversation by ID - authenticated users only"""
+    try:
+        from bson import ObjectId
+        
+        # Get the conversation
+        conversation = await Conversation.get(ObjectId(conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Check permissions
+        if current_customer:
+            if conversation.customer_id != str(current_customer.id):
+                raise HTTPException(status_code=403, detail="Access denied")
+        elif current_admin:
+            if conversation.admin_id != str(current_admin.id):
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        # Return conversation with all fields including metadata
+        return {
+            "id": str(conversation.id),
+            "title": conversation.title,
+            "tags": conversation.tags,
+            "created_at": conversation.created_at.isoformat(),
+            "updated_at": conversation.updated_at.isoformat(),
+            "rag_type": conversation.rag_type,
+            "model_name": conversation.model_name,
+            "temperature": conversation.temperature
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting conversation: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 class TitleUpdateRequest(BaseModel):
     title: str
 
