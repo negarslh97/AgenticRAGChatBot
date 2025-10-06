@@ -13,6 +13,13 @@ class QueryComplexity(str, Enum):
     COMPLEX = "complex"    # پیچیده - چند بخشی، نیاز به تجزیه
 
 
+class QueryType(str, Enum):
+    """نوع سوال - برای تعیین طول پاسخ"""
+    SPECIFIC = "specific"        # سوال خاص - پاسخ کوتاه و مستقیم
+    GENERAL = "general"          # سوال عمومی - پاسخ جامع
+    EXPLANATION = "explanation"  # درخواست توضیح - پاسخ متوسط
+
+
 def analyze_query_complexity(query: str) -> Dict[str, Any]:
     """
     تشخیص سطح پیچیدگی سوال
@@ -103,6 +110,101 @@ def analyze_query_complexity(query: str) -> Dict[str, Any]:
         "word_count": word_count,
         "reasons": reasons,
         "description": f"سوال {complexity_fa} با امتیاز {score}"
+    }
+
+
+def analyze_query_type(query: str) -> Dict[str, Any]:
+    """
+    تشخیص نوع سوال برای تعیین طول و سبک پاسخ
+    
+    Args:
+        query: متن سوال کاربر
+        
+    Returns:
+        Dict شامل query_type و توضیحات
+    """
+    query_lower = query.lower().strip()
+    
+    # الگوهای سوالات خاص (پاسخ کوتاه)
+    specific_patterns = [
+        r'\bچرا\b.*؟',  # چرا X است؟
+        r'\bدلیل\b',    # دلیل چیست؟
+        r'\bآیا\b.*؟',  # آیا X است؟
+        r'\bکدام\b',    # کدام گزینه؟
+        r'\bچند\b',     # چند تا؟
+        r'\bکی\b',      # کی؟
+        r'\bکجا\b',     # کجا؟
+        r'\bچی\s+هست', # X چی هست؟
+        r'\bچیست\b',    # X چیست؟
+        r'\bتفاوت\b',   # تفاوت X و Y چیست؟
+        r'\bمزیت\b',    # مزیت X چیست؟
+        r'\bمعایب\b',   # معایب X؟
+    ]
+    
+    # الگوهای سوالات عمومی (پاسخ جامع)
+    general_patterns = [
+        r'\bدر\s+مورد\b',           # در مورد X توضیح بده
+        r'\bبرام\s+توضیح\b',        # برام توضیح بده
+        r'\bمیدونی\b',              # چی میدونی؟
+        r'\bمی\s*دانی\b',          # چه می‌دانی؟
+        r'\bاطلاعات\b',             # اطلاعاتی بده
+        r'\bهمه.*\bچیز',           # همه چیز رو بگو
+        r'\bکامل.*\bتوضیح\b',      # کامل توضیح بده
+        r'\bجامع\b',                # توضیح جامع
+    ]
+    
+    # الگوهای درخواست توضیح (پاسخ متوسط)
+    explanation_patterns = [
+        r'\bچطور\b',    # چطور کار می‌کند؟
+        r'\bچگونه\b',   # چگونه استفاده کنم؟
+        r'\bنحوه\b',    # نحوه انجام X
+        r'\bروش\b',     # روش انجام X
+        r'\bمراحل\b',   # مراحل X چیست؟
+    ]
+    
+    # بررسی الگوها
+    is_specific = any(re.search(pattern, query) for pattern in specific_patterns)
+    is_general = any(re.search(pattern, query) for pattern in general_patterns)
+    is_explanation = any(re.search(pattern, query) for pattern in explanation_patterns)
+    
+    # تعیین نوع سوال
+    if is_specific:
+        query_type = QueryType.SPECIFIC
+        query_type_fa = "خاص"
+        response_style = "کوتاه و مستقیم"
+        expected_length = "1-3 پاراگراف"
+    elif is_general:
+        query_type = QueryType.GENERAL
+        query_type_fa = "عمومی"
+        response_style = "جامع و کامل"
+        expected_length = "5-10 پاراگراف"
+    elif is_explanation:
+        query_type = QueryType.EXPLANATION
+        query_type_fa = "توضیحی"
+        response_style = "متوسط با مراحل"
+        expected_length = "3-5 پاراگراف"
+    else:
+        # پیش‌فرض: اگر سوال کوتاه است، خاص، وگرنه عمومی
+        word_count = len(query.split())
+        if word_count <= 8:
+            query_type = QueryType.SPECIFIC
+            query_type_fa = "خاص"
+            response_style = "کوتاه و مستقیم"
+            expected_length = "1-3 پاراگراف"
+        else:
+            query_type = QueryType.GENERAL
+            query_type_fa = "عمومی"
+            response_style = "جامع و کامل"
+            expected_length = "5-10 پاراگراف"
+    
+    return {
+        "query_type": query_type.value,
+        "query_type_fa": query_type_fa,
+        "response_style": response_style,
+        "expected_length": expected_length,
+        "is_specific": is_specific,
+        "is_general": is_general,
+        "is_explanation": is_explanation
     }
 
 

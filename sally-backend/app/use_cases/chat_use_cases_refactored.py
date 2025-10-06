@@ -103,11 +103,21 @@ class ChatUseCases:
         Process admin chat message with streaming support and custom model settings.
         Similar to send_message_stream but for admin users with full control over AI settings.
         """
+        # 🎯 محدود کردن temperature برای RAG - جلوگیری از hallucination
+        if temperature > 0.3:
+            temperature = 0.2  # دمای پایین برای پاسخ‌های دقیق مبتنی بر متن
+            logger.info(f"🔥 Temperature adjusted to {temperature} for accurate RAG responses")
+        
         logger.info(f"🌊 Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
         
         # 🧠 تحلیل پیچیدگی سوال
         complexity_analysis = analyze_query_complexity(content)
         logger.info(f"📊 Query complexity: {complexity_analysis['complexity_fa']} (score: {complexity_analysis['score']})")
+        
+        # 🎯 تحلیل نوع سوال (برای تعیین طول پاسخ)
+        from app.use_cases.query_analyzer import analyze_query_type
+        query_type_analysis = analyze_query_type(content)
+        logger.info(f"🎯 Query type: {query_type_analysis['query_type_fa']} - {query_type_analysis['response_style']}")
         
         # Create or get conversation (same logic as non-streaming)
         if conversation_id:
@@ -194,9 +204,16 @@ class ChatUseCases:
             )
             
             if relevant_docs:
-                # 🎯 دریافت 3 منبع unique (نه 3 document اول!)
-                sources = rag_service._format_sources_markdown(relevant_docs, max_sources=3)
-                confidence = 0.9
+                # 🎯 دریافت 10 منبع unique (افزایش یافته برای پوشش بیشتر!)
+                sources = rag_service._format_sources_markdown(relevant_docs, max_sources=10)
+                
+                # 🎯 محاسبه پیشرفته confidence (قبل از generate کردن پاسخ)
+                confidence_analysis = rag_service._calculate_advanced_confidence(
+                    query=content,
+                    retrieved_docs=relevant_docs
+                )
+                confidence = confidence_analysis['confidence_score']
+                logger.info(f"🎯 Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
                 
                 # Send sources
                 yield {
@@ -205,22 +222,34 @@ class ChatUseCases:
                     "confidence": confidence
                 }
                 
-                # Build context از unique articles (نه documents اول)
-                # 🎯 استخراج unique articles براساس ID
-                unique_articles = []
-                seen_article_ids = set()
-                for doc in relevant_docs:
-                    doc_id = str(doc.get("id", ""))
-                    if doc_id not in seen_article_ids:
-                        unique_articles.append(doc)
-                        seen_article_ids.add(doc_id)
-                        if len(unique_articles) >= 3:
-                            break
+                # 🔥 ENHANCED: Build context از تمام documents مرتبط (نه فقط unique articles)
+                # چون ممکن است تمام documents از یک article باشند اما sections مختلف
+                context_parts = []
+                for i, doc in enumerate(relevant_docs[:15], 1):  # 🎯 استفاده از 15 document برتر (افزایش یافته!)
+                    doc_context = f"""
+=== بخش {i} ===
+عنوان: {doc['title']}
+مسیر: {doc.get('path', 'N/A')}
+امتیاز: {doc.get('score', 0):.2f}
+
+محتوا:
+{doc['content']}
+
+---
+"""
+                    context_parts.append(doc_context)
                 
-                context_text = "\n\n".join([
-                    f"Document: {doc['title']}\nContent: {doc['content']}"
-                    for doc in unique_articles
-                ])
+                context_text = "\n".join(context_parts)
+                
+                # 🔍 DEBUG: Log نهایی context که به LLM ارسال می‌شود
+                logger.info("=" * 80)
+                logger.info(f"📤 Context آماده برای ارسال به LLM:")
+                logger.info(f"   📊 تعداد بخش‌ها: {len(context_parts)}")
+                logger.info(f"   📏 طول کل: {len(context_text)} کاراکتر")
+                logger.info(f"   📋 عناوین بخش‌ها:")
+                for i, doc in enumerate(relevant_docs[:15], 1):
+                    logger.info(f"      {i}. {doc.get('title', 'N/A')[:60]} (Score: {doc.get('score', 0):.3f})")
+                logger.info("=" * 80)
                 
                 # Stream response with custom model settings
                 from app.infrastructure.langchain_utils import langchain_service
@@ -228,7 +257,8 @@ class ChatUseCases:
                     content, 
                     context_text,
                     custom_model=model,
-                    custom_temperature=temperature
+                    custom_temperature=temperature,
+                    query_type=query_type_analysis['query_type']  # 🎯 نوع سوال برای تطبیق طول پاسخ
                 ):
                     full_response += chunk
                     yield {
@@ -734,6 +764,14 @@ class ChatUseCases:
         
         logger.info(f"🌊 Starting streaming chat for {user_type}")
         
+        # 🧠 تحلیل پیچیدگی و نوع سوال
+        complexity_analysis = analyze_query_complexity(content)
+        logger.info(f"📊 Query complexity: {complexity_analysis['complexity_fa']} (score: {complexity_analysis['score']})")
+        
+        from app.use_cases.query_analyzer import analyze_query_type
+        query_type_analysis = analyze_query_type(content)
+        logger.info(f"🎯 Query type: {query_type_analysis['query_type_fa']} - {query_type_analysis['response_style']}")
+        
         # Create or get conversation (same as send_message)
         if conversation_id:
             try:
@@ -841,9 +879,16 @@ class ChatUseCases:
             logger.info(f"🔍 Found {len(relevant_docs)} relevant documents")
             
             if relevant_docs:
-                # 🎯 دریافت 3 منبع unique (نه 3 document اول!)
-                sources = rag_service._format_sources_markdown(relevant_docs, max_sources=3)
-                confidence = 0.9
+                # 🎯 دریافت 10 منبع unique (افزایش یافته برای پوشش بیشتر!)
+                sources = rag_service._format_sources_markdown(relevant_docs, max_sources=10)
+                
+                # 🎯 محاسبه پیشرفته confidence
+                confidence_analysis = rag_service._calculate_advanced_confidence(
+                    query=content,
+                    retrieved_docs=relevant_docs
+                )
+                confidence = confidence_analysis['confidence_score']
+                logger.info(f"🎯 Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
                 
                 # Send sources event
                 yield {
@@ -852,28 +897,44 @@ class ChatUseCases:
                     "confidence": confidence
                 }
                 
-                # Build context از unique articles (نه documents اول)
-                # 🎯 استخراج unique articles براساس ID
-                unique_articles = []
-                seen_article_ids = set()
-                for doc in relevant_docs:
-                    doc_id = str(doc.get("id", ""))
-                    if doc_id not in seen_article_ids:
-                        unique_articles.append(doc)
-                        seen_article_ids.add(doc_id)
-                        if len(unique_articles) >= 3:
-                            break
+                # 🔥 ENHANCED: Build context از تمام documents مرتبط (نه فقط unique articles)
+                # چون ممکن است تمام documents از یک article باشند اما sections مختلف
+                context_parts = []
+                for i, doc in enumerate(relevant_docs[:15], 1):  # 🎯 استفاده از 15 document برتر (افزایش یافته!)
+                    doc_context = f"""
+=== بخش {i} ===
+عنوان: {doc['title']}
+مسیر: {doc.get('path', 'N/A')}
+امتیاز: {doc.get('score', 0):.2f}
+
+محتوا:
+{doc['content']}
+
+---
+"""
+                    context_parts.append(doc_context)
                 
-                context_text = "\n\n".join([
-                    f"Document: {doc['title']}\nContent: {doc['content']}"
-                    for doc in unique_articles
-                ])
+                context_text = "\n".join(context_parts)
+                
+                # 🔍 DEBUG: Log نهایی context که به LLM ارسال می‌شود
+                logger.info("=" * 80)
+                logger.info(f"📤 Context آماده برای ارسال به LLM:")
+                logger.info(f"   📊 تعداد بخش‌ها: {len(context_parts)}")
+                logger.info(f"   📏 طول کل: {len(context_text)} کاراکتر")
+                logger.info(f"   📋 عناوین بخش‌ها:")
+                for i, doc in enumerate(relevant_docs[:15], 1):
+                    logger.info(f"      {i}. {doc.get('title', 'N/A')[:60]} (Score: {doc.get('score', 0):.3f})")
+                logger.info("=" * 80)
                 
                 # Stream RAG response (chunks are already split word-by-word in langchain_utils)
                 logger.info("🤖 Streaming STRICT RAG response...")
                 from app.infrastructure.langchain_utils import langchain_service
                 
-                async for chunk in langchain_service.generate_rag_response_stream(content, context_text):
+                async for chunk in langchain_service.generate_rag_response_stream(
+                    content, 
+                    context_text,
+                    query_type=query_type_analysis['query_type']  # 🎯 نوع سوال برای تطبیق طول پاسخ
+                ):
                     full_response += chunk
                     # chunks قبلاً در langchain_utils به کلمات تقسیم شده‌اند
                     yield {
