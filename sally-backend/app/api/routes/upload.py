@@ -10,6 +10,7 @@ from docx import Document
 import openpyxl
 import markdown
 from app.infrastructure.langchain_utils import langchain_service
+from app.infrastructure.knowledge_base_service import get_or_create_tags
 
 router = APIRouter()
 
@@ -26,21 +27,6 @@ async def generate_metadata_from_ai(title: str, content: str):
             "suggested_category": "عمومی",
             "suggested_visibility": "internal"
         }
-
-
-async def get_or_create_tags(tag_names):
-    """Get or create tags and return ArticleTag objects."""
-    from app.domain.entities import Tag
-    article_tags = []
-    for tag_name in tag_names:
-        # Check if tag exists
-        tag = await Tag.find_one(Tag.name == tag_name)
-        if not tag:
-            # Create new tag
-            tag = Tag(name=tag_name)
-            await tag.insert()
-        article_tags.append(ArticleTag(id=str(tag.id), name=tag.name, color=tag.color))
-    return article_tags
 
 # Create upload directory if it doesn't exist
 UPLOAD_DIR = Path("uploads")

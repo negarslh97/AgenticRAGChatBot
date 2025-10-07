@@ -5,22 +5,16 @@ LangChain utilities for AI model interactions.
 Features:
 - Chains & Runnables برای workflow‌های پیچیده
 - Callbacks برای monitoring و logging
-- Memory management برای conversations
 - Retry logic با exponential backoff
 - Token usage tracking
 - Performance monitoring
 """
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableLambda
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain.chains import LLMChain
-from langchain.memory import ConversationBufferMemory, ConversationSummaryMemory
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional, Tuple, Union
-import json
+from typing import Dict, Any, List, Optional, Union
 import asyncio
 from enum import Enum
 from tenacity import (
@@ -96,7 +90,6 @@ class LangChainService:
     این کلاس شامل:
     - Model management با caching
     - Callback integration برای monitoring
-    - Memory management برای conversations
     - Retry logic برای reliability
     - Performance tracking
     """
@@ -104,7 +97,6 @@ class LangChainService:
     def __init__(self):
         self._models = {}
         self._embeddings = None
-        self._memories = {}
         self._callbacks = get_default_callbacks()
         
         logger.info("🎯 LangChainService initialized")
@@ -233,43 +225,6 @@ class LangChainService:
             logger.info("✅ Embeddings model ready")
         
         return self._embeddings
-    
-    def get_or_create_memory(
-        self, 
-        conversation_id: str, 
-        memory_type: str = "buffer"
-    ) -> ConversationBufferMemory:
-        """
-        دریافت یا ایجاد memory برای یک conversation
-        
-        Args:
-            conversation_id: شناسه conversation
-            memory_type: نوع memory (buffer یا summary)
-            
-        Returns:
-            Memory instance
-        """
-        if conversation_id not in self._memories:
-            if memory_type == "summary":
-                # از مدل برای خلاصه‌سازی استفاده می‌کند
-                llm = self._get_model(settings.chat_model_loaded, max_tokens=150)
-                self._memories[conversation_id] = ConversationSummaryMemory(
-                    llm=llm,
-                    memory_key="chat_history",
-                    return_messages=True
-                )
-            else:
-                self._memories[conversation_id] = ConversationBufferMemory(
-                    memory_key="chat_history",
-                    return_messages=True
-                )
-            
-            logger.info(
-                f"💾 Created {memory_type} memory for conversation: {conversation_id}",
-                extra={'extra_data': {'conversation_id': conversation_id, 'memory_type': memory_type}}
-            )
-        
-        return self._memories[conversation_id]
     
     @retry(
         stop=stop_after_attempt(3),

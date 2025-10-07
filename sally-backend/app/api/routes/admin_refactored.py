@@ -18,6 +18,7 @@ from app.core.permissions import (
 )
 from app.core.security import get_password_hash
 from app.core.config import settings
+from app.infrastructure.knowledge_base_service import get_or_create_tags
 
 router = APIRouter()
 
@@ -363,6 +364,7 @@ async def get_customers(
     skip: int = 0,
     limit: int = 10,
     search: Optional[str] = None,
+    is_active: Optional[bool] = None,
     current_admin: Admin = Depends(get_current_admin_with_permission(Permission.VIEW_CUSTOMERS))
 ):
     """Get customers - Admin+ only (VIEW_CUSTOMERS permission)"""
@@ -485,19 +487,6 @@ async def delete_customer(
     await activity_log.insert()
 
     return
-
-async def get_or_create_tags(tag_names: List[str]) -> List[ArticleTag]:
-    """Get or create tags and return ArticleTag objects."""
-    article_tags = []
-    for tag_name in tag_names:
-        # Check if tag exists
-        tag = await Tag.find_one(Tag.name == tag_name)
-        if not tag:
-            # Create new tag
-            tag = Tag(name=tag_name)
-            await tag.insert()
-        article_tags.append(ArticleTag(id=str(tag.id), name=tag.name, color=tag.color))
-    return article_tags
 
 # --- Endpoints مدیریت مقالات دانش‌بنیان (تفکیک شده بر اساس دسترسی) ---
 

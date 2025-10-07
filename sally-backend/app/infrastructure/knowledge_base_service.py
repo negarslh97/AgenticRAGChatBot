@@ -621,5 +621,34 @@ class KnowledgeBaseService:
             return text.strip()
 
 
+# =============== HELPER FUNCTIONS (Shared across modules) ===============
+
+async def get_or_create_tags(tag_names: List[str]) -> List[Any]:
+    """
+    Get or create tags and return ArticleTag objects.
+    
+    این تابع مشترک برای ایجاد یا دریافت تگ‌ها است و در چند ماژول مختلف استفاده می‌شود.
+    
+    Args:
+        tag_names: لیست نام تگ‌ها
+        
+    Returns:
+        لیست ArticleTag objects
+    """
+    from app.domain.entities import ArticleTag
+    
+    article_tags = []
+    for tag_name in tag_names:
+        # Check if tag exists
+        tag = await Tag.find_one(Tag.name == tag_name)
+        if not tag:
+            # Create new tag
+            tag = Tag(name=tag_name)
+            await tag.insert()
+            logger.info(f"✨ Created new tag: {tag_name}")
+        article_tags.append(ArticleTag(id=str(tag.id), name=tag.name, color=tag.color))
+    return article_tags
+
+
 # Singleton instance
 knowledge_base_service = KnowledgeBaseService()

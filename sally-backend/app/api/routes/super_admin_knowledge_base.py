@@ -31,7 +31,7 @@ from app.docs_as_code.monitoring import get_system_stats
 import logging
 
 logger = logging.getLogger(__name__)
-from app.infrastructure.knowledge_base_service import knowledge_base_service
+from app.infrastructure.knowledge_base_service import knowledge_base_service, get_or_create_tags
 
 router = APIRouter()
 
@@ -201,19 +201,6 @@ class FileUploadResponse(BaseModel):
 
 
 # --- API Endpoints ---
-
-async def get_or_create_tags(tag_names: List[str]) -> List[ArticleTag]:
-    """Get or create tags and return ArticleTag objects."""
-    article_tags = []
-    for tag_name in tag_names:
-        # Check if tag exists
-        tag = await Tag.find_one(Tag.name == tag_name)
-        if not tag:
-            # Create new tag
-            tag = Tag(name=tag_name)
-            await tag.insert()
-        article_tags.append(ArticleTag(id=str(tag.id), name=tag.name, color=tag.color))
-    return article_tags
 
 @router.post("/articles", response_model=ArticleResponse, status_code=status.HTTP_201_CREATED, tags=["Knowledge Base Management"])
 async def create_article(
