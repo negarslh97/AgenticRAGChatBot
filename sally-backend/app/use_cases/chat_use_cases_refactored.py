@@ -218,6 +218,86 @@ class ChatUseCases:
         except Exception as e:
             logger.warning(f"⚠️ Could not load conversation history: {e}")
         
+        # 🎯 QUERY ROUTER: تشخیص هوشمند نوع سوال (قبل از RAG)
+        from app.utils.query_router import query_router
+        
+        routing_result = await query_router.classify_query(content, conversation_history)
+        logger.info(f"🧭 Query Router: {routing_result['intent']} (confidence: {routing_result['confidence']:.2f})")
+        logger.info(f"   📋 Reason: {routing_result['reason']}")
+        
+        # 🔥 اگر سوال محاوره‌ای است، RAG را bypass کن
+        if not routing_result['needs_rag']:
+            logger.info("⚡ Bypassing RAG - Conversational query detected")
+            
+            # 🎭 پاسخ محاوره‌ای ساده (بدون RAG)
+            from app.infrastructure.langchain_utils import langchain_service
+            
+            # پاسخ با personality دوستانه
+            conversational_prompt = f"""شما یک دستیار دوستانه و حرفه‌ای هستید. به این پیام به صورت محاوره‌ای و طبیعی پاسخ دهید:
+
+پیام کاربر: {content}
+
+دستورالعمل:
+- اگر کاربر اسم خود را معرفی کرد، از او با نام استقبال کنید
+- اگر تشکر کرد، خوشحالی خود را ابراز کنید
+- اگر سلام کرد، گرم برخورد کنید
+- اگر احوال‌پرسی کرد، پاسخی دوستانه بدهید
+- پاسخ را کوتاه (1-2 جمله) و صمیمی نگه دارید
+- در پایان بپرسید که چگونه می‌توانید کمک کنید
+
+پاسخ شما:"""
+            
+            async for chunk in langchain_service.generate_rag_response_stream(
+                query=content,
+                context=conversational_prompt,
+                conversation_history=conversation_history,
+                custom_model=model,
+                custom_temperature=0.7,  # دمای بالاتر برای پاسخ طبیعی‌تر
+                query_type="general"
+            ):
+                full_response += chunk
+                yield {
+                    "type": "chunk",
+                    "content": chunk
+                }
+            
+            # ذخیره پیام‌ها و پایان
+            user_message = Message(
+                conversation_id=str(conversation.id),
+                sender_type=SenderType.ADMIN,
+                sender_id=str(admin.id),
+                content=content,
+                is_ai=False
+            )
+            await user_message.save()
+            
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                sender_type=SenderType.AI,
+                content=full_response,
+                is_ai=True,
+                confidence=1.0,  # پاسخ محاوره‌ای همیشه confident است
+                model=model,
+                temperature=0.7,
+                complexity=complexity_analysis['complexity']
+            )
+            await ai_message.save()
+            
+            yield {
+                "type": "complete",
+                "conversation_id": str(conversation.id),
+                "message": {
+                    "content": full_response,
+                    "sources": [],
+                    "confidence": 1.0,
+                    "routing": "conversational"  # 🆕 نشان می‌دهد که از مسیر چت استفاده شده
+                }
+            }
+            return  # 🔥 پایان - RAG bypass شد
+        
+        # ✅ سوال تخصصی است - ادامه با RAG معمولی
+        logger.info("🔍 Proceeding with RAG pipeline - Factual query detected")
+        
         try:
             # Retrieve documents
             relevant_docs = await rag_service.retrieve_relevant_documents(

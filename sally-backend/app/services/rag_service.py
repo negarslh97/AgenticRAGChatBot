@@ -53,6 +53,32 @@ class RAGService(ABC):
             logger.info("🔄 Falling back to MongoDB keyword search...")
             return await self._retrieve_from_mongodb(query, is_public_only)
 
+    def _extract_article_title_from_content(self, full_content: str) -> str:
+        """
+        استخراج عنوان اصلی مقاله از محتوای کامل Markdown.
+        عنوان اصلی معمولاً اولین header است که با # شروع می‌شود.
+        
+        Args:
+            full_content: محتوای کامل مقاله در قالب Markdown
+            
+        Returns:
+            عنوان مقاله اصلی یا None
+        """
+        if not full_content:
+            return None
+            
+        # جستجوی اولین خط که با # شروع می‌شود
+        lines = full_content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('#'):
+                # حذف # ها و فاصله‌های اضافی
+                title = line.lstrip('#').strip()
+                if title:  # اطمینان از اینکه عنوان خالی نیست
+                    return title
+        
+        return None
+    
     async def _enrich_with_mongodb_metadata(self, weaviate_results: List[Dict[str, Any]], is_public_only: bool = True) -> List[Dict[str, Any]]:
         """
         Enrich Weaviate results with MongoDB metadata (OPTIONAL).
@@ -150,9 +176,16 @@ class RAGService(ABC):
                 else:
                     # Article not in MongoDB - use Weaviate data directly
                     logger.debug(f"📄 Using Weaviate data for {article_id} (not found in MongoDB)")
+                    
+                    # 🔥 استخراج عنوان اصلی مقاله از محتوای کامل
+                    full_article_content = weaviate_doc.get("full_article_content", "")
+                    article_title = self._extract_article_title_from_content(full_article_content)
+                    chunk_title = weaviate_doc.get("title", "Untitled")
+                    
                     enriched_doc = {
                         "id": article_id,
-                        "title": weaviate_doc.get("title", "Untitled"),
+                        "article_title": article_title,  # 🎯 عنوان اصلی مقاله
+                        "title": chunk_title,  # عنوان chunk
                         "content": weaviate_doc.get("content", ""),
                         "summary": "",
                         "score": weaviate_doc.get("score", 0.5),
@@ -163,7 +196,8 @@ class RAGService(ABC):
                         "tags": [],
                         "category": None
                     }
-                    logger.info(f"✅ Using Weaviate data: '{enriched_doc['title'][:50]}...' (Score: {enriched_doc['score']:.3f})")
+                    display_title = article_title or chunk_title
+                    logger.info(f"✅ Using Weaviate data: '{display_title[:50]}...' (Score: {enriched_doc['score']:.3f})")
 
                 enriched_docs.append(enriched_doc)
 
@@ -171,9 +205,14 @@ class RAGService(ABC):
                 logger.error(f"❌ Error processing document {weaviate_doc.get('id')}: {e}")
                 # حتی با خطا، سعی می‌کنیم از داده Weaviate استفاده کنیم
                 try:
+                    # استخراج article title از محتوای کامل
+                    full_article_content = weaviate_doc.get("full_article_content", "")
+                    article_title = self._extract_article_title_from_content(full_article_content)
+                    
                     enriched_docs.append({
                         "id": weaviate_doc.get("id", weaviate_doc.get("node_id", "unknown")),
-                        "title": weaviate_doc.get("title", "Untitled"),
+                        "article_title": article_title,  # 🎯 عنوان اصلی
+                        "title": weaviate_doc.get("title", "Untitled"),  # عنوان chunk
                         "content": weaviate_doc.get("content", ""),
                         "summary": "",
                         "score": weaviate_doc.get("score", 0.5),
@@ -194,7 +233,7 @@ class RAGService(ABC):
     def _format_sources_markdown(self, documents: List[Dict[str, Any]], max_sources: int = 5) -> List[Dict[str, Any]]:
         """
         Format sources as unique articles (not chunks).
-        🎯 نمایش مقالات یکتا (نه چندین chunk از یک مقاله)
+        🎯 نمایش مقالات یکتا - فقط لینک به سند اصلی (بدون نمایش گره‌های جداگانه)
         
         Args:
             documents: لیست documents (chunks)
@@ -205,49 +244,61 @@ class RAGService(ABC):
         """
         formatted_sources = []
         seen_article_ids = set()  # 🎯 برای جلوگیری از تکرار مقالات
-
+        
+        # 🎯 گروه‌بندی chunks بر اساس article_id برای یافتن بهترین score
+        article_best_scores = {}
         for doc in documents:
             article_id = str(doc.get("id", ""))
+            score = doc.get("score", 0)
+            if article_id not in article_best_scores or score > article_best_scores[article_id]["score"]:
+                article_best_scores[article_id] = {
+                    "doc": doc,
+                    "score": score
+                }
+
+        # 🎯 مرتب‌سازی بر اساس بهترین score هر مقاله
+        sorted_articles = sorted(
+            article_best_scores.items(), 
+            key=lambda x: x[1]["score"], 
+            reverse=True
+        )
+
+        for article_id, data in sorted_articles[:max_sources]:
+            doc = data["doc"]
             
-            # اگر این مقاله قبلاً اضافه شده، رد کن
-            if article_id in seen_article_ids:
-                logger.debug(f"⏭️ Skipping duplicate article: {article_id}")
-                continue
+            # 🎯 استخراج عنوان مقاله اصلی
+            article_title = doc.get("article_title")
             
-            seen_article_ids.add(article_id)
+            # اگر article_title وجود نداشت، سعی کن از full_article_content استخراج کنی
+            if not article_title:
+                full_article_content = doc.get("full_article_content", "")
+                article_title = self._extract_article_title_from_content(full_article_content)
             
-            chunk_title = doc.get("title", "بدون عنوان")
-            article_title = doc.get("article_title", chunk_title)  # fallback به chunk_title
-            path = doc.get("path", "")
+            # اگر باز هم پیدا نشد، از title استفاده کن (chunk title)
+            if not article_title:
+                article_title = doc.get("title", "بدون عنوان")
             
-            # استخراج snippet (بخش مرتبط) برای highlighting
+            # استخراج snippet از بهترین chunk برای preview
             content = doc.get("content", "")
-            snippet = content[:300] + "..." if len(content) > 300 else content
+            snippet = content[:200] + "..." if len(content) > 200 else content
             
-            # 🎯 نمایش فقط عنوان مقاله اصلی
+            # 🎯 فقط اطلاعات مقاله اصلی - بدون اطلاعات chunk
             formatted_sources.append({
                 "id": article_id,
-                "title": article_title,  # 🎯 فقط title مقاله اصلی
-                "chunk_title": chunk_title,  # title chunk (برای reference)
-                "path": path,  # مسیر chunk برای اطلاعات بیشتر
-                "score": doc.get("score", 0),
+                "title": article_title,  # 🎯 فقط عنوان مقاله اصلی
+                "score": data["score"],
                 "category": doc.get("category"),
                 "tags": doc.get("tags", []),
-                "url": doc.get("url"),
-                "snippet": snippet,  # 🔥 بخش مرتبط برای preview
-                "full_content": content,  # 🔥 محتوای کامل برای highlighting
+                "url": doc.get("url"),  # 🎯 لینک به مقاله اصلی
+                "snippet": snippet,  # پیش‌نمایش کوتاه
                 "summary": doc.get("summary", "")
             })
-            
-            # 🎯 اگر به تعداد مورد نظر رسیدیم، متوقف می‌شویم
-            if len(formatted_sources) >= max_sources:
-                break
 
         logger.info(f"📋 Formatted {len(formatted_sources)} unique articles (from {len(documents)} chunks)")
         
         # 🔥 DEBUG: نمایش منابع برگشتی
         for idx, src in enumerate(formatted_sources, 1):
-            logger.info(f"   🔖 Article #{idx}: {src['title'][:50]}... (Best chunk path: {src['path']}, Score: {src['score']:.3f})")
+            logger.info(f"   🔖 Article #{idx}: {src['title'][:50]}... (Score: {src['score']:.3f})")
         
         return formatted_sources
 
@@ -267,7 +318,7 @@ class RAGService(ABC):
         
         try:
             import os
-            from app.core.config import settings
+            # settings already imported at top of file - no need to import again
             from app.infrastructure.connection_manager import weaviate_client
             from openai import OpenAI
 
@@ -385,13 +436,13 @@ class RAGService(ABC):
                     relevant_docs.append({
                         "id": article_id,
                         "node_id": node_id,
-                        "title": f"{path} - {title}",  # Include path in title for better context
+                        "title": title,  # 🎯 فقط title chunk (بدون path)
                         "content": combined_content,
                         "path": path,
                         "score": score,
                         "source": "weaviate",
                         "raw_content": node_content,  # محتوای خام برای reranking
-                        "full_article_content": full_content  # محتوای کامل مقاله
+                        "full_article_content": full_content  # 🔥 محتوای کامل برای استخراج article title
                     })
 
                 logger.info(f"✅ Weaviate search completed: {len(relevant_docs)} unique documents found")

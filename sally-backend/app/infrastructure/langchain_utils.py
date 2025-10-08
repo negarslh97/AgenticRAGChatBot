@@ -706,7 +706,7 @@ class LangChainService:
             async for chunk in chain.astream({
                 "response_guide": response_guide,
                 "context": context,
-                "conversation_history": history_text,
+                "history": history_text,
                 "query": query
             }):
                 chunk_num += 1
