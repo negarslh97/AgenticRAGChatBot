@@ -8,7 +8,7 @@ from app.domain.entities import (
     Conversation, Message, Customer, Admin, GuestSession, UnansweredQuestion,
     MessageRating, SenderType
 )
-from app.infrastructure.rag_service import get_rag_service
+from app.services.rag_service import get_rag_service
 from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.use_cases.query_analyzer import analyze_query_complexity, generate_conversation_title
@@ -180,10 +180,10 @@ class ChatUseCases:
         
         # Get RAG service
         if rag_type == "simple":
-            from app.infrastructure.rag_service import SimpleRAGService
+            from app.services.rag_service import SimpleRAGService
             rag_service = SimpleRAGService()
         else:
-            from app.infrastructure.rag_service import AgenticRAGService
+            from app.services.rag_service import AgenticRAGService
             rag_service = AgenticRAGService()
         
         context = {

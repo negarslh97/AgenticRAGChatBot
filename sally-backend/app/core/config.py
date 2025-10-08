@@ -25,20 +25,43 @@ class Settings(BaseSettings):
     weaviate_api_key: Optional[str] = None
 
     # AI Models Configuration
+    # 📌 توصیه: برای هر نوع provider، از تنظیمات مناسب استفاده کنید
     metadata_model: Optional[str] = None
     rag_model: Optional[str] = None
     chat_model: Optional[str] = None
+    
+    # 🔑 OpenRouter / Custom Provider Configuration (پیش‌فرض)
+    # برای مدل‌های OpenRouter, Anthropic, Google, etc.
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
-    embedder_api_key: Optional[str] = None
-    embedder_openai_base_url: Optional[str] = None
+    
+    # 🔑 OpenAI Official Configuration
+    # برای استفاده از OpenAI رسمی (gpt-4o, gpt-3.5-turbo)
+    embedder_api_key: Optional[str] = None           # OpenAI Official API Key
+    embedder_openai_base_url: Optional[str] = None   # پیش‌فرض: https://api.openai.com/v1
     embedder_model: Optional[str] = None
     # Ollama Configuration for local embeddings fallback
     ollama_url: Optional[str] = None
     ollama_embedding_model: Optional[str] = None
     
-    # 🆕 Reranker API Configuration (External Colab)
+    # 🆕 Reranker API Configuration
+    # توصیه می‌شود از یکی از موارد زیر استفاده کنید:
+    # 1. Self-hosted Reranker: مدل BAAI/bge-reranker-v2-m3 روی FastAPI + GPU
+    # 2. Managed Service: Cohere Rerank API یا Jina Rerank API
+    # 3. External Service: Colab API (فقط برای تست - برای پروداکشن مناسب نیست)
     reranker_api_url: Optional[str] = None
+    reranker_timeout: int = 60  # تایم‌اوت به ثانیه
+    
+    # 🆕 RAG Retrieval Configuration
+    weaviate_retrieval_limit: int = 30      # تعداد اسناد برای بازیابی اولیه
+    reranker_top_k: int = 20                # تعداد اسناد برتر بعد از reranking
+    context_documents_count: int = 15       # تعداد اسناد برای context در RAG
+    
+    # 🆕 Hybrid Model Strategy (برای کاهش هزینه و بهبود سرعت)
+    # برای وظایف ساده از مدل سریع و ارزان، برای وظایف پیچیده از مدل قدرتمند
+    agentic_fast_model: Optional[str] = None    # برای analyze_query, plan_strategy
+    agentic_power_model: Optional[str] = None   # برای synthesize_answer
+    use_hybrid_model_strategy: bool = False      # فعال/غیرفعال کردن
 
     # Docs-as-Code Git Configuration
     kb_git_repo_url: Optional[str] = None

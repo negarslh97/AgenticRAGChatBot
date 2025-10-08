@@ -57,6 +57,8 @@ class RAGService(ABC):
         """
         Enrich Weaviate results with MongoDB metadata (OPTIONAL).
         اگر article در MongoDB نبود، از داده‌های Weaviate استفاده می‌کنیم.
+        
+        🔥 OPTIMIZED: استفاده از batch query برای جلوگیری از مشکل N+1 Query
         """
         logger.info("🗄️ Enriching Weaviate results with MongoDB metadata...")
 
@@ -69,6 +71,26 @@ class RAGService(ABC):
 
         enriched_docs = []
 
+        # 🔥 OPTIMIZATION 1: جمع‌آوری تمام article_id های یکتا
+        article_ids = []
+        for weaviate_doc in weaviate_results:
+            article_id = weaviate_doc.get("id")
+            if article_id:
+                article_ids.append(article_id)
+        
+        # 🔥 OPTIMIZATION 2: فقط یک درخواست به MongoDB برای گرفتن تمام مقالات
+        articles_map = {}
+        if article_ids:
+            try:
+                logger.info(f"📊 Fetching {len(set(article_ids))} unique articles from MongoDB in single batch query...")
+                articles_cursor = KnowledgeBaseArticle.find({"_id": {"$in": article_ids}})
+                articles_map = {str(article.id): article async for article in articles_cursor}
+                logger.info(f"✅ Fetched {len(articles_map)} articles from MongoDB in a single query.")
+            except Exception as e:
+                logger.error(f"❌ Batch fetch from MongoDB failed: {e}")
+                articles_map = {}
+
+        # 🔥 OPTIMIZATION 3: حلقه بدون درخواست اضافی به دیتابیس
         for weaviate_doc in weaviate_results:
             try:
                 article_id = weaviate_doc.get("id")
@@ -90,12 +112,8 @@ class RAGService(ABC):
                     })
                     continue
 
-                # Try to fetch full article from MongoDB
-                article = None
-                try:
-                    article = await KnowledgeBaseArticle.get(article_id)
-                except Exception as e:
-                    logger.debug(f"Could not fetch article {article_id} from MongoDB: {e}")
+                # 🔥 دریافت آنی article از map (بدون درخواست دیتابیس)
+                article = articles_map.get(article_id)
 
                 if article:
                     # Apply visibility filter if needed
@@ -233,15 +251,18 @@ class RAGService(ABC):
         
         return formatted_sources
 
-    async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True, limit: int = 30) -> List[Dict[str, Any]]:
+    async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True, limit: int = None) -> List[Dict[str, Any]]:
         """
         Retrieve documents using Enhanced Weaviate vector search with:
         1. Query Expansion برای coverage بهتر
         2. Hybrid Search (vector + keyword)
-        3. تعداد بیشتر documents (30 برای پوشش کامل‌تر)
+        3. تعداد بیشتر documents (قابل تنظیم از settings)
         4. Content غنی‌تر (2000 کاراکتر به جای 1000)
         5. Powerful Reranking (BAAI/bge-reranker-v2-m3)
         """
+        # 🔥 استفاده از تنظیمات به جای hardcoded values
+        if limit is None:
+            limit = settings.weaviate_retrieval_limit
         logger.info("🔗 Connecting to Weaviate vector database...")
         
         try:
@@ -377,7 +398,8 @@ class RAGService(ABC):
                 logger.info(f"🎯 Query: '{query[:50]}{'...' if len(query) > 50 else ''}'")
                 
                 # 🔥 STEP 4: Reranking - مرتب‌سازی مجدد بر اساس relevance
-                reranked_docs = await self._rerank_documents(query, relevant_docs, top_k=20)  # 🎯 افزایش به 20
+                # استفاده از تنظیمات به جای hardcoded value
+                reranked_docs = await self._rerank_documents(query, relevant_docs, top_k=settings.reranker_top_k)
                 logger.info(f"🎯 Reranked {len(reranked_docs)} documents by relevance")
                 
                 # 🔍 DEBUG: نمایش محتوای دقیق top 5 documents برای بررسی کیفیت retrieval
@@ -470,7 +492,7 @@ class RAGService(ABC):
                 response = requests.post(
                     self.reranker_api_url,
                     json=payload,
-                    timeout=60  # 60 ثانیه timeout
+                    timeout=settings.reranker_timeout
                 )
                 
                 # 4️⃣ بررسی موفقیت
@@ -984,8 +1006,8 @@ class SimpleRAGService(RAGService):
             logger.info("🧠 Generating Enhanced RAG response with richer context...")
             # Use RAG with context from knowledge base
             try:
-                # 🔥 ENHANCED: استفاده از 15 document برای context غنی‌تر (افزایش یافته!)
-                top_docs = relevant_docs[:15]
+                # 🔥 ENHANCED: استفاده از تنظیمات برای تعداد documents در context
+                top_docs = relevant_docs[:settings.context_documents_count]
                 
                 # 🔥 ENHANCED: ساخت context با ساختار بهتر و اطلاعات بیشتر
                 context_parts = []
@@ -1106,181 +1128,159 @@ class SimpleRAGService(RAGService):
 
 
 class AgenticRAGService(RAGService):
-    """Agentic RAG for authenticated customers - STRICT MODE - uses full knowledge base only."""
+    """
+    Agentic RAG for authenticated customers.
+    🔥 UPDATED: This service now uses the advanced LangGraph workflow.
+    """
+    
+    def __init__(self):
+        super().__init__()
+        # 🔥 نمونه‌سازی از workflow پیشرفته
+        from app.infrastructure.langchain_utils import langchain_service
+        from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
+        
+        # ایجاد instance از advanced workflow
+        self.advanced_workflow = get_advanced_agentic_rag(langchain_service, self)
+        logger.info("✅ AgenticRAGService initialized with AdvancedAgenticRAG workflow.")
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Generate response using RAG for authenticated customers.
-        STRICT MODE: فقط بر اساس documents موجود پاسخ می‌دهد.
+        Generate response by invoking the Advanced Agentic RAG workflow.
+        🔥 NEW: Uses LangGraph workflow for intelligent multi-step reasoning.
         """
-
         import time
         start_time = time.time()
         
-        # 🎯 تحلیل نوع سوال برای confidence و prompt بهتر
-        from app.use_cases.query_analyzer import analyze_query_type
-        query_type_analysis = analyze_query_type(query)
-        query_type = query_type_analysis['query_type']
-
         user_context = context or {}
         user_id = user_context.get("user_id")
+        conversation_history = user_context.get("conversation_history", [])
 
         logger.info("=" * 60)
-        logger.info("🧠 AgenticRAGService: Starting STRICT advanced RAG operation")
+        logger.info("🚀 Invoking Advanced Agentic RAG Workflow...")
         logger.info(f"📝 Query: '{query[:100]}{'...' if len(query) > 100 else ''}'")
-        logger.info(f"🎯 Query Type: {query_type_analysis['query_type_fa']}")
         logger.info(f"👤 User ID: {user_id if user_id else 'Anonymous'}")
         logger.info(f"🔓 Access Level: Full knowledge base")
-        logger.info(f"🧠 LLM Model: {settings.rag_model_loaded}")
-        logger.info(f"⚠️  STRICT MODE: Only knowledge base answers")
         logger.info("=" * 60)
 
-        # Try to retrieve relevant documents from knowledge base
-        relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=False)
-        logger.info(f"📚 Retrieved {len(relevant_docs)} relevant documents")
-        
-        # اگر هیچ سندی پیدا نشد، پاسخ مناسب برگردان
-        if not relevant_docs:
-            logger.warning("❌ No relevant documents found in knowledge base")
-            no_docs_response = "متأسفانه اطلاعات مربوط به سوال شما در پایگاه دانش موجود نیست. لطفاً سوال خود را واضح‌تر بیان کنید یا تیکت پشتیبانی ایجاد کنید."
+        if not self.advanced_workflow:
+            logger.error("❌ Advanced workflow is not available!")
+            logger.warning("🔄 Falling back to simple RAG...")
+            # Fallback به متد قدیمی در صورت عدم دسترسی به workflow
+            return await self._fallback_simple_agentic_rag(query, context)
+
+        try:
+            # 🔥 فراخوانی متد run از workflow پیشرفته LangGraph
+            result = await self.advanced_workflow.run(
+                query=query,
+                user_id=user_id,
+                conversation_history=conversation_history
+            )
             
             total_time = time.time() - start_time
-            logger.info(f"⏱️  Total time: {total_time:.3f}s")
+            logger.info(f"⏱️  Total workflow time: {total_time:.3f}s")
+            logger.info(f"✅ Workflow completed with confidence: {result.get('confidence', 0):.2f}")
             
+            # تبدیل خروجی workflow به فرمت مورد انتظار API
             return {
-                "response": no_docs_response,
-                "sources": [],
-                "confidence": 0.0,
-                "suggested_actions": ["create_ticket", "refine_question"]
+                "response": result.get("response", "پاسخی تولید نشد."),
+                "sources": result.get("sources", []),
+                "confidence": result.get("confidence", 0.0),
+                "confidence_analysis": {
+                    "complexity": result.get("complexity", "unknown"),
+                    "actions_taken": result.get("actions_taken", []),
+                    "reflection_notes": result.get("reflection_notes", []),
+                    "session_id": result.get("session_id", "")
+                },
+                "suggested_actions": self._extract_suggested_actions(result),
+                "quality_metrics": {}
             }
-
-        # Get user-specific context if available
-        user_info = ""
-        if user_id:
-            logger.info(f"👤 Fetching user context for ID: {user_id}")
-            # Try to get user from Customer entity first
-            user = None
-
-            try:
-                user = await Customer.get(user_id)
-                if user:
-                    user_info = f"You are a customer: {user.full_name} ({user.email}). "
-                    logger.info(f"✅ User context loaded: Customer - {user.full_name}")
-                else:
-                    user = await Admin.get(user_id)
-                    if user:
-                        user_info = f"You are an admin: {user.full_name} ({user.email}). "
-                        logger.info(f"✅ User context loaded: Admin - {user.full_name}")
-            except Exception as e:
-                logger.error(f"❌ Error fetching user info for {user_id}: {e}")
-                user_info = "User information not available. "
-        else:
-            logger.info("👤 No user ID provided - anonymous user")
-
-        if relevant_docs:
-            logger.info("🧠 Generating Enhanced Agentic RAG response with full context...")
             
-            # 🔥 ENHANCED: استفاده از 5 document به جای 3 برای context غنی‌تر
+        except Exception as e:
+            logger.error(f"❌ Advanced workflow execution failed: {e}", exc_info=True)
+            logger.warning("🔄 Falling back to simple RAG...")
+            return await self._fallback_simple_agentic_rag(query, context)
+    
+    async def _fallback_simple_agentic_rag(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Fallback به RAG ساده در صورت عدم دسترسی یا خطا در workflow پیشرفته
+        """
+        logger.info("🔄 Using fallback simple agentic RAG")
+        
+        user_context = context or {}
+        
+        try:
+            # استفاده از retrieval ساده
+            relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=False)
+            
+            if not relevant_docs:
+                return {
+                    "response": "متأسفانه اطلاعات مربوط به سوال شما در پایگاه دانش موجود نیست.",
+                    "sources": [],
+                    "confidence": 0.0,
+                    "suggested_actions": ["create_ticket", "refine_question"]
+                }
+            
+            # ساخت context ساده
             top_docs = relevant_docs[:5]
-            
-            # 🔥 ENHANCED: ساخت context با ساختار بهتر و اطلاعات بیشتر
             context_parts = []
             for i, doc in enumerate(top_docs, 1):
-                doc_context = f"""
+                context_parts.append(f"""
 === منبع {i} ===
 عنوان: {doc['title']}
-مسیر: {doc.get('path', 'N/A')}
-امتیاز ارتباط: {doc.get('score', 0):.2f}
-
-محتوا:
-{doc['content']}
-
+محتوا: {doc['content']}
 ---
-"""
-                context_parts.append(doc_context)
+""")
             
-            # Build context from retrieved documents with user info
-            full_context = user_info + "\n".join(context_parts)
-
-            logger.info(f"📝 Enhanced context: {len(top_docs)} documents, {len(full_context)} characters")
-            logger.info(f"👤 User context included: {'Yes' if user_info else 'No'}")
-
-            # Generate response using OpenAI with context
-            if settings.openai_api_key_loaded:
-                try:
-                    logger.info("🤖 Calling LangChain for enhanced agentic RAG response...")
-                    
-                    # Get conversation history from context
-                    conversation_history = user_context.get("conversation_history", []) if user_context else []
-                    
-                    response = await self._generate_openai_response_with_context(query, full_context, conversation_history)
-                    logger.info(f"✅ Enhanced agentic RAG response generated successfully")
-                    logger.info(f"📄 Response preview: '{response[:100]}...'")
-                    
-                    # 🔥 ENHANCED: بررسی کیفیت پاسخ
-                    formatted_sources = self._format_sources_markdown(relevant_docs[:5], max_sources=5)
-                    verification_result = self._verify_answer_quality(
-                        query=query,
-                        answer=response,
-                        context=full_context,
-                        sources=formatted_sources
-                    )
-                    
-                    logger.info(f"🔍 Answer Quality: {verification_result['quality_score']:.2f}")
-                    if verification_result['issues']:
-                        logger.warning(f"⚠️  Quality Issues: {', '.join(verification_result['issues'])}")
-                    if verification_result['warnings']:
-                        logger.info(f"💡 Quality Warnings: {', '.join(verification_result['warnings'])}")
-                    
-                    suggested_actions = self._suggest_actions(query, relevant_docs)
-                    logger.info(f"💡 Suggested actions: {suggested_actions}")
-                    
-                    total_rag_time = time.time() - start_time
-                    logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
-                    
-                    # 🎯 محاسبه پیشرفته confidence
-                    confidence_analysis = self._calculate_advanced_confidence(
-                        query=query,
-                        retrieved_docs=relevant_docs,
-                        answer=response,
-                        verification_result=verification_result,
-                        query_type=query_type  # 🎯 تطبیق با نوع سوال
-                    )
-                    
-                    # 🔥 ENHANCED: برگرداندن 5 source به جای 3 + quality metrics + confidence analysis
-                    return {
-                        "response": response,
-                        "sources": formatted_sources,
-                        "confidence": confidence_analysis['confidence_score'],
-                        "confidence_analysis": confidence_analysis,
-                        "suggested_actions": suggested_actions,
-                        "quality_metrics": verification_result
-                    }
-                except Exception as e:
-                    logger.error(f"❌ Enhanced agentic RAG response generation failed: {e}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    
-                    # در STRICT MODE، اگر خطا رخ داد، پیام خطا برمی‌گردانیم
-                    total_rag_time = time.time() - start_time
-                    logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
-                    return {
-                        "response": "متأسفانه در پردازش اطلاعات پایگاه دانش خطایی رخ داد. لطفاً دوباره تلاش کنید.",
-                        "sources": [],
-                        "confidence": 0.0,
-                        "suggested_actions": ["retry", "create_ticket"]
-                    }
-
-        # اگر API key نداریم
-        logger.error("❌ OpenAI API key not configured")
-        total_rag_time = time.time() - start_time
-        logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
-        return {
-            "response": "متأسفانه سرویس هوش مصنوعی در حال حاضر در دسترس نیست.",
-            "sources": [],
-            "confidence": 0.0,
-            "suggested_actions": ["contact_support"]
-        }
+            full_context = "\n".join(context_parts)
+            conversation_history = user_context.get("conversation_history", [])
+            
+            # تولید پاسخ ساده
+            response = await self._generate_openai_response_with_context(query, full_context, conversation_history)
+            formatted_sources = self._format_sources_markdown(relevant_docs[:5], max_sources=5)
+            
+            return {
+                "response": response,
+                "sources": formatted_sources,
+                "confidence": 0.5,
+                "suggested_actions": self._suggest_actions(query, relevant_docs),
+                "quality_metrics": {}
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Fallback RAG also failed: {e}")
+            return {
+                "response": "متأسفانه در پردازش اطلاعات خطایی رخ داد.",
+                "sources": [],
+                "confidence": 0.0,
+                "suggested_actions": ["retry", "contact_support"]
+            }
+    
+    def _extract_suggested_actions(self, workflow_result: Dict[str, Any]) -> List[str]:
+        """
+        استخراج suggested actions از نتیجه workflow
+        """
+        actions = []
+        
+        # بر اساس complexity
+        complexity = workflow_result.get("complexity", "unknown")
+        if complexity == "complex":
+            actions.append("consider_breaking_down")
+        
+        # بر اساس confidence
+        confidence = workflow_result.get("confidence", 0)
+        if confidence < 0.5:
+            actions.append("refine_question")
+            actions.append("create_ticket")
+        
+        # بر اساس errors
+        if workflow_result.get("errors"):
+            actions.append("retry")
+        
+        # اگر sources دارد
+        if workflow_result.get("sources"):
+            actions.append("view_related_articles")
+        
+        return actions if actions else ["view_related_articles"]
     
     async def _generate_openai_response_with_context(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
         """Generate response using OpenAI API with context from knowledge base."""
@@ -1294,87 +1294,6 @@ class AgenticRAGService(RAGService):
             logger.error(f"Error details: {str(e)}")
             raise Exception("AI service unavailable")
 
-    async def _generate_agentic_response(self, query: str, context: str, user_context: Dict[str, Any]) -> str:
-        """Generate response using OpenAI with agentic capabilities."""
-        prompt = f"""You are Sally, an advanced AI customer support agent. You have access to the full knowledge base and customer information. Use this context to provide personalized, actionable responses.
-
-Context:
-{context}
-
-User Question: {query}
-
-As an agentic assistant, you can:
-1. Provide detailed answers from the knowledge base
-2. Suggest creating support tickets for complex issues
-3. Recommend specific articles or resources
-4. Offer step-by-step guidance
-
-Provide a helpful, personalized response that goes beyond just answering the question - anticipate follow-up needs and offer proactive assistance."""
-
-        from app.infrastructure.langchain_utils import langchain_service
-
-        try:
-            logger.info(f"_generate_agentic_response: Using LangChain chat model for query '{query[:50]}...'")
-
-            # Convert to messages format
-            messages = [
-                {"role": "user", "content": query}
-            ]
-
-            return await langchain_service.generate_chat_response(messages, context)
-        except Exception as e:
-            logger.error(f"_generate_agentic_response: LangChain error for query '{query[:50]}...': {e}")
-            # Fallback to simple response
-            return f"متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم. اما می‌توانم به شما کمک کنم: {query}"
-    
-    async def _generate_direct_openai_response(self, query: str, user_context: Dict[str, Any]) -> str:
-        """Generate response using OpenAI API directly without RAG context."""
-        user_info = ""
-        if user_context.get("user_id"):
-            user_id = user_context.get("user_id")
-            # Try to get user from Customer entity first
-            user = None
-
-            try:
-                user = await Customer.get(user_id)
-                if user:
-                    user_info = f"You are {user.full_name} ({user.email}), a Customer.\n"
-                else:
-                    user = await Admin.get(user_id)
-                    if user:
-                        user_info = f"You are {user.full_name} ({user.email}), an Admin.\n"
-            except Exception as e:
-                logger.error(f"_generate_direct_openai_response: Error fetching user info for {user_id}: {e}")
-                user_info = "User information not available\n"
-        
-        prompt = f"""{user_info}You are Sally, a helpful customer support assistant. The user has asked: "{query}"
-
-Please provide a helpful response to their question. Since I don't have specific information from our knowledge base available, respond in a general but helpful way. If appropriate:
-- Offer to help create a support ticket for more specific assistance
-- Suggest they provide more details if they need a more specific answer
-- Be friendly and professional in your response
-
-Your response:"""
-
-        from app.infrastructure.langchain_utils import langchain_service
-
-        try:
-            logger.info(f"_generate_direct_openai_response (Agentic): Using LangChain chat model for query '{query[:50]}...'")
-
-            # Convert to messages format
-            messages = [
-                {"role": "user", "content": query}
-            ]
-
-            return await langchain_service.generate_chat_response(messages)
-        except Exception as e:
-            logger.error(f"_generate_direct_openai_response (Agentic): LangChain error for query '{query[:50]}...': {e}")
-            logger.error(f"Error details: {str(e)}")
-            # Fallback response
-            fallback = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را با جزئیات بیشتری مطرح کنید یا با تیم پشتیبانی تماس بگیرید."
-            logger.warning(f"Using fallback response: '{fallback}'")
-            return fallback
-    
     def _suggest_actions(self, query: str, relevant_docs: List[Dict[str, Any]]) -> List[str]:
         """Suggest relevant actions based on query and context."""
         actions = []

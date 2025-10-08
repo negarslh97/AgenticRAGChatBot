@@ -11,7 +11,7 @@ import asyncio
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from .sync_service import SyncService, MongoToGitSync
+from app.services.sync_service import SyncService, MongoToGitSync
 from .background_jobs import JobQueue, JobStatus, JobType
 from .conflict_resolver import ConflictManager, ConflictResolution
 from app.core.config import settings

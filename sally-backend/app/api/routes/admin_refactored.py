@@ -18,7 +18,7 @@ from app.core.permissions import (
 )
 from app.core.security import get_password_hash
 from app.core.config import settings
-from app.infrastructure.knowledge_base_service import get_or_create_tags
+from app.services.knowledge_base_service import get_or_create_tags
 
 router = APIRouter()
 

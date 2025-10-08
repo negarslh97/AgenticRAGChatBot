@@ -9,10 +9,10 @@ import hashlib
 import logging
 from bson import ObjectId
 
-from .config import DocsAsCodeConfig
-from .git_manager import GitManager
-from .markdown_processor import MarkdownProcessor, CategoryProcessor
-from .file_converter import FileConverter
+from app.docs_as_code.config import DocsAsCodeConfig
+from app.docs_as_code.git_manager import GitManager
+from app.docs_as_code.markdown_processor import MarkdownProcessor, CategoryProcessor
+from app.docs_as_code.file_converter import FileConverter
 from app.domain.entities import KnowledgeBaseArticle, Category, ArticleStatus, ArticleVisibility
 
 

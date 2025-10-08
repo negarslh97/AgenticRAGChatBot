@@ -10,7 +10,7 @@ from bson import ObjectId
 from enum import Enum
 import json
 
-from .sync_service import SyncService, MongoToGitSync
+from app.services.sync_service import SyncService, MongoToGitSync
 from app.domain.entities import KnowledgeBaseArticle, Category, ArticleStatus
 from app.core.config import settings
 

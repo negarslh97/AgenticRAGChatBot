@@ -3,104 +3,33 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from pathlib import Path
-import sys
-import os
 import uuid
 import openai
 import json
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-# Import text extraction libraries
-try:
-    from pypdf import PdfReader
-    from docx import Document
-    import openpyxl
-    TEXT_EXTRACTION_AVAILABLE = True
-except ImportError:
-    TEXT_EXTRACTION_AVAILABLE = False
 
 from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, Admin, ArticleVisibility, AdminRole, ArticleCategory, ArticleTag, Category, Tag
 import markdown  # For markdown to HTML conversion
 from app.api.dependencies import get_current_admin
 from app.core.permissions import get_current_admin_with_permission, Permission
 from app.core.config import settings
-from app.docs_as_code.sync_service import MongoToGitSync
+from app.services.sync_service import MongoToGitSync
 from app.docs_as_code.config import get_default_config
 from app.docs_as_code.git_manager import GitManager
 from app.docs_as_code.monitoring import get_system_stats
+from app.services.knowledge_base_service import knowledge_base_service, get_or_create_tags
+from app.utils.text_extraction import (
+    extract_text_from_file,
+    extract_text_from_pdf,
+    extract_text_from_docx,
+    extract_text_from_excel,
+    extract_text_from_csv,
+    TEXT_EXTRACTION_AVAILABLE
+)
 import logging
 
 logger = logging.getLogger(__name__)
-from app.infrastructure.knowledge_base_service import knowledge_base_service, get_or_create_tags
 
 router = APIRouter()
-
-# --- Helper Functions for Text Extraction and AI Generation ---
-
-def extract_text_from_pdf(file_path: Path) -> str:
-    """Extract text from PDF file."""
-    if not TEXT_EXTRACTION_AVAILABLE:
-        return "Text extraction libraries not available"
-
-    try:
-        reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return text.strip()
-    except Exception as e:
-        return f"Error extracting PDF text: {str(e)}"
-
-
-def extract_text_from_docx(file_path: Path) -> str:
-    """Extract text from DOCX file."""
-    if not TEXT_EXTRACTION_AVAILABLE:
-        return "Text extraction libraries not available"
-
-    try:
-        doc = Document(file_path)
-        text = ""
-        for paragraph in doc.paragraphs:
-            text += paragraph.text + "\n"
-        return text.strip()
-    except Exception as e:
-        return f"Error extracting DOCX text: {str(e)}"
-
-
-def extract_text_from_excel(file_path: Path) -> str:
-    """Extract text from Excel file."""
-    if not TEXT_EXTRACTION_AVAILABLE:
-        return "Text extraction libraries not available"
-
-    try:
-        wb = openpyxl.load_workbook(file_path)
-        text = ""
-        for sheet_name in wb.sheetnames:
-            sheet = wb[sheet_name]
-            text += f"Sheet: {sheet_name}\n"
-            for row in sheet.iter_rows(values_only=True):
-                row_text = "\t".join(str(cell) for cell in row if cell is not None)
-                if row_text.strip():
-                    text += row_text + "\n"
-            text += "\n"
-        return text.strip()
-    except Exception as e:
-        return f"Error extracting Excel text: {str(e)}"
-
-
-def extract_text_from_csv(file_path: Path) -> str:
-    """Extract text from CSV file."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except UnicodeDecodeError:
-        try:
-            with open(file_path, 'r', encoding='latin-1') as f:
-                return f.read()
-        except Exception as e:
-            return f"Error extracting CSV text: {str(e)}"
-    except Exception as e:
-        return f"Error extracting CSV text: {str(e)}"
 
 
 async def generate_metadata_from_ai(title: str, content: str) -> dict:

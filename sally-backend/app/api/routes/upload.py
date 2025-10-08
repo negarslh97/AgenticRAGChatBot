@@ -5,12 +5,16 @@ from app.domain.entities import Admin, KnowledgeBaseArticle, ArticleStatus, Arti
 import os
 import uuid
 from pathlib import Path
-from pypdf import PdfReader
-from docx import Document
-import openpyxl
 import markdown
 from app.infrastructure.langchain_utils import langchain_service
-from app.infrastructure.knowledge_base_service import get_or_create_tags
+from app.services.knowledge_base_service import get_or_create_tags
+from app.utils.text_extraction import (
+    extract_text_from_file,
+    extract_text_from_pdf,
+    extract_text_from_docx,
+    extract_text_from_excel,
+    extract_text_from_csv
+)
 
 router = APIRouter()
 
@@ -31,63 +35,6 @@ async def generate_metadata_from_ai(title: str, content: str):
 # Create upload directory if it doesn't exist
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
-
-
-def extract_text_from_pdf(file_path: Path) -> str:
-    """Extract text from PDF file."""
-    try:
-        reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return text.strip()
-    except Exception as e:
-        return f"Error extracting PDF text: {str(e)}"
-
-
-def extract_text_from_docx(file_path: Path) -> str:
-    """Extract text from DOCX file."""
-    try:
-        doc = Document(file_path)
-        text = ""
-        for paragraph in doc.paragraphs:
-            text += paragraph.text + "\n"
-        return text.strip()
-    except Exception as e:
-        return f"Error extracting DOCX text: {str(e)}"
-
-
-def extract_text_from_excel(file_path: Path) -> str:
-    """Extract text from Excel file."""
-    try:
-        wb = openpyxl.load_workbook(file_path)
-        text = ""
-        for sheet_name in wb.sheetnames:
-            sheet = wb[sheet_name]
-            text += f"Sheet: {sheet_name}\n"
-            for row in sheet.iter_rows(values_only=True):
-                row_text = "\t".join(str(cell) for cell in row if cell is not None)
-                if row_text.strip():
-                    text += row_text + "\n"
-            text += "\n"
-        return text.strip()
-    except Exception as e:
-        return f"Error extracting Excel text: {str(e)}"
-
-
-def extract_text_from_csv(file_path: Path) -> str:
-    """Extract text from CSV file."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except UnicodeDecodeError:
-        try:
-            with open(file_path, 'r', encoding='latin-1') as f:
-                return f.read()
-        except Exception as e:
-            return f"Error extracting CSV text: {str(e)}"
-    except Exception as e:
-        return f"Error extracting CSV text: {str(e)}"
 
 @router.post("/upload", tags=["File Upload"])
 async def upload_file(

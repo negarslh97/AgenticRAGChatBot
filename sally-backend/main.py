@@ -1,142 +1,13 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import asyncio
-
-# from app.core.config import settings
-# from app.infrastructure.database import init_database, create_default_admin
-# from app.api.routes import auth, chat, tickets, admin, knowledge_base, admin_knowledge_base, upload
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup and shutdown events."""
-    # Startup code
-    logger.info("Starting up the application...")
-    
-    # Initialize connection managers
-    from app.infrastructure.connection_manager import startup_connections
-    await startup_connections()
-    
-    await init_db()
-
-    # Log existing roles in database for debugging
-    from app.domain.entities import Role
-    existing_roles = await Role.find_all().to_list()
-    logger.info(f"DEBUG: Existing roles in database before create_default_roles: {[role.name for role in existing_roles]}")
-
-    # این تابع نقش‌ها را با حروف بزرگ (SuperAdmin, Admin, ...) می‌سازد
-    from app.core.permissions import create_default_roles
-    await create_default_roles()
-
-    # Log roles after creation
-    roles_after = await Role.find_all().to_list()
-    logger.info(f"DEBUG: Roles in database after create_default_roles: {[role.name for role in roles_after]}")
-
-    # ساخت ادمین پیش‌فرض در صورتی که هیچ ادمینی وجود نداشته باشد
-    from app.domain.entities import Admin, Role
-    from app.core.security import get_password_hash
-
-    admin_count = await Admin.find_all().count()
-    if admin_count == 0:
-        logger.info("No admins found. Creating default super admin...")
-
-        # --- اصلاح اصلی و کلیدی اینجاست ---
-        # حالا به دنبال نقشی با نام "SuperAdmin" (با حرف بزرگ) می‌گردیم
-        SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
-        # --- پایان اصلاح ---
-
-        if not SuperAdmin_role:
-            # این پیام خطا حالا بسیار مهم است، چون نشان می‌دهد حتی نقش با حروف بزرگ هم ساخته نشده
-            logger.error("SuperAdmin role not found! Cannot create default admin. Check DEFAULT_ROLES in permissions.py")
-            return
-
-        default_admin = Admin(
-            email=settings.default_SuperAdmin_email,
-            hashed_password=get_password_hash(settings.default_SuperAdmin_password),
-            full_name="Default Super Admin",
-            # --- بهبود کوچک اما مهم: تبدیل id به رشته ---
-            role_id=str(SuperAdmin_role.id),
-            # --- بهبود دوم: اضافه کردن role_name ---
-            role_name=SuperAdmin_role.name
-        )
-        await default_admin.insert()
-        logger.info(f"Created default super Admin: {settings.default_SuperAdmin_email}")
-
-    # Start background job processor
-    from app.docs_as_code.background_jobs import start_background_jobs
-    await start_background_jobs()
-    logger.info("Background job processor started")
-    logger.info("Application startup completed!")
-
-    yield  # Application runs here
-
-    # Shutdown code
-    logger.info("Shutting down the application...")
-    
-    # Cleanup connections
-    from app.infrastructure.connection_manager import shutdown_connections
-    await shutdown_connections()
-
-    # Close MongoDB client
-    from app.infrastructure.database.mongodb import close_mongo_client
-    await close_mongo_client()
-    logger.info("MongoDB client closed")
-
-    # Stop background job processor
-    from app.docs_as_code.background_jobs import stop_background_jobs
-    await stop_background_jobs()
-    logger.info("Background job processor stopped")
-    logger.info("Application shutdown completed!")
-
-
-# app = FastAPI(
-#     title="Sally - Customer Support Platform",
-#     description="AI-powered customer support with RAG capabilities",
-#     version="1.0.0",
-#     lifespan=lifespan
-# )
-
-# # CORS middleware
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-#     expose_headers=["*"],
-# )
-
-# # Include routers
-# app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-# app.include_router(chat.router, prefix="/chat", tags=["Chat"])
-# app.include_router(tickets.router, prefix="/tickets", tags=["Tickets"])
-# app.include_router(knowledge_base.router, prefix="/kb", tags=["Knowledge Base"])
-# app.include_router(admin.router, prefix="/admin", tags=["admin"])
-# app.include_router(admin_knowledge_base.router, prefix="/admin/kb", tags=["admin: Knowledge Base"])
-# app.include_router(upload.router, prefix="/admin/upload", tags=["File Upload"])
-
-
-# @app.get("/")
-# async def root():
-#     return {"message": "Sally Customer Support Platform API"}
-
-
-# @app.get("/health")
-# async def health_check():
-#     return {"status": "healthy"}
-
-
-# مسیر: sally-backend/main.py
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from app.core.config import settings
-from app.infrastructure.database.mongodb import init_db
+from contextlib import asynccontextmanager
 import logging
 import os
 import warnings
+
+from app.core.config import settings
+from app.infrastructure.database.mongodb import init_db
 
 # Suppress specific deprecation warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*general_plain_validator_function.*")
@@ -161,15 +32,86 @@ from app.api.middleware.logging_middleware import (
     ErrorLoggingMiddleware
 )
 
-# فایل‌های جدیدی که باید بسازید یا جایگزین کنید
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for startup and shutdown events."""
+    logger.info("🚀 Starting up the application...")
+    
+    # Initialize connection managers
+    from app.infrastructure.connection_manager import startup_connections
+    await startup_connections()
+    
+    # Initialize database
+    await init_db()
+
+    # Log existing roles in database for debugging
+    from app.domain.entities import Role
+    existing_roles = await Role.find_all().to_list()
+    logger.info(f"Existing roles in database: {[role.name for role in existing_roles]}")
+
+    # Create default roles
+    from app.core.permissions import create_default_roles
+    await create_default_roles()
+
+    # Log roles after creation
+    roles_after = await Role.find_all().to_list()
+    logger.info(f"Roles after creation: {[role.name for role in roles_after]}")
+
+    # Create default Super Admin if no admins exist
+    from app.domain.entities import Admin
+    from app.core.security import get_password_hash
+
+    admin_count = await Admin.find_all().count()
+    if admin_count == 0:
+        logger.info("No admins found. Creating default super admin...")
+        SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
+        
+        if not SuperAdmin_role:
+            logger.error("SuperAdmin role not found! Cannot create default admin.")
+        else:
+            default_admin = Admin(
+                email=settings.default_SuperAdmin_email,
+                hashed_password=get_password_hash(settings.default_SuperAdmin_password),
+                full_name="Default Super Admin",
+                role_id=str(SuperAdmin_role.id),
+                role_name=SuperAdmin_role.name
+            )
+            await default_admin.insert()
+            logger.info(f"✅ Created default super admin: {settings.default_SuperAdmin_email}")
+
+    # Start background job processor
+    from app.docs_as_code.background_jobs import start_background_jobs
+    await start_background_jobs()
+    logger.info("✅ Application startup completed!")
+
+    yield  # Application runs here
+
+    # Shutdown code
+    logger.info("🛑 Shutting down the application...")
+    
+    from app.infrastructure.connection_manager import shutdown_connections
+    await shutdown_connections()
+
+    from app.infrastructure.database.mongodb import close_mongo_client
+    await close_mongo_client()
+
+    from app.docs_as_code.background_jobs import stop_background_jobs
+    await stop_background_jobs()
+    
+    logger.info("✅ Application shutdown completed!")
+
+
+# Import API routers
 from app.api.routes.auth_refactored import router as auth_router
 from app.api.routes.chat_refactored import router as chat_router
 from app.api.routes.tickets_refactored import router as tickets_router
 from app.api.routes.admin_refactored import router as admin_router
-# روترهای موجود که نیازی به تغییر بزرگ ندارند
 from app.api.routes.knowledge_base import router as kb_router
 from app.api.routes.super_admin_knowledge_base import router as admin_kb_router
 from app.api.routes.upload import router as upload_router
+from app.api.routes.categories import router as categories_router
+from app.api.routes.system_routes import router as system_router
 
 app = FastAPI(
     title="Sally Chat Bot API",
@@ -223,9 +165,7 @@ app.include_router(admin_router, prefix="/api/admin", tags=["👨‍💼 Admin M
 # PUBLISH_ARTICLES, DELETE_ARTICLES, MANAGE_SYSTEM_SETTINGS
 app.include_router(admin_kb_router, prefix="/api/super-admin/kb", tags=["👑 Super Admin Knowledge Base"])
 app.include_router(upload_router, prefix="/api/super-admin", tags=["👑 Super Admin Upload"])
-
-# System Routes
-from app.api.routes.system_routes import router as system_router
+app.include_router(categories_router, prefix="/api/super-admin/categories", tags=["👑 Super Admin Categories"])
 app.include_router(system_router, prefix="/api/system", tags=["🔧 System Monitoring"])
 
 # ============================================================================
@@ -318,10 +258,6 @@ async def serve_spa_with_auth(path: str, request: Request):
         return FileResponse(index_path)
     else:
         return {"message": "Frontend not built. Run 'npm run build' in sally-frontend directory."}
-
-# Note: SPA route handler with authentication check is defined above
-
-# Application startup and shutdown handled by lifespan context manager above
 
 
 @app.get("/")

@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
+"""
+Weaviate-MongoDB Connector for knowledge base management.
+Handles migration, vectorization, and data synchronization.
+"""
 
 import warnings
 import sys
 import os
-
-# Suppress all warnings
-warnings.filterwarnings("ignore")
-os.environ['PYTHONWARNINGS'] = 'ignore'
-
 import asyncio
-import sys
-import os
 import logging
+import argparse
 from typing import Dict, List, Any, Optional
 from pathlib import Path
-import argparse
+
 import weaviate
 from weaviate.classes.init import Auth
 from weaviate.classes.config import Configure, Property, DataType, VectorDistances
 from weaviate.classes.query import Filter
 
-# Add parent directory to Python path for imports
-import os
-current_dir = Path(__file__).resolve().parent
-project_root = current_dir.parent.parent.parent
-sys.path.insert(0, str(project_root))
+# Suppress warnings
+warnings.filterwarnings("ignore")
+os.environ['PYTHONWARNINGS'] = 'ignore'
 
-# Also set PYTHONPATH environment variable
-os.environ['PYTHONPATH'] = str(project_root)
+# Add project root to path if running as script
+if __name__ == "__main__":
+    current_dir = Path(__file__).resolve().parent
+    project_root = current_dir.parent.parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
 
 from app.core.config import settings
 

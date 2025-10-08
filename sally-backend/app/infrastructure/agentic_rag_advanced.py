@@ -105,6 +105,7 @@ class AgenticRAGState(TypedDict):
     errors: Annotated[List[str], operator.add]
     retry_count: int
     max_retries: int
+    needs_fallback: bool  # 🔥 برای مدیریت fallback
 
 
 class AdvancedAgenticRAG:
@@ -134,6 +135,7 @@ class AdvancedAgenticRAG:
         workflow.add_node("decompose_query", self.decompose_query)
         workflow.add_node("plan_strategy", self.plan_strategy)
         workflow.add_node("tree_search", self.tree_search)
+        workflow.add_node("simple_search", self.simple_search)  # 🔥 گره fallback
         workflow.add_node("aggregate_context", self.aggregate_context)
         workflow.add_node("analyze_results", self.analyze_results)
         workflow.add_node("synthesize_answer", self.synthesize_answer)
@@ -168,8 +170,18 @@ class AdvancedAgenticRAG:
         # مسیر برای سوالات متوسط
         workflow.add_edge("plan_strategy", "tree_search")
         
-        # جریان اصلی پردازش
-        workflow.add_edge("tree_search", "aggregate_context")
+        # 🔥 مسیریابی بعد از tree_search با fallback
+        workflow.add_conditional_edges(
+            "tree_search",
+            self.should_use_fallback,
+            {
+                "use_fallback": "simple_search",
+                "continue": "aggregate_context"
+            }
+        )
+        
+        # مسیر fallback
+        workflow.add_edge("simple_search", "aggregate_context")
         workflow.add_edge("aggregate_context", "analyze_results")
         workflow.add_edge("analyze_results", "synthesize_answer")
         workflow.add_edge("synthesize_answer", "reflect_on_answer")
@@ -225,8 +237,11 @@ class AdvancedAgenticRAG:
                 فقط یکی از این کلمات را برگردان: simple, moderate, complex
                 """)
                 
+                # 🔥 استفاده از Hybrid Model Strategy
+                model_to_use = self._get_fast_model() if settings.use_hybrid_model_strategy else settings.chat_model_loaded
+                
                 model = self.langchain_service._get_model(
-                    settings.chat_model_loaded,
+                    model_to_use,
                     max_tokens=10
                 )
                 
@@ -270,8 +285,11 @@ class AdvancedAgenticRAG:
                 فقط زیرسوالات مهم و ضروری را بنویس (حداکثر 3 تا).
                 """)
                 
+                # 🔥 استفاده از Fast Model برای decomposition
+                fast_model = self._get_fast_model()
+                
                 model = self.langchain_service._get_model(
-                    settings.chat_model_loaded,
+                    fast_model,
                     max_tokens=200
                 )
                 
@@ -356,8 +374,11 @@ class AdvancedAgenticRAG:
                 پاسخ خود را در 2-3 خط خلاصه کن.
                 """)
                 
+                # 🔥 استفاده از Fast Model برای planning
+                fast_model = self._get_fast_model()
+                
                 model = self.langchain_service._get_model(
-                    settings.chat_model_loaded,
+                    fast_model,
                     max_tokens=150
                 )
                 
@@ -385,6 +406,8 @@ class AdvancedAgenticRAG:
         - جستجو در گره‌های markdown
         - پیدا کردن والدین و فرزندان مرتبط
         - استخراج context کامل از درخت
+        
+        🔥 با fallback به simple_search در صورت خطا
         """
         with PerformanceLogger(logger, "tree_search"):
             logger.info(f"🌳 Performing tree-aware search")
@@ -415,12 +438,61 @@ class AdvancedAgenticRAG:
                     logger.info(f"📊 Tree context includes {len(state['tree_context'])} articles")
                 else:
                     logger.warning(f"⚠️ No results found for query")
+                    # 🔥 اگر نتیجه‌ای پیدا نشد، fallback flag را تنظیم کن
+                    state["errors"].append("tree_search_no_results")
                 
                 state["action_history"].append(AgentAction.TREE_SEARCH)
                 
             except Exception as e:
                 logger.error(f"❌ Tree search failed: {e}")
-                state["errors"].append(f"tree_search_error:{str(e)}")
+                logger.warning(f"🔄 Will fallback to simple search")
+                # 🔥 علامت‌گذاری برای fallback
+                state["errors"].append(f"tree_search_failed:{str(e)}")
+                state["needs_fallback"] = True
+            
+            return state
+    
+    async def simple_search(self, state: AgenticRAGState) -> AgenticRAGState:
+        """
+        جستجوی ساده با استفاده از RAG service معمولی
+        
+        🔥 این گره به عنوان fallback برای tree_search استفاده می‌شود
+        """
+        with PerformanceLogger(logger, "simple_search"):
+            logger.info(f"🔍 Performing simple RAG search (fallback mode)")
+            
+            try:
+                # استفاده از rag_service موجود برای جستجوی ساده
+                if self.rag_service:
+                    documents = await self.rag_service.retrieve_relevant_documents(
+                        state["query"],
+                        is_public_only=False
+                    )
+                    
+                    if documents:
+                        logger.info(f"✅ Found {len(documents)} documents via fallback")
+                        
+                        # تبدیل به فرمت TreeNode
+                        for doc in documents:
+                            node = TreeNode(
+                                node_id=doc.get("node_id", ""),
+                                title=doc.get("title", ""),
+                                level=1,
+                                content=doc.get("content", ""),
+                                parent_id="-1",
+                                path=doc.get("path", ""),
+                                article_id=doc.get("id", ""),
+                                score=doc.get("score", 0.5)
+                            )
+                            state["search_results"].append(node)
+                    else:
+                        logger.warning("⚠️ Simple search also returned no results")
+                
+                state["action_history"].append(AgentAction.SEARCH)
+                
+            except Exception as e:
+                logger.error(f"❌ Simple search also failed: {e}")
+                state["errors"].append(f"simple_search_error:{str(e)}")
             
             return state
     
@@ -484,17 +556,33 @@ class AdvancedAgenticRAG:
     async def _enrich_with_tree_context(self, nodes: List[TreeNode]) -> List[TreeNode]:
         """
         غنی‌سازی نتایج با context درختی (والدین و فرزندان)
+        
+        🔥 OPTIMIZED: استفاده از batch query برای جلوگیری از مشکل N+1
         """
         try:
             enriched_nodes = []
             
+            # 🔥 OPTIMIZATION 1: جمع‌آوری تمام parent_id های یکتا
+            parent_ids = set()
+            for node in nodes:
+                if node["parent_id"] and node["parent_id"] != "-1":
+                    parent_ids.add(node["parent_id"])
+            
+            # 🔥 OPTIMIZATION 2: فقط یک درخواست به Weaviate برای گرفتن تمام parents
+            parents_map = {}
+            if parent_ids:
+                logger.info(f"📊 Fetching {len(parent_ids)} parent nodes in single batch query...")
+                parents_map = await self._fetch_nodes_by_ids(list(parent_ids))
+                logger.info(f"✅ Fetched {len(parents_map)} parent nodes from Weaviate in a single query.")
+            
+            # 🔥 OPTIMIZATION 3: حلقه بدون درخواست اضافی
             for node in nodes:
                 # افزودن node اصلی
                 enriched_nodes.append(node)
                 
-                # اگر node والد دارد، آن را هم اضافه کن
+                # اگر node والد دارد، آن را از map بگیر
                 if node["parent_id"] and node["parent_id"] != "-1":
-                    parent = await self._fetch_node_by_id(node["parent_id"])
+                    parent = parents_map.get(node["parent_id"])
                     if parent:
                         parent["score"] = node["score"] * 0.7  # score کمتر برای والد
                         enriched_nodes.append(parent)
@@ -507,42 +595,66 @@ class AdvancedAgenticRAG:
             logger.error(f"❌ Tree context enrichment error: {e}")
             return nodes
     
-    async def _fetch_node_by_id(self, node_id: str) -> Optional[TreeNode]:
+    async def _fetch_nodes_by_ids(self, node_ids: List[str]) -> Dict[str, TreeNode]:
         """
-        دریافت یک گره با استفاده از node_id
+        دریافت چندین گره با استفاده از node_ids (batch query)
+        
+        🔥 OPTIMIZED: برای جلوگیری از N+1 Query Problem
+        
+        Args:
+            node_ids: لیست node_id ها
+        
+        Returns:
+            Dictionary mapping node_id to TreeNode
         """
         try:
             from app.infrastructure.connection_manager import weaviate_client
             from weaviate.classes.query import Filter
             
+            nodes_map = {}
+            
+            if not node_ids:
+                return nodes_map
+            
             with weaviate_client() as client:
                 collection = client.collections.get("MarkdownNode")
                 
-                # جستجو با filter
+                # 🔥 استفاده از contains_any برای batch query
                 response = collection.query.fetch_objects(
-                    filters=Filter.by_property("node_id").equal(node_id),
-                    limit=1
+                    filters=Filter.by_property("node_id").contains_any(node_ids),
+                    limit=len(node_ids)  # حداکثر به اندازه تعداد IDs
                 )
                 
-                if response.objects and len(response.objects) > 0:
-                    obj = response.objects[0]
-                    node = TreeNode(
-                        node_id=obj.properties.get("node_id", ""),
-                        title=obj.properties.get("title", ""),
-                        level=obj.properties.get("level", 1),
-                        content=obj.properties.get("content", ""),
-                        parent_id=obj.properties.get("parent_id", ""),
-                        path=obj.properties.get("path", ""),
-                        article_id=obj.properties.get("article_id", ""),
-                        score=0.5
-                    )
-                    return node
+                # ساخت map از نتایج
+                for obj in response.objects:
+                    node_id = obj.properties.get("node_id", "")
+                    if node_id:
+                        nodes_map[node_id] = TreeNode(
+                            node_id=node_id,
+                            title=obj.properties.get("title", ""),
+                            level=obj.properties.get("level", 1),
+                            content=obj.properties.get("content", ""),
+                            parent_id=obj.properties.get("parent_id", ""),
+                            path=obj.properties.get("path", ""),
+                            article_id=obj.properties.get("article_id", ""),
+                            score=0.5
+                        )
                 
-                return None
+                return nodes_map
             
         except Exception as e:
-            logger.error(f"❌ Node fetch error: {e}")
-            return None
+            logger.error(f"❌ Batch node fetch error: {e}")
+            return {}
+    
+    async def _fetch_node_by_id(self, node_id: str) -> Optional[TreeNode]:
+        """
+        دریافت یک گره با استفاده از node_id
+        
+        Note: این متد برای backward compatibility نگه داشته شده.
+        برای performance بهتر از _fetch_nodes_by_ids استفاده کنید.
+        """
+        nodes_map = await self._fetch_nodes_by_ids([node_id])
+        return nodes_map.get(node_id)
     
     async def aggregate_context(self, state: AgenticRAGState) -> AgenticRAGState:
         """
@@ -663,10 +775,14 @@ class AdvancedAgenticRAG:
                 else:
                     query_text = history_text + original_query
                 
-                # تولید پاسخ با context کامل
+                # 🔥 تولید پاسخ با context کامل - استفاده از Power Model
+                power_model = self._get_power_model()
+                logger.info(f"🎯 Using power model for synthesis: {power_model}")
+                
                 response = await self.langchain_service.generate_rag_response(
                     query_text,
-                    context
+                    context,
+                    custom_model=power_model
                 )
                 
                 state["final_response"] = response
@@ -739,6 +855,26 @@ class AdvancedAgenticRAG:
             
             return state
     
+    def _get_fast_model(self) -> str:
+        """
+        دریافت مدل سریع برای وظایف ساده
+        
+        🔥 Hybrid Model Strategy: برای کاهش هزینه و افزایش سرعت
+        """
+        if settings.use_hybrid_model_strategy and settings.agentic_fast_model:
+            return settings.agentic_fast_model
+        return settings.chat_model_loaded
+    
+    def _get_power_model(self) -> str:
+        """
+        دریافت مدل قدرتمند برای وظایف پیچیده
+        
+        🔥 Hybrid Model Strategy: برای کیفیت بالاتر در وظایف مهم
+        """
+        if settings.use_hybrid_model_strategy and settings.agentic_power_model:
+            return settings.agentic_power_model
+        return settings.rag_model_loaded
+    
     def _calculate_confidence(self, state: AgenticRAGState) -> float:
         """
         محاسبه confidence score بر اساس کیفیت نتایج
@@ -764,6 +900,25 @@ class AdvancedAgenticRAG:
             base_confidence *= 0.8
         
         return min(base_confidence, 1.0)
+    
+    def should_use_fallback(self, state: AgenticRAGState) -> str:
+        """
+        تصمیم‌گیری برای استفاده از fallback
+        
+        🔥 اگر tree_search شکست خورد یا نتیجه‌ای پیدا نکرد، به simple_search هدایت می‌شود
+        """
+        # بررسی flag نیاز به fallback
+        if state.get("needs_fallback", False):
+            logger.info("🔄 Tree search failed, using fallback to simple search")
+            return "use_fallback"
+        
+        # بررسی اینکه آیا نتیجه‌ای پیدا شده یا نه
+        if not state["search_results"] or len(state["search_results"]) == 0:
+            logger.info("🔄 No results from tree search, using fallback")
+            return "use_fallback"
+        
+        logger.info("✅ Tree search successful, continuing normally")
+        return "continue"
     
     def route_by_complexity(self, state: AgenticRAGState) -> str:
         """
@@ -837,7 +992,8 @@ class AdvancedAgenticRAG:
                 "reflection_notes": [],
                 "errors": [],
                 "retry_count": 0,
-                "max_retries": 1
+                "max_retries": 1,
+                "needs_fallback": False  # 🔥 مدیریت fallback
             }
             
             try:

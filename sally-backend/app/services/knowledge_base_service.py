@@ -620,6 +620,363 @@ class KnowledgeBaseService:
             text = re.sub(r'<[^>]+>', '', text)
             return text.strip()
 
+    # =============== CATEGORY MANAGEMENT METHODS ===============
+
+    async def create_category(
+        self,
+        name: str,
+        slug: str,
+        description: Optional[str] = None,
+        parent_id: Optional[str] = None,
+        is_public: bool = True
+    ) -> Category:
+        """
+        ایجاد دسته‌بندی جدید
+        
+        Args:
+            name: نام دسته‌بندی
+            slug: شناسه URL-friendly (باید یکتا باشد)
+            description: توضیحات دسته‌بندی
+            parent_id: شناسه دسته‌بندی والد (اختیاری)
+            is_public: آیا عمومی است؟
+            
+        Returns:
+            دسته‌بندی ایجاد شده
+        """
+        try:
+            # بررسی یکتا بودن slug
+            existing = await Category.find_one(Category.slug == slug)
+            if existing:
+                raise ValueError(f"دسته‌بندی با slug '{slug}' قبلاً وجود دارد")
+            
+            # ایجاد دسته‌بندی جدید
+            category = Category(
+                name=name,
+                slug=slug,
+                description=description,
+                is_public=is_public
+            )
+            
+            # تنظیم parent اگر وجود داشته باشد
+            if parent_id:
+                parent = await Category.get(parent_id)
+                if parent:
+                    category.parent = parent
+                else:
+                    raise ValueError(f"دسته‌بندی والد با ID '{parent_id}' یافت نشد")
+            
+            await category.insert()
+            await category.update_ancestors()
+            await category.save()
+            
+            logger.info(f"✅ دسته‌بندی '{name}' ایجاد شد - ID: {category.id}")
+            return category
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در ایجاد دسته‌بندی: {str(e)}")
+            raise
+
+    async def get_category_by_id(self, category_id: str) -> Optional[Category]:
+        """دریافت دسته‌بندی با ID"""
+        try:
+            return await Category.get(category_id)
+        except Exception as e:
+            logger.error(f"❌ خطا در دریافت دسته‌بندی: {str(e)}")
+            return None
+
+    async def get_category_by_slug(self, slug: str) -> Optional[Category]:
+        """دریافت دسته‌بندی با slug"""
+        try:
+            return await Category.find_one(Category.slug == slug)
+        except Exception as e:
+            logger.error(f"❌ خطا در دریافت دسته‌بندی: {str(e)}")
+            return None
+
+    async def get_all_categories(
+        self,
+        is_public_only: bool = False,
+        parent_id: Optional[str] = None
+    ) -> List[Category]:
+        """
+        دریافت همه دسته‌بندی‌ها
+        
+        Args:
+            is_public_only: فقط دسته‌بندی‌های عمومی
+            parent_id: فیلتر بر اساس والد (None = root categories)
+            
+        Returns:
+            لیست دسته‌بندی‌ها
+        """
+        try:
+            query = {}
+            
+            if is_public_only:
+                query["is_public"] = True
+            
+            if parent_id:
+                parent = await Category.get(parent_id)
+                query["parent.$id"] = parent.id
+            elif parent_id is None:
+                # فقط root categories (بدون والد)
+                query["parent"] = None
+            
+            categories = await Category.find(query).to_list()
+            return categories
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در دریافت دسته‌بندی‌ها: {str(e)}")
+            return []
+
+    async def update_category(
+        self,
+        category_id: str,
+        name: Optional[str] = None,
+        slug: Optional[str] = None,
+        description: Optional[str] = None,
+        parent_id: Optional[str] = None,
+        is_public: Optional[bool] = None,
+        update_articles: bool = True
+    ) -> Category:
+        """
+        به‌روزرسانی دسته‌بندی
+        
+        Args:
+            category_id: شناسه دسته‌بندی
+            name: نام جدید (اختیاری)
+            slug: slug جدید (اختیاری)
+            description: توضیحات جدید (اختیاری)
+            parent_id: والد جدید (اختیاری)
+            is_public: وضعیت عمومی بودن
+            update_articles: آیا مقالات هم به‌روز شوند؟
+            
+        Returns:
+            دسته‌بندی به‌روز شده
+        """
+        try:
+            category = await Category.get(category_id)
+            if not category:
+                raise ValueError(f"دسته‌بندی با ID '{category_id}' یافت نشد")
+            
+            old_name = category.name
+            old_slug = category.slug
+            
+            # به‌روزرسانی فیلدها
+            if name is not None:
+                category.name = name
+            
+            if slug is not None and slug != old_slug:
+                # بررسی یکتا بودن slug جدید
+                existing = await Category.find_one(Category.slug == slug)
+                if existing and str(existing.id) != category_id:
+                    raise ValueError(f"دسته‌بندی با slug '{slug}' قبلاً وجود دارد")
+                category.slug = slug
+            
+            if description is not None:
+                category.description = description
+            
+            if is_public is not None:
+                category.is_public = is_public
+            
+            if parent_id is not None:
+                if parent_id == "":  # حذف والد
+                    category.parent = None
+                else:
+                    parent = await Category.get(parent_id)
+                    if not parent:
+                        raise ValueError(f"دسته‌بندی والد با ID '{parent_id}' یافت نشد")
+                    
+                    # جلوگیری از circular reference
+                    if str(parent.id) == category_id:
+                        raise ValueError("دسته‌بندی نمی‌تواند والد خودش باشد")
+                    
+                    category.parent = parent
+            
+            await category.update_ancestors()
+            await category.save()
+            
+            logger.info(f"✅ دسته‌بندی '{old_name}' به‌روز شد")
+            
+            # به‌روزرسانی مقالات مرتبط اگر نام یا slug تغییر کرده باشد
+            if update_articles and (name != old_name or slug != old_slug):
+                await self._update_articles_category(category_id, category.name, category.slug)
+            
+            return category
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در به‌روزرسانی دسته‌بندی: {str(e)}")
+            raise
+
+    async def _update_articles_category(self, category_id: str, new_name: str, new_slug: str):
+        """به‌روزرسانی اطلاعات دسته‌بندی در تمام مقالات مرتبط"""
+        try:
+            from app.domain.entities import ArticleCategory
+            
+            # پیدا کردن تمام مقالاتی که این دسته‌بندی را دارند
+            articles = await KnowledgeBaseArticle.find(
+                {"category.id": category_id}
+            ).to_list()
+            
+            updated_count = 0
+            for article in articles:
+                if article.category:
+                    article.category = ArticleCategory(
+                        id=category_id,
+                        name=new_name,
+                        slug=new_slug
+                    )
+                    await article.save()
+                    updated_count += 1
+            
+            logger.info(f"✅ {updated_count} مقاله با اطلاعات دسته‌بندی جدید به‌روز شدند")
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در به‌روزرسانی مقالات: {str(e)}")
+
+    async def delete_category(
+        self,
+        category_id: str,
+        cascade: bool = False,
+        move_to_parent: bool = True
+    ) -> Dict[str, Any]:
+        """
+        حذف دسته‌بندی
+        
+        Args:
+            category_id: شناسه دسته‌بندی
+            cascade: اگر True باشد، زیردسته‌ها و مقالات هم حذف می‌شوند
+            move_to_parent: اگر True باشد، زیردسته‌ها به والد منتقل می‌شوند
+            
+        Returns:
+            اطلاعات عملیات حذف
+        """
+        try:
+            category = await Category.get(category_id)
+            if not category:
+                raise ValueError(f"دسته‌بندی با ID '{category_id}' یافت نشد")
+            
+            # بررسی زیردسته‌ها
+            children = await Category.find({"parent.$id": category.id}).to_list()
+            
+            # بررسی مقالات مرتبط
+            articles = await KnowledgeBaseArticle.find(
+                {"category.id": category_id}
+            ).to_list()
+            
+            result = {
+                "category_name": category.name,
+                "children_count": len(children),
+                "articles_count": len(articles),
+                "deleted_categories": [category_id],
+                "affected_articles": [],
+                "moved_children": []
+            }
+            
+            # مدیریت زیردسته‌ها
+            if children:
+                if cascade:
+                    # حذف تمام زیردسته‌ها به صورت بازگشتی
+                    for child in children:
+                        child_result = await self.delete_category(
+                            str(child.id),
+                            cascade=True,
+                            move_to_parent=False
+                        )
+                        result["deleted_categories"].extend(child_result["deleted_categories"])
+                        result["affected_articles"].extend(child_result["affected_articles"])
+                        
+                elif move_to_parent:
+                    # انتقال زیردسته‌ها به والد این دسته‌بندی
+                    for child in children:
+                        child.parent = category.parent
+                        await child.update_ancestors()
+                        await child.save()
+                        result["moved_children"].append(str(child.id))
+                        logger.info(f"📦 زیردسته '{child.name}' به والد منتقل شد")
+                else:
+                    raise ValueError(
+                        f"این دسته‌بندی {len(children)} زیردسته دارد. "
+                        "برای حذف باید cascade=True یا move_to_parent=True باشد"
+                    )
+            
+            # مدیریت مقالات
+            if articles:
+                if cascade:
+                    # حذف تمام مقالات
+                    for article in articles:
+                        await article.delete()
+                        result["affected_articles"].append({
+                            "id": str(article.id),
+                            "title": article.title,
+                            "action": "deleted"
+                        })
+                    logger.info(f"🗑️ {len(articles)} مقاله حذف شدند")
+                else:
+                    # حذف category از مقالات
+                    for article in articles:
+                        article.category = None
+                        await article.save()
+                        result["affected_articles"].append({
+                            "id": str(article.id),
+                            "title": article.title,
+                            "action": "category_removed"
+                        })
+                    logger.info(f"📝 دسته‌بندی از {len(articles)} مقاله حذف شد")
+            
+            # حذف دسته‌بندی
+            await category.delete()
+            logger.info(f"✅ دسته‌بندی '{category.name}' حذف شد")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در حذف دسته‌بندی: {str(e)}")
+            raise
+
+    async def get_category_tree(self, is_public_only: bool = False) -> List[Dict[str, Any]]:
+        """
+        دریافت درخت کامل دسته‌بندی‌ها
+        
+        Returns:
+            درخت سلسله‌مراتبی دسته‌بندی‌ها
+        """
+        try:
+            # دریافت تمام دسته‌بندی‌ها
+            query = {"is_public": True} if is_public_only else {}
+            all_categories = await Category.find(query).to_list()
+            
+            # ساخت mapping از ID به category
+            categories_map = {str(cat.id): cat for cat in all_categories}
+            
+            # ساخت درخت
+            def build_tree_node(category: Category) -> Dict[str, Any]:
+                node = {
+                    "id": str(category.id),
+                    "name": category.name,
+                    "slug": category.slug,
+                    "description": category.description,
+                    "is_public": category.is_public,
+                    "children": []
+                }
+                
+                # پیدا کردن فرزندان
+                for cat_id, cat in categories_map.items():
+                    if cat.parent and str(cat.parent.ref.id) == str(category.id):
+                        node["children"].append(build_tree_node(cat))
+                
+                return node
+            
+            # ساخت درخت از root categories
+            tree = []
+            for category in all_categories:
+                if not category.parent:
+                    tree.append(build_tree_node(category))
+            
+            return tree
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در ساخت درخت دسته‌بندی: {str(e)}")
+            return []
+
 
 # =============== HELPER FUNCTIONS (Shared across modules) ===============
 
