@@ -315,7 +315,7 @@ const AdminUsersPage: React.FC = () => {
         </DropdownMenu>
       ),
     }),
-  ], [])
+  ], [dropdownOpen])
 
   const table = useReactTable({
     data: users,
@@ -337,6 +337,7 @@ const AdminUsersPage: React.FC = () => {
   useEffect(() => {
     // لود نقش‌ها در اولین رندر
     fetchRoles()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -354,7 +355,8 @@ const AdminUsersPage: React.FC = () => {
     } else {
       console.log("⏳ Waiting for auth to complete...");
     }
-  }, [globalFilter, table.getColumn('is_active')?.getFilterValue(), table.getColumn('role')?.getFilterValue(), authLoading, isAuthenticated, user])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalFilter, authLoading, isAuthenticated, user])
 
   // Real-time updates - poll every 30 seconds
   useEffect(() => {
@@ -365,6 +367,7 @@ const AdminUsersPage: React.FC = () => {
 
       return () => clearInterval(interval)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isAuthenticated, user])
 
   const handleAddUser = () => {

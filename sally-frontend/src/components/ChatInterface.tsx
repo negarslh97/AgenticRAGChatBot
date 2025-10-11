@@ -151,6 +151,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
     const isUser = message.sender_type !== 'ai'
     const sources = message.metadata?.sources || []
     const suggestedActions = message.metadata?.suggested_actions || []
+    const canGetMoreDetails = message.metadata?.can_get_more_details || false
+    const ragType = message.metadata?.rag_type || 'simple'
 
     return (
       <div key={message.id} className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
@@ -174,7 +176,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
             </div>
           )}
 
-          {!isUser && suggestedActions.length > 0 && (
+          {!isUser && (suggestedActions.length > 0 || canGetMoreDetails) && (
             <div className="mt-2 pt-2 border-t border-border">
               <p className="text-xs text-muted-foreground mb-1">اقدامات پیشنهادی:</p>
               <div className="flex flex-wrap gap-1">
@@ -187,6 +189,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
                     {formatActionText(action)}
                   </button>
                 ))}
+                {canGetMoreDetails && (
+                  <button
+                    className="text-xs bg-primary text-primary-foreground px-2 py-1 rounded hover:opacity-80 transition-opacity"
+                    onClick={() => handleGetMoreDetails(message)}
+                  >
+                    توضیحات کامل
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -195,6 +205,75 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
         </div>
       </div>
     )
+  }
+
+  const handleGetMoreDetails = async (aiMessage: ChatMessage) => {
+    // Find the previous user message in the conversation
+    const aiMessageIndex = messages.findIndex(msg => msg.id === aiMessage.id)
+    if (aiMessageIndex <= 0) {
+      toast.error("Unable to find the original question")
+      return
+    }
+
+    const userMessage = messages[aiMessageIndex - 1]
+    if (userMessage.sender_type === 'ai') {
+      toast.error("Unable to find the original question")
+      return
+    }
+
+    // Add a temporary message indicating we're getting detailed response
+    const tempMessage: ChatMessage = {
+      id: `temp_detailed_${Date.now()}`,
+      content: "در حال دریافت توضیحات کامل...",
+      sender_type: "ai" as const,
+      created_at: new Date().toISOString(),
+    }
+
+    setMessages((prev) => [...prev, tempMessage])
+    setLoading(true)
+
+    try {
+      const guestSessionIdToSend = user ? undefined : guestSessionId
+
+      const response: ChatResponse = await chatService.sendMessage({
+        content: userMessage.content,
+        conversation_id: conversationId,
+        guest_session_id: guestSessionIdToSend,
+        rag_type: "detailed"
+      })
+
+      // Update conversation ID if this is a new conversation
+      if (!conversationId && onNewConversation) {
+        onNewConversation(response.conversation_id)
+      }
+
+      const detailedMessage: ChatMessage = {
+        id: response.message_id,
+        content: response.message,
+        sender_type: "ai" as const,
+        created_at: new Date().toISOString(),
+        metadata: {
+          sources: response.sources,
+          confidence: response.confidence,
+          suggested_actions: response.suggested_actions,
+          rag_type: "detailed",
+          can_get_more_details: false, // Detailed response doesn't need more details
+        },
+      }
+
+      // Replace the temporary message with the detailed response
+      setMessages((prev) => [
+        ...prev.filter((msg) => msg.id !== tempMessage.id),
+        detailedMessage,
+      ])
+
+      toast.success("توضیحات کامل دریافت شد")
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Failed to get detailed response")
+      setMessages((prev) => prev.filter((msg) => msg.id !== tempMessage.id)) // Remove temp message
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSuggestedAction = (action: string) => {

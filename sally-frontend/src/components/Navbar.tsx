@@ -10,7 +10,7 @@ interface NavbarProps {
 }
 
 const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
-  const { user, logout, isAuthenticated, isAdmin } = useAuth()
+  const { user, logout, isAuthenticated } = useAuth()
 
   const handleLogout = () => {
     logout()

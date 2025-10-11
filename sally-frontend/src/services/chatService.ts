@@ -24,6 +24,8 @@ export interface ChatMessage {
     }>
     confidence?: number
     suggested_actions?: string[]
+    rag_type?: 'simple' | 'detailed'
+    can_get_more_details?: boolean
     model_name?: string
     provider?: string
     token_usage?: {
@@ -80,12 +82,13 @@ export const chatService = {
   // Base URL for API (needed for some direct fetch calls)
   API_BASE_URL: '',  // Will use relative URLs with api interceptor
   
-  async sendMessage(data: { content: string; conversation_id?: string | null; guest_session_id?: string | null }): Promise<ChatResponse> {
+  async sendMessage(data: { content: string; conversation_id?: string | null; guest_session_id?: string | null; rag_type?: 'simple' | 'detailed' }): Promise<ChatResponse> {
     // Use the same api instance that has the Authorization interceptor
     const requestData = {
       content: data.content,
       conversation_id: data.conversation_id,
       guest_session_id: data.guest_session_id,
+      rag_type: data.rag_type || 'simple',
     }
     
     try {

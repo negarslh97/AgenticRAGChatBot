@@ -15,12 +15,6 @@ const ArticleEditPage: React.FC = () => {
   const [article, setArticle] = useState<Article | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (articleId) {
-      loadArticle()
-    }
-  }, [articleId])
-
   const loadArticle = async () => {
     try {
       const articleData = await knowledgeBaseService.getArticleByAdmin(articleId!)
@@ -33,6 +27,13 @@ const ArticleEditPage: React.FC = () => {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (articleId) {
+      loadArticle()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articleId])
 
   const handleSave = () => {
     toast.success("مقاله با موفقیت بروزرسانی شد")

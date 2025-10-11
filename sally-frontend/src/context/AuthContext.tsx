@@ -108,7 +108,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }
 
   const register = async (email: string, password: string, fullName: string) => {
-    const userData = await authService.register(email, password, fullName)
+    await authService.register(email, password, fullName)
     // After registration, user needs to login
     const loginResponse = await login(email, password)
     return { user: loginResponse.user }
@@ -135,11 +135,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     hasUser: !!user,
     userTypeType: typeof userType
   })
-
-  // Additional check to ensure these values are never undefined
-  const safeIsAuthenticated = !!user
-  const safeIsAdmin = userType ? (userType === "Admin" || userType === "SuperAdmin") : false
-  const safeIsSuperAdmin = userType ? userType === "SuperAdmin" : false
 
   const getDashboardByRole = (role: string): string => {
     switch (role) {

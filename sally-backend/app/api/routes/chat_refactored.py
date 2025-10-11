@@ -30,7 +30,8 @@ class ChatMessage(BaseModel):
     content: str
     conversation_id: Optional[str] = None
     guest_session_id: Optional[str] = None
-    
+    rag_type: str = "simple"  # 🆕 "simple" or "detailed" for two-speed RAG
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -98,12 +99,17 @@ async def send_message(
         if not current_user and not message.guest_session_id:
             raise HTTPException(status_code=400, detail="guest_session_id is required for guest users")
         
+        # Validate RAG type
+        if message.rag_type not in ["simple", "detailed"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple' or 'detailed'")
+
         response = await ChatUseCases.send_message(
             content=message.content,
             user=current_user,
             user_type=user_type,
             conversation_id=message.conversation_id,
-            guest_session_id=message.guest_session_id
+            guest_session_id=message.guest_session_id,
+            rag_type=message.rag_type
         )
         
         return ChatResponse(**response)

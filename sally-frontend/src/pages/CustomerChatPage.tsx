@@ -13,15 +13,13 @@ import {
   Brain,
   Target,
   ExternalLink,
-  ThumbsUp,
-  ThumbsDown,
   Menu,
   X
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
 import { MarkdownRenderer } from '../components/ui/markdown-renderer'
-import { chatService, Conversation as ApiConversation } from '../services/chatService'
+import { chatService } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
 import ArticleHighlightModal from '../components/ArticleHighlightModal'
@@ -74,8 +72,6 @@ interface Conversation {
   updated_at?: string
 }
 
-type RAGType = 'simple' | 'agentic'
-
 const CustomerChatPage = () => {
   const { user } = useAuth()
   const [isSidebarOpen, setIsSidebarOpen] = useState(false) // ✅ Default: closed on mobile
@@ -87,7 +83,7 @@ const CustomerChatPage = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [guestSessionId, setGuestSessionId] = useState<string | null>(null)
   const ragType = 'agentic' // ✅ همیشه Agentic برای مشتریان
-  const [useStreaming, setUseStreaming] = useState(true) // 🌊 Streaming enabled by default
+  const useStreaming = true // 🌊 Streaming enabled by default
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   // 🔥 Article Highlight Modal state
@@ -247,7 +243,6 @@ const CustomerChatPage = () => {
       if (useStreaming) {
         let streamedContent = ''
         let conversationId = selectedConversation?.id?.startsWith('temp_') ? undefined : selectedConversation?.id
-        let messageMetadata: any = {}
         
         // Create AI message placeholder
         const aiMessageId = `msg_${Date.now()}`
@@ -288,7 +283,6 @@ const CustomerChatPage = () => {
             }))
             setTimeout(scrollToBottom, 10)
           } else if (evt.type === 'metadata') {
-            messageMetadata = evt
             setSelectedConversation(prev => ({
               ...prev!,
               id: conversationId || prev!.id,

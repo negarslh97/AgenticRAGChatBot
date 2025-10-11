@@ -1107,8 +1107,14 @@ class SimpleRAGService(RAGService):
                 
                 # Get conversation history from context
                 conversation_history = context.get("conversation_history", []) if context else []
-                
-                rag_response = await self._generate_openai_response(query, context_text, conversation_history)
+
+                # 🔥 فراخوانی با پرامپت مخصوص Simple RAG
+                rag_response = await self._generate_openai_response(
+                    query,
+                    context_text,
+                    conversation_history,
+                    prompt_name="simple_rag_response"
+                )
                 logger.info(f"✅ RAG response generated successfully")
                 logger.info(f"📄 Response preview: '{rag_response[:100]}...'")
                 
@@ -1168,13 +1174,13 @@ class SimpleRAGService(RAGService):
             "confidence": 0.0
         }
     
-    async def _generate_openai_response(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
+    async def _generate_openai_response(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None, prompt_name: str = "rag_response") -> str:
         """Generate response using LangChain."""
         from app.infrastructure.langchain_utils import langchain_service
 
         try:
-            logger.info(f"_generate_openai_response: Using LangChain RAG model for query '{query[:50]}...'")
-            return await langchain_service.generate_rag_response(query, context, conversation_history)
+            logger.info(f"_generate_openai_response: Using LangChain with prompt '{prompt_name}' for query '{query[:50]}...'")
+            return await langchain_service.generate_rag_response(query, context, conversation_history, prompt_name=prompt_name)
         except Exception as e:
             logger.error(f"_generate_openai_response: LangChain error for query '{query[:50]}...': {str(e)}")
             # Fallback response
@@ -1391,10 +1397,21 @@ class AgenticRAGService(RAGService):
 
 
 # Service factory
-def get_rag_service(user: Optional[Union['Customer', 'Admin']] = None) -> RAGService:
-    """Get appropriate RAG service based on user type."""
-    if user:
-        # Check if user is authenticated (has an id attribute)
+def get_rag_service(
+    user: Optional[Union['Customer', 'Admin']] = None,
+    rag_type: str = "simple"  # 🆕 پارامتر جدید برای کنترل نوع RAG
+) -> RAGService:
+    """Get appropriate RAG service based on user type AND requested RAG type."""
+
+    # برای کاربران مهمان، همیشه Simple RAG است (به دلایل امنیتی)
+    if not user:
+        logger.info("🔧 No user provided, defaulting to SimpleRAGService.")
+        return SimpleRAGService()
+
+    # برای کاربران احراز هویت شده، بر اساس rag_type تصمیم بگیر
+    if rag_type == "agentic" or rag_type == "detailed":
+        logger.info(f"🔧 User is authenticated and requested '{rag_type}', providing AgenticRAGService.")
         return AgenticRAGService()
-    else:
+    else:  # simple
+        logger.info(f"🔧 User is authenticated but requested 'simple', providing SimpleRAGService.")
         return SimpleRAGService()

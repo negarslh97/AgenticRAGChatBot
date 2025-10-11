@@ -19,25 +19,24 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Lightbulb,
-  HelpCircle,
   Trash2,
   Search,
   Zap,
   Brain,
+  BookOpen,
   X,
   ExternalLink,
   Menu,
   Target,
-  Edit2,
   Settings,
   Cpu,
-  Thermometer
+  Thermometer,
+  Sparkles
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
 import { MarkdownRenderer } from '../components/ui/markdown-renderer'
-import { chatService, Conversation as ApiConversation, ChatMessage } from '../services/chatService'
+import { chatService } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
 import ArticleHighlightModal from '../components/ArticleHighlightModal'
@@ -65,10 +64,11 @@ interface Message {
       completion_tokens?: number
       total_tokens?: number
     }
-    rag_type?: 'simple' | 'agentic'
+    rag_type?: 'simple' | 'agentic' | 'detailed'
     complexity?: string
     complexity_fa?: string
     model?: string
+    can_get_more_details?: boolean  // 🔥 فیلد جدید برای نمایش دکمه توضیحات کامل
   }
   sources?: Array<{ title: string; id: string }>
   confidence?: number
@@ -83,10 +83,11 @@ interface Conversation {
   messages: Message[]
   created_at?: string
   updated_at?: string
-  rag_type?: 'simple' | 'agentic'
+  rag_type?: 'simple' | 'agentic' | 'detailed'
 }
 
-type RAGType = 'simple' | 'agentic'
+type RAGType = 'simple' | 'agentic' | 'detailed'
+type AdminRAGType = 'simple' | 'agentic'
 
 // 🤖 لیست مدل‌های موجود
 const AVAILABLE_MODELS = [
@@ -125,10 +126,8 @@ const SuperAdminChatPage = () => {
     const [newMessage, setNewMessage] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [isInitialLoading, setIsInitialLoading] = useState(true)
-    const [editingTitle, setEditingTitle] = useState<string | null>(null)
-    const [newTitle, setNewTitle] = useState('')
     const [searchQuery, setSearchQuery] = useState('')
-    const [ragType, setRagType] = useState<RAGType>('simple')
+    const [ragType, setRagType] = useState<AdminRAGType>('simple')
     const [selectedArticle, setSelectedArticle] = useState<{id: string, title: string, content: string} | null>(null)
     const [showSettingsModal, setShowSettingsModal] = useState(false)
     const [selectedModel, setSelectedModel] = useState<string>('google/gemini-2.5-flash')  // 🏆 سریع‌ترین و بهترین مدل برای RAG
@@ -313,7 +312,12 @@ const SuperAdminChatPage = () => {
                                         id: evt.message_id || assistantTempId, 
                                         content: evt.full_response || m.content,
                                         complexity_fa: evt.complexity_fa,
-                                        model: evt.model
+                                        model: evt.model,
+                                        metadata: {
+                                            ...(m.metadata || {}),
+                                            rag_type: evt.rag_type,
+                                            can_get_more_details: evt.can_get_more_details || false  // 🔥 فیلد کلیدی برای نمایش دکمه
+                                        }
                                     }
                                     : m
                             );
@@ -474,11 +478,15 @@ const SuperAdminChatPage = () => {
     )
 
     const getRagTypeIcon = (type: RAGType) => {
-        return type === 'simple' ? <Zap className="h-4 w-4" /> : <Brain className="h-4 w-4" />
+        if (type === 'simple') return <Zap className="h-4 w-4" />
+        if (type === 'detailed') return <BookOpen className="h-4 w-4" />
+        return <Brain className="h-4 w-4" />
     }
 
     const getRagTypeLabel = (type: RAGType) => {
-        return type === 'simple' ? 'Simple RAG' : 'Agentic RAG'
+        if (type === 'simple') return 'Simple RAG'
+        if (type === 'detailed') return 'Detailed RAG'
+        return 'Agentic RAG'
     }
 
     if (isInitialLoading) {
@@ -1085,6 +1093,43 @@ const SuperAdminChatPage = () => {
                                                         </div>
                                                     </div>
                                                 )}
+                                            
+                                            {/* Get More Details Button */}
+                                            {message.role === 'assistant' && message.metadata?.can_get_more_details && (
+                                                <div className="mt-3">
+                                                    <button
+                                                        onClick={async () => {
+                                                            // ارسال مجدد همان سوال با rag_type="agentic" برای دریافت جزئیات بیشتر
+                                                            if (!userQuery) {
+                                                                toast.error('سوال اصلی یافت نشد');
+                                                                return;
+                                                            }
+                                                            
+                                                            console.log('🔥 Getting more details for query:', userQuery);
+                                                            console.log('🔥 Current rag_type:', ragType, '-> switching to: agentic');
+                                                            
+                                                            // تنظیم موقت rag_type به agentic
+                                                            const previousRagType = ragType;
+                                                            setRagType('agentic');
+                                                            
+                                                            // ارسال سوال با rag_type جدید
+                                                            setNewMessage(userQuery);
+                                                            
+                                                            // کمی صبر کنیم تا state به‌روز شود
+                                                            setTimeout(async () => {
+                                                                await handleSendMessage();
+                                                                // برگرداندن rag_type به حالت قبلی
+                                                                setRagType(previousRagType);
+                                                            }, 100);
+                                                        }}
+                                                        disabled={isLoading}
+                                                        className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg"
+                                                    >
+                                                        <Sparkles className="w-4 h-4" />
+                                                        توضیحات کامل
+                                                    </button>
+                                                </div>
+                                            )}
                                             
                                             {/* Timestamp */}
                                             <p className={`text-xs text-gray-500 mt-2 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>

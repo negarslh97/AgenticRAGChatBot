@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { knowledgeBaseService, type FileUploadResponse } from "../services/knowledgeBaseService"
@@ -12,13 +12,12 @@ import { ArrowRight, Upload, FileText, FileImage, File, CheckCircle, AlertCircle
 
 const SuperAdminUploadPage: React.FC = () => {
   const navigate = useNavigate()
-  const { user, isSuperAdmin, loading: authLoading } = useAuth()
+  const { isSuperAdmin, loading: authLoading } = useAuth()
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadResult, setUploadResult] = useState<FileUploadResponse | null>(null)
   const [dragActive, setDragActive] = useState(false)
-  const [hasNavigated, setHasNavigated] = useState(false)
   const [creatingArticle, setCreatingArticle] = useState(false)
 
   // AuthGuard authentication را چک می‌کند، نیازی به چک مجدد نیست

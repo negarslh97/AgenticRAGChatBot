@@ -167,17 +167,6 @@ const AdminPanel: React.FC = () => {
     ? articles.filter(article => article.status === selectedStatus)
     : articles
 
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "draft": return "پیش‌نویس"
-      case "published": return "منتشر شده"
-      case "archived": return "بایگانی شده"
-      default: return status
-    }
-  }
-
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}

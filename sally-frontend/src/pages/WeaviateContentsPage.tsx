@@ -55,12 +55,6 @@ const WeaviateContentsPage: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<NodeDetails | null>(null)
   const [nodeDetailsLoading, setNodeDetailsLoading] = useState(false)
 
-  useEffect(() => {
-    if (!authLoading && isSuperAdmin && user) {
-      loadContents()
-    }
-  }, [authLoading, isSuperAdmin, user, limit])
-
   const loadContents = async () => {
     setLoading(true)
     try {
@@ -73,6 +67,13 @@ const WeaviateContentsPage: React.FC = () => {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!authLoading && isSuperAdmin && user) {
+      loadContents()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, isSuperAdmin, user, limit])
 
   const toggleArticleExpand = (articleId: string) => {
     const newExpanded = new Set(expandedArticles)

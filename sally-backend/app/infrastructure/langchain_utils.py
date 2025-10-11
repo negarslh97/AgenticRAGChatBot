@@ -480,13 +480,14 @@ class LangChainService:
             yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم."
 
     async def generate_rag_response(
-        self, 
-        query: str, 
-        context: str, 
+        self,
+        query: str,
+        context: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         custom_model: Optional[str] = None,
         custom_temperature: Optional[float] = None,
-        query_type: str = "general"  # 🎯 نوع سوال: specific, general, explanation
+        query_type: str = "general",  # 🎯 نوع سوال: specific, general, explanation
+        prompt_name: str = "rag_response"  # 🆕 پارامتر جدید برای نام پرامپت
     ) -> str:
         """
         Generate a RAG response using AI - uses provided context and conversation history.
@@ -574,7 +575,7 @@ class LangChainService:
 """
 
             # 🔥 استفاده از prompt template جداگانه
-            prompt_template = get_prompt("rag_response")
+            prompt_template = get_prompt(prompt_name)
             prompt = ChatPromptTemplate.from_template(prompt_template)
 
             chain = prompt | model
@@ -705,13 +706,14 @@ class LangChainService:
             yield "متأسفانه در حال حاضر نمی‌توانم به پیام شما پاسخ دهم."
     
     async def generate_rag_response_stream(
-        self, 
-        query: str, 
+        self,
+        query: str,
         context: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         custom_model: Optional[str] = None,
         custom_temperature: Optional[float] = None,
-        query_type: str = "general"  # 🎯 نوع سوال: specific, general, explanation
+        query_type: str = "general",  # 🎯 نوع سوال: specific, general, explanation
+        prompt_name: str = "rag_response"  # 🆕 پارامتر جدید برای نام پرامپت
     ):
         """
         Generate a streaming RAG response using AI - STRICT MODE: Only use provided context.
@@ -791,9 +793,9 @@ class LangChainService:
 """
             
             # 🔥 استفاده از prompt template جداگانه
-            prompt_template = get_prompt("rag_response")
+            prompt_template = get_prompt(prompt_name)
             prompt = ChatPromptTemplate.from_template(prompt_template)
-            
+
             # Build conversation history text
             history_text = ""
             if conversation_history and len(conversation_history) > 0:

@@ -303,7 +303,7 @@ const CustomerUsersPage: React.FC = () => {
         </DropdownMenu>
       ),
     }),
-  ], [])
+  ], [dropdownOpen])
 
   const table = useReactTable({
     data: users,
@@ -325,11 +325,13 @@ const CustomerUsersPage: React.FC = () => {
   useEffect(() => {
     // لود نقش‌ها در اولین رندر
     fetchRoles()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     fetchCustomers()
-  }, [globalFilter, table.getColumn('is_active')?.getFilterValue(), table.getColumn('role')?.getFilterValue()])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalFilter])
 
   // Real-time updates - poll every 30 seconds
   useEffect(() => {
@@ -338,6 +340,7 @@ const CustomerUsersPage: React.FC = () => {
     }, 30000) // 30 seconds
 
     return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleAddUser = () => {

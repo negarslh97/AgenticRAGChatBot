@@ -5,7 +5,6 @@ import { useState, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
 import { adminService } from "../services/adminService"
-import { useAuth } from "../context/AuthContext"
 import { Button } from "./ui/button"
 import { MarkdownRenderer } from "./ui/markdown-renderer"
 import toast from "react-hot-toast"
@@ -18,13 +17,6 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
   const { articleId } = useParams<{ articleId: string }>()
   const [article, setArticle] = useState<Article | null>(null)
   const [loading, setLoading] = useState(true)
-  const { isAdmin, isSuperAdmin } = useAuth()
-
-  useEffect(() => {
-    if (articleId) {
-      loadArticle()
-    }
-  }, [articleId])
 
   const loadArticle = async () => {
     try {
@@ -41,31 +33,12 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
     }
   }
 
-  const handlePublish = async () => {
-    if (!article || !isSuperAdmin) return
-
-    try {
-      await knowledgeBaseService.publishArticle(article.id)
-      toast.success("Article published successfully!")
-      loadArticle() // Reload to get updated status
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to publish article")
+  useEffect(() => {
+    if (articleId) {
+      loadArticle()
     }
-  }
-
-  const handleDelete = async () => {
-    if (!article || !isSuperAdmin) return
-
-    if (window.confirm("Are you sure you want to delete this article? This action cannot be undone.")) {
-      try {
-        await knowledgeBaseService.deleteArticle(article.id)
-        toast.success("Article deleted successfully!")
-        window.history.back()
-      } catch (error: any) {
-        toast.error(error.response?.data?.detail || "Failed to delete article")
-      }
-    }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articleId])
 
 
   if (loading) {

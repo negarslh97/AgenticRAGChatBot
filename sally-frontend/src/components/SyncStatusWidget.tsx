@@ -116,11 +116,6 @@ const SyncStatusWidget: React.FC = () => {
     }, 300000)
   }
 
-  const formatDate = (dateString?: string) => {
-    if (!dateString) return "هرگز"
-    return new Date(dateString).toLocaleString('fa-IR')
-  }
-
   const getStatusColor = (healthStatus: string) => {
     switch (healthStatus) {
       case "healthy":

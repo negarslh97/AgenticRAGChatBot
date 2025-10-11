@@ -40,7 +40,7 @@ import {
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
 import { MarkdownRenderer } from '../components/ui/markdown-renderer'
-import { chatService, Conversation as ApiConversation, ChatMessage } from '../services/chatService'
+import { chatService } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
 
@@ -62,6 +62,16 @@ interface Message {
     model_name?: string
     provider?: string
     confidence?: number
+    rag_type?: 'simple' | 'detailed'
+    can_get_more_details?: boolean
+    sources?: Array<{
+      id: string
+      title: string
+      score: number
+      category?: string
+      tags?: string[]
+    }>
+    suggested_actions?: string[]
     token_usage?: {
       prompt_tokens?: number
       completion_tokens?: number
@@ -202,34 +212,6 @@ const ChatPage = () => {
         }
     }, [guestSessionId])
 
-    // Create new conversation
-    const createNewConversation = useCallback(() => {
-        console.log('🔄 createNewConversation called')
-
-        // Check if there's already a new conversation at the top
-        setConversations(prev => {
-            const firstConversation = prev[0]
-            if (firstConversation && firstConversation.id.startsWith('new-')) {
-                console.log('✅ Found existing new conversation, selecting it:', firstConversation.id)
-                // Already have a new conversation, just select it
-                setSelectedConversation(firstConversation)
-                return prev
-            }
-
-            // Create a truly unique ID
-            const uniqueId = `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-            console.log('🆕 Creating new conversation:', uniqueId)
-            const newConversation: Conversation = {
-                id: uniqueId,
-                title: 'گفتگوی جدید',
-                messages: []
-            }
-            setSelectedConversation(newConversation)
-            return [newConversation, ...prev]
-        })
-    }, [])
-
-
     // Initialize - load conversations and create new chat
     useEffect(() => {
         // Prevent duplicate initialization (React strict mode runs effects twice)
@@ -284,6 +266,7 @@ const ChatPage = () => {
             console.log('🧹 ChatPage useEffect cleanup')
             isMounted = false
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []) // Empty dependency array to run only once
 
     useEffect(() => {

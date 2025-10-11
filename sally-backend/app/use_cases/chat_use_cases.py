@@ -340,13 +340,19 @@ class ChatUseCases:
                 
                 # Stream response with custom model settings
                 from app.infrastructure.langchain_utils import langchain_service
+                
+                # 🔥 انتخاب پرامپت مناسب بر اساس rag_type
+                prompt_name = "simple_rag_response" if rag_type == "simple" else "rag_response"
+                logger.info(f"🎯 Using prompt: {prompt_name} for rag_type: {rag_type}")
+                
                 async for chunk in langchain_service.generate_rag_response_stream(
                     content, 
                     context_text,
                     conversation_history=conversation_history,  # 💾 ارسال تاریخچه مکالمه
                     custom_model=model,
                     custom_temperature=temperature,
-                    query_type=query_type_analysis['query_type']  # 🎯 نوع سوال برای تطبیق طول پاسخ
+                    query_type=query_type_analysis['query_type'],  # 🎯 نوع سوال برای تطبیق طول پاسخ
+                    prompt_name=prompt_name  # 🔥 ارسال prompt مناسب
                 ):
                     full_response += chunk
                     yield {
@@ -374,12 +380,17 @@ class ChatUseCases:
                     "complexity": complexity_analysis['complexity'],
                     "complexity_fa": complexity_analysis['complexity_fa'],
                     "model": model or settings.rag_model_loaded,
-                    "temperature": temperature
+                    "temperature": temperature,
+                    "can_get_more_details": rag_type == "simple" and bool(sources)  # 🎯 فیلد کلیدی برای نمایش دکمه
                 }
             )
             await ai_message.insert()
             
-            # Send complete event با complexity
+            # 🎯 محاسبه can_get_more_details
+            can_get_more_details = rag_type == "simple" and bool(sources)
+            logger.info(f"🔥 can_get_more_details calculation: rag_type={rag_type}, has_sources={bool(sources)}, result={can_get_more_details}")
+            
+            # Send complete event با complexity و metadata برای UI
             yield {
                 "type": "complete",
                 "message_id": str(ai_message.id),
@@ -387,7 +398,9 @@ class ChatUseCases:
                 "confidence": confidence,
                 "complexity": complexity_analysis['complexity'],
                 "complexity_fa": complexity_analysis['complexity_fa'],
-                "model": model or settings.rag_model_loaded
+                "model": model or settings.rag_model_loaded,
+                "can_get_more_details": can_get_more_details,  # 🔥 سیگنال به Frontend برای نمایش دکمه
+                "rag_type": rag_type
             }
             
         except Exception as e:
@@ -591,7 +604,8 @@ class ChatUseCases:
         user: Optional[Union[Customer, Admin]] = None,
         user_type: str = "guest",
         conversation_id: Optional[str] = None,
-        guest_session_id: Optional[str] = None
+        guest_session_id: Optional[str] = None,
+        rag_type: str = "simple"  # 🆕 "simple" or "detailed"
     ) -> Dict[str, Any]:
         """Process a chat message and generate AI response."""
         
@@ -682,8 +696,9 @@ class ChatUseCases:
         logger.info(f"Saved user message with ID: {user_message.id} in conversation {conversation.id}")
         logger.info(f"User message data: sender_type={user_message.sender_type}, sender_id={user_message.sender_id}")
         
-        # Get appropriate RAG service
-        rag_service = get_rag_service(user)
+        # 🆕 Two-Speed RAG: Choose service using factory function
+        rag_service = get_rag_service(user, rag_type)
+        logger.info(f"🔧 Selected RAG service for rag_type='{rag_type}': {type(rag_service).__name__}")
         
         # Prepare context for agentic RAG
         context = {}
@@ -730,7 +745,8 @@ class ChatUseCases:
                 "sources": sources,
                 "confidence": confidence,
                 "suggested_actions": suggested_actions,
-                "rag_type": "agentic" if user else "simple",
+                "rag_type": rag_type,  # 🆕 Reflect actual RAG type used
+                "can_get_more_details": rag_type == "simple",  # 🆕 Only show button for simple responses
                 "model_name": settings.chat_model_loaded,
                 "provider": "OpenRouter",
                 "api_base_url": settings.openai_base_url_loaded,
@@ -1053,11 +1069,16 @@ class ChatUseCases:
                 logger.info("🤖 Streaming STRICT RAG response...")
                 from app.infrastructure.langchain_utils import langchain_service
                 
+                # 🔥 مهمان‌ها و مشتریان همیشه از simple RAG استفاده می‌کنند
+                prompt_name = "simple_rag_response"
+                logger.info(f"🎯 Using prompt: {prompt_name} for {user_type} user")
+                
                 async for chunk in langchain_service.generate_rag_response_stream(
                     content, 
                     context_text,
                     conversation_history=conversation_history,  # 💾 ارسال تاریخچه مکالمه
-                    query_type=query_type_analysis['query_type']  # 🎯 نوع سوال برای تطبیق طول پاسخ
+                    query_type=query_type_analysis['query_type'],  # 🎯 نوع سوال برای تطبیق طول پاسخ
+                    prompt_name=prompt_name  # 🔥 ارسال prompt مناسب
                 ):
                     full_response += chunk
                     # chunks قبلاً در langchain_utils به کلمات تقسیم شده‌اند
@@ -1078,6 +1099,9 @@ class ChatUseCases:
                 confidence = 0.0
             
             # Save AI message
+            # 🎯 مهمان‌ها و مشتریان همیشه از simple RAG استفاده می‌کنند
+            rag_type_used = "simple"
+            
             ai_message = Message(
                 conversation_id=str(conversation.id),
                 content=full_response,
@@ -1087,19 +1111,26 @@ class ChatUseCases:
                 metadata={
                     "sources": sources,
                     "confidence": confidence,
-                    "rag_type": "agentic" if user else "simple",
+                    "rag_type": rag_type_used,
                     "streaming": True,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "can_get_more_details": rag_type_used == "simple" and bool(sources)  # 🎯 فیلد کلیدی برای نمایش دکمه
                 }
             )
             await ai_message.insert()
             
-            # Send completion event
+            # 🎯 محاسبه can_get_more_details
+            can_get_more_details = rag_type_used == "simple" and bool(sources)
+            logger.info(f"🔥 can_get_more_details calculation: rag_type={rag_type_used}, has_sources={bool(sources)}, result={can_get_more_details}")
+            
+            # Send completion event با metadata برای UI
             yield {
                 "type": "complete",
                 "message_id": str(ai_message.id),
                 "full_response": full_response,
-                "confidence": confidence
+                "confidence": confidence,
+                "can_get_more_details": can_get_more_details,  # 🔥 سیگنال به Frontend برای نمایش دکمه
+                "rag_type": rag_type_used
             }
             
             logger.info(f"✅ Streaming completed successfully")

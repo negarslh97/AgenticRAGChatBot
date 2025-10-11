@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
-import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
+import { knowledgeBaseService } from "../services/knowledgeBaseService"
 import { adminService, type GeneratedMetadata } from "../services/adminService"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -29,7 +29,6 @@ const SuperAdminAddArticlePage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [markdownConverting, setMarkdownConverting] = useState(false)
-  const [hasNavigated, setHasNavigated] = useState(false)
 
   useEffect(() => {
     // فقط یک بار دسته‌بندی‌ها را بارگذاری کن

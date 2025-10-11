@@ -16,10 +16,6 @@ const KnowledgeBasePage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | undefined>()
 
-  useEffect(() => {
-    loadArticles()
-  }, [selectedCategoryId])
-
   const loadArticles = async () => {
     setLoading(true)
     try {
@@ -31,6 +27,11 @@ const KnowledgeBasePage: React.FC = () => {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    loadArticles()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategoryId])
 
   return (
     <div className="min-h-screen bg-gray-50">
