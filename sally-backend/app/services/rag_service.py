@@ -79,6 +79,35 @@ class RAGService(ABC):
         
         return None
     
+    def _get_display_title(self, doc: Dict[str, Any]) -> str:
+        """
+        استخراج عنوان نمایشی مقاله از document.
+        
+        این متد یک منطق چندمرحله‌ای برای پیدا کردن بهترین عنوان دارد:
+        1. ابتدا از فیلد article_title استفاده می‌کند
+        2. اگر موجود نبود، از محتوای کامل استخراج می‌کند
+        3. در نهایت از title (chunk title) استفاده می‌کند
+        
+        Args:
+            doc: سند شامل اطلاعات مقاله
+            
+        Returns:
+            عنوان نمایشی مقاله
+        """
+        # مرحله 1: سعی کنید article_title را بگیرید
+        article_title = doc.get("article_title")
+        
+        # مرحله 2: اگر article_title وجود نداشت، از full_article_content استخراج کنید
+        if not article_title:
+            full_article_content = doc.get("full_article_content", "")
+            article_title = self._extract_article_title_from_content(full_article_content)
+        
+        # مرحله 3: اگر باز هم پیدا نشد، از title (chunk title) استفاده کنید
+        if not article_title:
+            article_title = doc.get("title", "بدون عنوان")
+        
+        return article_title
+    
     async def _enrich_with_mongodb_metadata(self, weaviate_results: List[Dict[str, Any]], is_public_only: bool = True) -> List[Dict[str, Any]]:
         """
         Enrich Weaviate results with MongoDB metadata (OPTIONAL).
@@ -230,18 +259,22 @@ class RAGService(ABC):
         logger.info(f"✅ Enrichment completed: {len(enriched_docs)} documents ready (from {len(weaviate_results)} Weaviate results)")
         return enriched_docs
 
-    def _format_sources_markdown(self, documents: List[Dict[str, Any]], max_sources: int = 5) -> List[Dict[str, Any]]:
+    def _format_sources_markdown(self, documents: List[Dict[str, Any]], max_sources: int = None) -> List[Dict[str, Any]]:
         """
         Format sources as unique articles (not chunks).
         🎯 نمایش مقالات یکتا - فقط لینک به سند اصلی (بدون نمایش گره‌های جداگانه)
         
         Args:
             documents: لیست documents (chunks)
-            max_sources: حداکثر تعداد مقالات یکتا برای برگرداندن
+            max_sources: حداکثر تعداد مقالات یکتا برای برگرداندن (None = استفاده از config)
             
         Returns:
             لیست مقالات یکتا با اولویت بالاترین score
         """
+        # استفاده از تنظیمات اگر max_sources مشخص نشده باشد
+        if max_sources is None:
+            max_sources = settings.max_sources_to_format
+        
         formatted_sources = []
         seen_article_ids = set()  # 🎯 برای جلوگیری از تکرار مقالات
         
@@ -266,17 +299,8 @@ class RAGService(ABC):
         for article_id, data in sorted_articles[:max_sources]:
             doc = data["doc"]
             
-            # 🎯 استخراج عنوان مقاله اصلی
-            article_title = doc.get("article_title")
-            
-            # اگر article_title وجود نداشت، سعی کن از full_article_content استخراج کنی
-            if not article_title:
-                full_article_content = doc.get("full_article_content", "")
-                article_title = self._extract_article_title_from_content(full_article_content)
-            
-            # اگر باز هم پیدا نشد، از title استفاده کن (chunk title)
-            if not article_title:
-                article_title = doc.get("title", "بدون عنوان")
+            # 🎯 استفاده از متد helper برای استخراج عنوان
+            article_title = self._get_display_title(doc)
             
             # استخراج snippet از بهترین chunk برای preview
             content = doc.get("content", "")
@@ -1089,7 +1113,7 @@ class SimpleRAGService(RAGService):
                 logger.info(f"📄 Response preview: '{rag_response[:100]}...'")
                 
                 # 🔥 ENHANCED: بررسی کیفیت پاسخ
-                formatted_sources = self._format_sources_markdown(relevant_docs[:10], max_sources=10)
+                formatted_sources = self._format_sources_markdown(relevant_docs)
                 verification_result = self._verify_answer_quality(
                     query=query,
                     answer=rag_response,
@@ -1287,7 +1311,7 @@ class AgenticRAGService(RAGService):
             
             # تولید پاسخ ساده
             response = await self._generate_openai_response_with_context(query, full_context, conversation_history)
-            formatted_sources = self._format_sources_markdown(relevant_docs[:5], max_sources=5)
+            formatted_sources = self._format_sources_markdown(relevant_docs)
             
             return {
                 "response": response,

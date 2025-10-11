@@ -8,7 +8,7 @@ from app.domain.entities import (
     MessageRating
 )
 from app.core.permissions import get_current_customer, get_optional_customer, get_optional_admin, get_current_admin
-from app.use_cases.chat_use_cases_refactored import ChatUseCases
+from app.use_cases.chat_use_cases import ChatUseCases
 import json
 from datetime import datetime
 import logging
@@ -721,7 +721,7 @@ async def advanced_agentic_rag_stream(
                 
                 # تولید عنوان
                 try:
-                    from app.use_cases.chat_use_cases_refactored import ChatUseCases
+                    from app.use_cases.chat_use_cases import ChatUseCases
                     await ChatUseCases.generate_conversation_title_and_tags(conversation_id_str)
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to generate title: {e}")

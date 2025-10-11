@@ -593,6 +593,117 @@ class LangChainService:
             logger.error(f"❌ RAG response generation failed: {e}", exc_info=True)
             return "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید."
     
+    async def generate_conversational_response_stream(
+        self,
+        query: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        custom_model: Optional[str] = None,
+        custom_temperature: Optional[float] = None
+    ):
+        """
+        Generate a conversational (non-RAG) streaming response using AI.
+        
+        این متد برای پاسخ‌های محاوره‌ای ساده است که نیازی به RAG ندارند:
+        - سلام و احوال‌پرسی
+        - تشکر
+        - معرفی اسم
+        - گفتگوی عمومی
+        
+        Args:
+            query: User query
+            conversation_history: Previous messages in the conversation
+            custom_model: Optional custom model name (overrides default)
+            custom_temperature: Optional custom temperature (overrides default - default: 0.7)
+            
+        Yields:
+            Chunks of the AI response as they are generated
+        """
+        try:
+            model_name = custom_model or settings.chat_model_loaded
+            temperature = custom_temperature if custom_temperature is not None else 0.7  # دمای بالاتر برای طبیعی‌تر بودن
+            
+            logger.info(f"💬 Conversational streaming with model: {model_name}, temperature: {temperature}")
+            
+            # استفاده از مدل با streaming enabled
+            model = self._get_model(
+                model_name, 
+                force_json=False,
+                streaming=True,
+                temperature=temperature,
+                max_tokens=500  # پاسخ‌های محاوره‌ای کوتاه‌تر هستند
+            )
+            
+            # ساخت prompt محاوره‌ای
+            conversational_prompt = f"""شما یک دستیار دوستانه و حرفه‌ای هستید. به این پیام به صورت محاوره‌ای و طبیعی پاسخ دهید:
+
+پیام کاربر: {query}
+
+دستورالعمل:
+- اگر کاربر اسم خود را معرفی کرد، از او با نام استقبال کنید
+- اگر تشکر کرد، خوشحالی خود را ابراز کنید
+- اگر سلام کرد، گرم برخورد کنید
+- اگر احوال‌پرسی کرد، پاسخی دوستانه بدهید
+- پاسخ را کوتاه (1-2 جمله) و صمیمی نگه دارید
+- در پایان بپرسید که چگونه می‌توانید کمک کنید
+
+پاسخ شما:"""
+            
+            # آماده‌سازی تاریخچه مکالمه
+            history_text = ""
+            if conversation_history and len(conversation_history) > 0:
+                history_text = "\n\nتاریخچه مکالمه:\n"
+                # فقط 3 پیام آخر
+                recent_messages = conversation_history[-3:]
+                for msg in recent_messages:
+                    role_fa = "کاربر" if msg.get("role") == "user" else "دستیار"
+                    content = msg.get("content", "")
+                    history_text += f"{role_fa}: {content}\n"
+                history_text += "\n"
+            
+            logger.info(f"📚 Conversation history: {len(conversation_history) if conversation_history else 0} messages")
+            
+            # ساخت prompt template ساده
+            from langchain_core.prompts import ChatPromptTemplate
+            prompt = ChatPromptTemplate.from_template(history_text + conversational_prompt)
+            
+            chain = prompt | model
+            
+            # Stream response
+            chunk_num = 0
+            empty_chunk_count = 0
+            first_content_found = False
+            
+            async for chunk in chain.astream({}):
+                chunk_num += 1
+                content = chunk.content if hasattr(chunk, 'content') else str(chunk)
+
+                # فیلتر کردن chunkهای خالی (فقط تا اولین محتوای معنادار)
+                if not first_content_found:
+                    if not content or not isinstance(content, str) or len(content.strip()) == 0:
+                        empty_chunk_count += 1
+                        if empty_chunk_count == 1:
+                            logger.info(f"⏭️ Skipping initial empty chunks...")
+                        continue
+                    else:
+                        first_content_found = True
+                        if empty_chunk_count > 0:
+                            logger.info(f"✅ Skipped {empty_chunk_count} empty chunks, starting content stream...")
+
+                # بعد از پیدا شدن اولین محتوا، همه chunks را ارسال می‌کنیم
+                if not isinstance(content, str):
+                    content = str(content)
+                
+                if content:
+                    yield content
+                    if len(content) > 5:
+                        await asyncio.sleep(0.01)
+                    
+            logger.info(f"✅ Conversational streaming completed: {chunk_num} total chunks")
+                    
+        except Exception as e:
+            logger.error(f"❌ Conversational streaming failed: {e}", exc_info=True)
+            yield "متأسفانه در حال حاضر نمی‌توانم به پیام شما پاسخ دهم."
+    
     async def generate_rag_response_stream(
         self, 
         query: str, 

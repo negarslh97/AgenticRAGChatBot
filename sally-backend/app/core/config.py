@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     weaviate_retrieval_limit: int = 30      # تعداد اسناد برای بازیابی اولیه
     reranker_top_k: int = 20                # تعداد اسناد برتر بعد از reranking
     context_documents_count: int = 15       # تعداد اسناد برای context در RAG
+    max_sources_to_format: int = 10         # حداکثر تعداد منابع یکتا برای نمایش
     
     # 🆕 Hybrid Model Strategy (برای کاهش هزینه و بهبود سرعت)
     # برای وظایف ساده از مدل سریع و ارزان، برای وظایف پیچیده از مدل قدرتمند
