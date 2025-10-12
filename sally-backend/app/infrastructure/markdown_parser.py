@@ -3,6 +3,11 @@ Markdown Parser for Tree Structure Extraction
 
 This module provides functionality to parse markdown content and extract
 hierarchical tree structure based on heading levels (#, ##, ###, etc.)
+
+🆕 Enhanced with Smart Chunking:
+- Maximum chunk size limit (configurable)
+- Chunk overlap for context preservation
+- Semantic chunking for better retrieval
 """
 
 import re
@@ -12,10 +17,23 @@ from app.domain.entities import MarkdownNode, MarkdownTree
 
 
 class MarkdownParser:
-    """Parser for extracting tree structure from markdown content."""
+    """Parser for extracting tree structure from markdown content with smart chunking."""
 
-    def __init__(self):
+    def __init__(
+        self, 
+        max_chunk_size: int = 1000,  # حداکثر اندازه chunk (کاراکتر)
+        chunk_overlap: int = 200      # همپوشانی بین chunks (کاراکتر)
+    ):
+        """
+        Initialize parser with chunking parameters.
+        
+        Args:
+            max_chunk_size: حداکثر تعداد کاراکتر در هر chunk
+            chunk_overlap: تعداد کاراکتر همپوشانی بین chunks متوالی
+        """
         self.heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+        self.max_chunk_size = max_chunk_size
+        self.chunk_overlap = chunk_overlap
 
     def parse_to_tree(self, markdown_content: str, article_id: str, article_title: str = None) -> MarkdownTree:
         """
@@ -82,6 +100,9 @@ class MarkdownParser:
         if current_node:
             current_node.content = '\n'.join(content_buffer).strip()
             nodes.append(current_node)
+        
+        # 🆕 تقسیم chunks بزرگ با overlap
+        nodes = self._split_large_chunks(nodes)
 
         # ✅ ایجاد Root Node با عنوان مقاله از MongoDB
         root_node = MarkdownNode(
@@ -194,6 +215,84 @@ class MarkdownParser:
 
         return MarkdownTree(article_id="", root_nodes=root_nodes)
 
+    def _split_large_chunks(self, nodes: List[MarkdownNode]) -> List[MarkdownNode]:
+        """
+        تقسیم chunks بزرگ به قطعات کوچکتر با overlap.
+        
+        این تابع chunks بزرگتر از max_chunk_size را به قطعات کوچکتر تقسیم می‌کند
+        و همپوشانی بین آنها را حفظ می‌کند تا اطلاعات در مرز chunks از دست نرود.
+        
+        Args:
+            nodes: لیست nodes اولیه
+            
+        Returns:
+            لیست nodes با chunks بهینه شده
+        """
+        result_nodes = []
+        
+        for node in nodes:
+            content_length = len(node.content)
+            
+            # اگر chunk کوچک است، همان را نگه دار
+            if content_length <= self.max_chunk_size:
+                result_nodes.append(node)
+                continue
+            
+            # chunk بزرگ است، باید تقسیم شود
+            # 🎯 استراتژی: تقسیم بر اساس پاراگراف (برای حفظ معنا)
+            paragraphs = node.content.split('\n\n')
+            
+            # اگر پاراگراف‌ها وجود ندارند، بر اساس جمله تقسیم کن
+            if len(paragraphs) == 1:
+                paragraphs = node.content.split('. ')
+                separator = '. '
+            else:
+                separator = '\n\n'
+            
+            current_chunk = ""
+            chunk_parts = []
+            
+            for para in paragraphs:
+                # اگر اضافه کردن این پاراگراف، chunk را بزرگتر از حد کند
+                if len(current_chunk) + len(para) + len(separator) > self.max_chunk_size and current_chunk:
+                    chunk_parts.append(current_chunk.strip())
+                    # شروع chunk جدید با overlap از انتهای chunk قبلی
+                    if self.chunk_overlap > 0:
+                        overlap_start = max(0, len(current_chunk) - self.chunk_overlap)
+                        current_chunk = current_chunk[overlap_start:] + separator + para
+                    else:
+                        current_chunk = para
+                else:
+                    if current_chunk:
+                        current_chunk += separator + para
+                    else:
+                        current_chunk = para
+            
+            # اضافه کردن chunk آخر
+            if current_chunk:
+                chunk_parts.append(current_chunk.strip())
+            
+            # ایجاد node های جدید برای هر chunk
+            for idx, chunk_content in enumerate(chunk_parts):
+                if idx == 0:
+                    # اولین chunk: node اصلی را به‌روز کن
+                    node.content = chunk_content
+                    result_nodes.append(node)
+                else:
+                    # chunks بعدی: node های جدید بساز
+                    new_node = MarkdownNode(
+                        id=str(uuid.uuid4()),
+                        title=f"{node.title} (بخش {idx + 1})",
+                        level=node.level,
+                        content=chunk_content,
+                        parent_id=node.parent_id,
+                        path=f"{node.path}.{idx + 1}",
+                        order=node.order
+                    )
+                    result_nodes.append(new_node)
+        
+        return result_nodes
+    
     def _find_parent(self, node: MarkdownNode, parent_stack: List[Tuple[int, MarkdownNode]]) -> Optional[MarkdownNode]:
         """
         Find the parent node for the given node.
@@ -301,5 +400,7 @@ class MarkdownParser:
         return "\n".join(toc_lines)
 
 
-# Global instance
-markdown_parser = MarkdownParser()
+# Global instance با تنظیمات بهینه برای RAG
+# max_chunk_size=1000: حداکثر 1000 کاراکتر (حدود 200-250 کلمه)
+# chunk_overlap=200: 20% همپوشانی برای حفظ context
+markdown_parser = MarkdownParser(max_chunk_size=1000, chunk_overlap=200)

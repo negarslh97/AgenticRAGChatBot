@@ -32,6 +32,7 @@ const WeaviateContentsPage = lazy(() => import("./pages/WeaviateContentsPage"))
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage"))
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"))
 const CustomerUsersPage = lazy(() => import("./pages/CustomerUsersPage"))
+const SuperAdminReindexPage = lazy(() => import("./pages/SuperAdminReindexPage"))
 const UnauthorizedPage = lazy(() => import("./pages/UnauthorizedPage"))
 
 // Loading component for Suspense
@@ -170,6 +171,14 @@ const App: React.FC = () => {
                 element={
                   <AuthGuard requiredRole="SuperAdmin">
                     <WeaviateContentsPage />
+                  </AuthGuard>
+                }
+              />
+              <Route
+                path="knowledge-base/reindex"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <SuperAdminReindexPage />
                   </AuthGuard>
                 }
               />

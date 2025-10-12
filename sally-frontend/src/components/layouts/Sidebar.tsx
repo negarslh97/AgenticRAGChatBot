@@ -69,8 +69,17 @@ const Sidebar: React.FC = () => {
     },
     {
       name: 'پایگاه دانش',
-      href: '/super-admin/knowledge-base',
-      icon: BookOpen
+      icon: BookOpen,
+      submenu: [
+        {
+          name: 'مدیریت مقالات',
+          href: '/super-admin/knowledge-base'
+        },
+        {
+          name: '🔄 Re-indexing',
+          href: '/super-admin/knowledge-base/reindex'
+        }
+      ]
     },
     {
       name: 'لاگ‌های فعالیت',

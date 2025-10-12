@@ -5,11 +5,14 @@ Query Router - تشخیص هوشمند نوع سوال
 این ماژول قبل از اجرای پایپلاین سنگین RAG، سوال را تحلیل می‌کند و مسیر مناسب را انتخاب می‌کند:
 - conversational: سوالات محاوره‌ای، سلام، تشکر، معرفی نام → RAG bypass
 - factual: سوالات تخصصی که نیاز به جستجو در پایگاه دانش دارند → RAG اجرا می‌شود
+
+⚠️ IMPORTANT: از regex برای تطبیق دقیق استفاده می‌کند تا False Positive نداشته باشیم
 """
 
 from enum import Enum
 from typing import Dict, Any, Optional
 import logging
+import re  # ✅ اضافه شد برای regex
 from app.infrastructure.langchain_utils import langchain_service
 
 logger = logging.getLogger(__name__)
@@ -132,69 +135,91 @@ class QueryRouter:
     def _quick_pattern_match(self, query: str) -> Optional[Dict[str, Any]]:
         """
         تشخیص سریع بر اساس الگوهای رایج (بدون نیاز به LLM)
-        این کار هزینه و latency را برای سوالات رایج به صفر می‌رساند.
+        
+        ⚠️ CRITICAL: از regex برای تطبیق دقیق استفاده می‌کند تا False Positive نداشته باشیم
         """
         query_lower = query.strip().lower()
+        query_normalized = re.sub(r'\s+', ' ', query_lower)  # normalize spaces
         
-        # 🎯 الگوهای محاوره‌ای
-        conversational_patterns = [
-            # معرفی
-            "اسم من", "نام من", "من هستم", "من ... هستم",
-            "my name is", "i am", "i'm",
+        # 🎯 الگوهای EXACT محاوره‌ای (باید کل پیام match شود)
+        # این الگوها فقط وقتی match می‌شوند که کل پیام فقط شامل آن‌ها باشد
+        exact_conversational_patterns = [
+            # سلام
+            r'^سلام$', r'^درود$', r'^سلام\s*(علیکم)?$',
+            r'^صبح بخیر$', r'^عصر بخیر$', r'^شب بخیر$',
+            r'^hello$', r'^hi$', r'^hey$',
             
             # تشکر
-            "ممنون", "متشکر", "مرسی", "تشکر",
-            "thank", "thanks", "thx",
-            
-            # سلام
-            "سلام", "درود", "صبح بخیر", "عصر بخیر", "شب بخیر",
-            "hello", "hi", "hey", "good morning", "good evening",
-            
-            # احوال‌پرسی
-            "حالت چطور", "چطوری", "خوبی",
-            "how are you", "what's up", "how do you do",
+            r'^ممنون(م)?$', r'^متشکر(م)?$', r'^مرسی$', r'^تشکر$',
+            r'^خیلی\s+ممنون(م)?$', r'^بسیار\s+متشکر(م)?$',
+            r'^thank\s*you$', r'^thanks$', r'^thx$',
             
             # خداحافظی
-            "خداحافظ", "بای", "فعلا",
-            "bye", "goodbye", "see you"
+            r'^خداحافظ$', r'^خدا\s+حافظ$', r'^بای$', r'^فعلا$',
+            r'^bye$', r'^goodbye$', r'^see\s+you$',
+            
+            # احوال‌پرسی
+            r'^چطوری(\s+هستی)?$', r'^خوبی$', r'^حالت\s+چطوره?$',
+            r'^how\s+are\s+you(\s+doing)?$', r'^what\'?s\s+up$',
         ]
         
-        for pattern in conversational_patterns:
-            if pattern in query_lower:
+        for pattern in exact_conversational_patterns:
+            if re.match(pattern, query_normalized):
                 return {
                     "intent": QueryIntent.CONVERSATIONAL.value,
                     "confidence": 1.0,
                     "needs_rag": False,
-                    "reason": f"الگوی محاوره‌ای شناسایی شد: '{pattern}'"
+                    "reason": f"الگوی محاوره‌ای دقیق شناسایی شد"
                 }
         
-        # 🎯 الگوهای واضح تخصصی
-        factual_indicators = [
-            "چگونه", "چطور", "چیست", "چیه",
-            "how to", "what is", "where is", "why",
-            "راهنما", "آموزش", "مستندات",
-            "فاکتور", "مدل فروش", "حسابداری", "خرید", "فروش"
+        # 🎯 الگوهای معرفی (می‌تواند در دل جمله باشد)
+        introduction_patterns = [
+            r'اسم\s+من\s+\S+\s+(است|هست)',
+            r'نام\s+من\s+\S+\s+(است|هست)',
+            r'من\s+\S+\s+هستم',
+            r'my\s+name\s+is\s+\S+',
+            r'i\'?m\s+\S+',
+            r'i\s+am\s+\S+'
         ]
         
-        for indicator in factual_indicators:
-            if indicator in query_lower:
+        for pattern in introduction_patterns:
+            if re.search(pattern, query_normalized):
+                return {
+                    "intent": QueryIntent.CONVERSATIONAL.value,
+                    "confidence": 1.0,
+                    "needs_rag": False,
+                    "reason": "الگوی معرفی شناسایی شد"
+                }
+        
+        # 🎯 الگوهای واضح تخصصی (اولویت بالا)
+        factual_indicators = [
+            r'\bچگونه\b', r'\bچطور\b', r'\bچیست\b', r'\bچیه\b',
+            r'\bچرا\b', r'\bکجا\b', r'\bکی\b', r'\bکدام\b',
+            r'\bhow\s+to\b', r'\bwhat\s+is\b', r'\bwhere\s+is\b', r'\bwhy\b',
+            r'\bراهنما\b', r'\bآموزش\b', r'\bمستندات\b',
+            r'\bفاکتور\b', r'\bمدل\s+فروش\b', r'\bحسابداری\b',
+            r'\bخرید\b', r'\bفروش\b', r'\bبایگانی\b'
+        ]
+        
+        for pattern in factual_indicators:
+            if re.search(pattern, query_normalized):
                 return {
                     "intent": QueryIntent.FACTUAL.value,
                     "confidence": 1.0,
                     "needs_rag": True,
-                    "reason": f"الگوی تخصصی شناسایی شد: '{indicator}'"
+                    "reason": f"الگوی تخصصی شناسایی شد"
                 }
         
-        # 🎯 سوالات کوتاه (کمتر از 4 کلمه) معمولاً محاوره‌ای هستند
-        words = query_lower.split()
-        if len(words) <= 3 and len(query_lower) < 20:
-            # اما اگر علامت سوال دارد، احتمالاً factual است
+        # 🎯 سوالات کوتاه (کمتر از 3 کلمه) بدون علامت سوال
+        words = query_normalized.split()
+        if len(words) <= 2 and len(query_normalized) < 15:
+            # اگر علامت سوال دارد، احتمالاً factual است
             if '؟' not in query and '?' not in query:
                 return {
                     "intent": QueryIntent.CONVERSATIONAL.value,
-                    "confidence": 0.8,
+                    "confidence": 0.7,
                     "needs_rag": False,
-                    "reason": "جمله کوتاه بدون علامت سوال - احتمالاً محاوره‌ای"
+                    "reason": "جمله بسیار کوتاه بدون علامت سوال"
                 }
         
         # اگر هیچ الگویی match نکرد، None برگردان (برای استفاده از LLM)

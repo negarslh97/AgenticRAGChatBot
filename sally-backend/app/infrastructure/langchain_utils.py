@@ -16,6 +16,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional, Union
 import asyncio
+import re
 from enum import Enum
 from tenacity import (
     retry,
@@ -588,8 +589,14 @@ class LangChainService:
                 "query": query
             })
 
-            logger.info(f"✅ RAG response generated: {len(result.content)} characters")
-            return result.content
+            # 🧹 حذف بلوک thinking از پاسخ نهایی (اگر مدل آن را تولید کرده باشد)
+            response = result.content
+            # حذف هر چیزی بین <thinking> و </thinking> (با پشتیبانی از multiline)
+            response = re.sub(r'<thinking>.*?</thinking>', '', response, flags=re.DOTALL)
+            response = response.strip()
+
+            logger.info(f"✅ RAG response generated: {len(response)} characters")
+            return response
 
         except Exception as e:
             logger.error(f"❌ RAG response generation failed: {e}", exc_info=True)
@@ -815,6 +822,10 @@ class LangChainService:
             empty_chunk_count = 0
             first_content_found = False
             
+            # 🧠 State machine برای فیلتر کردن بلوک thinking
+            inside_thinking = False
+            thinking_buffer = ""  # بافر برای ذخیره محتوای احتمالی thinking
+            
             async for chunk in chain.astream({
                 "response_guide": response_guide,
                 "context": context,
@@ -845,12 +856,52 @@ class LangChainService:
                 if not isinstance(content, str):
                     content = str(content)
                 
-                # Yield content directly for faster streaming
-                if content:  # حتی فاصله‌ها و newline‌ها
-                    yield content
+                # 🧹 فیلتر بلوک thinking در streaming mode
+                if content:
+                    # اضافه کردن به بافر برای بررسی thinking tags
+                    thinking_buffer += content
+                    
+                    # بررسی شروع thinking block
+                    if '<thinking>' in thinking_buffer and not inside_thinking:
+                        inside_thinking = True
+                        # ارسال محتوای قبل از thinking
+                        before_thinking = thinking_buffer.split('<thinking>')[0]
+                        if before_thinking:
+                            yield before_thinking
+                        thinking_buffer = thinking_buffer.split('<thinking>', 1)[1] if '<thinking>' in thinking_buffer else ""
+                        logger.info(f"🧠 Detected <thinking> block start, filtering...")
+                        continue
+                    
+                    # اگر داخل thinking هستیم، بررسی پایان آن
+                    if inside_thinking:
+                        if '</thinking>' in thinking_buffer:
+                            inside_thinking = False
+                            # ارسال محتوای بعد از thinking
+                            after_thinking = thinking_buffer.split('</thinking>', 1)[1] if '</thinking>' in thinking_buffer else ""
+                            thinking_buffer = after_thinking
+                            logger.info(f"🧠 Detected </thinking> block end, resuming stream...")
+                            if after_thinking:
+                                yield after_thinking
+                                thinking_buffer = ""
+                        # همچنان در thinking هستیم، skip کن
+                        continue
+                    
+                    # اگر بافر خیلی بزرگ شد و thinking پیدا نشد، محتوای آن را ارسال کن
+                    if len(thinking_buffer) > 100 and not inside_thinking:
+                        yield thinking_buffer
+                        thinking_buffer = ""
+                    elif not inside_thinking and len(thinking_buffer) < 50:
+                        # اگر بافر کوچک است، منتظر بمان تا thinking کامل شود یا نشود
+                        continue
+                    
                     # تاخیر خیلی کم برای streaming سریع‌تر
                     if len(content) > 5:
                         await asyncio.sleep(0.01)
+            
+            # 🧹 ارسال محتوای باقی‌مانده در بافر (اگر thinking پیدا نشد)
+            if thinking_buffer and not inside_thinking:
+                yield thinking_buffer
+                logger.info(f"✅ Flushed remaining buffer: {len(thinking_buffer)} characters")
                     
             logger.info(f"✅ Streaming completed: {chunk_num} total chunks, {empty_chunk_count} empty chunks skipped")
             

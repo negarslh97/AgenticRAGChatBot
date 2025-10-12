@@ -112,6 +112,7 @@ from app.api.routes.super_admin_knowledge_base import router as admin_kb_router
 from app.api.routes.upload import router as upload_router
 from app.api.routes.categories import router as categories_router
 from app.api.routes.system_routes import router as system_router
+from app.api.routes.super_admin_reindex import router as reindex_router
 
 app = FastAPI(
     title="Sally Chat Bot API",
@@ -166,6 +167,7 @@ app.include_router(admin_router, prefix="/api/admin", tags=["👨‍💼 Admin M
 app.include_router(admin_kb_router, prefix="/api/super-admin/kb", tags=["👑 Super Admin Knowledge Base"])
 app.include_router(upload_router, prefix="/api/super-admin", tags=["👑 Super Admin Upload"])
 app.include_router(categories_router, prefix="/api/super-admin/categories", tags=["👑 Super Admin Categories"])
+app.include_router(reindex_router, prefix="/api/super-admin", tags=["👑 Super Admin Re-indexing"])
 app.include_router(system_router, prefix="/api/system", tags=["🔧 System Monitoring"])
 
 # ============================================================================

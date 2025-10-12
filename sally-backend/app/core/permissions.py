@@ -195,6 +195,20 @@ async def get_current_admin(credentials: Optional[HTTPAuthorizationCredentials] 
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Admin authentication credentials")
     return admin
 
+
+async def has_permission(admin: Admin, permission: str) -> bool:
+    """Check if an admin has a specific permission."""
+    try:
+        role = await admin.get_role()
+        if not role or not role.is_active:
+            return False
+        
+        permission_keys = {perm.permission_key for perm in role.permissions}
+        return permission in permission_keys
+    except Exception as e:
+        logger.error(f"Error checking permission: {e}")
+        return False
+
 def get_current_admin_with_permission(permission: str):
     """Dependency factory for checking if the current admin has a specific permission."""
     async def dependency(admin: Admin = Depends(get_current_admin)) -> Admin:

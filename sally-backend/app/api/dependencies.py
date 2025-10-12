@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
-from typing import Optional, Union
-from app.core.permissions import get_optional_auth_header, get_admin_from_token, get_current_customer_from_token
+from typing import Optional, Union, Callable
+from app.core.permissions import get_optional_auth_header, get_admin_from_token, get_current_customer_from_token, Permission, has_permission
 from app.domain.entities import Admin, Customer
 
 
@@ -66,3 +66,26 @@ async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] 
         return await get_current_user(credentials)
     except HTTPException:
         return None
+
+
+def get_current_admin_with_permission(required_permission: Permission) -> Callable:
+    """
+    Dependency factory for checking admin permissions.
+    
+    Usage:
+        @router.post("/some-route")
+        async def some_endpoint(
+            current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+        ):
+            ...
+    """
+    async def permission_checker(current_admin: Admin = Depends(get_current_admin)) -> Admin:
+        """Check if admin has required permission."""
+        if not await has_permission(current_admin, required_permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission required: {required_permission.value}"
+            )
+        return current_admin
+    
+    return permission_checker

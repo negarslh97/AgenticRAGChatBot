@@ -400,20 +400,38 @@ class RAGService(ABC):
                 # استفاده از v4 API برای جستجو
                 collection = client.collections.get("MarkdownNode")
                 
-                logger.info(f"⚡ Executing Enhanced Weaviate search (limit: {limit})...")
+                logger.info(f"⚡ Executing Enhanced Weaviate Hybrid Search (limit: {limit})...")
                 
-                # 🔥 STEP 2: Hybrid Search - ترکیب vector و keyword
-                # Execute query using v4 API با limit بالاتر
+                # 🔥 STEP 2: Hybrid Search - ترکیب vector و keyword (BM25)
+                # این قابلیت قوی‌ترین روش برای پیدا کردن اسناد مرتبط است
                 try:
-                    # Vector search اصلی
-                    response = collection.query.near_vector(
-                        near_vector=query_vector,
+                    # 🎯 Hybrid Search: ترکیب vector similarity با keyword matching (BM25)
+                    # alpha=0.5 یعنی وزن برابر برای vector و keyword
+                    # alpha=0.7 یعنی بیشتر vector (برای سوالات مفهومی)
+                    # alpha=0.3 یعنی بیشتر keyword (برای جستجوی دقیق)
+                    
+                    # 🧠 تشخیص هوشمند نوع سوال برای تنظیم alpha
+                    alpha = 0.5  # پیش‌فرض: وزن برابر
+                    
+                    # اگر سوال حاوی کلمات کلیدی خاص است، keyword را قوی‌تر کن
+                    technical_keywords = ['حساب', 'سند', 'بستانکار', 'بدهکار', 'مانده', 'تعدیل', 'معین', 'کل']
+                    if any(keyword in query for keyword in technical_keywords):
+                        alpha = 0.3  # بیشتر keyword-based
+                        logger.info(f"🎯 Detected technical keywords → Using alpha={alpha} (more keyword-focused)")
+                    else:
+                        alpha = 0.5  # متعادل
+                        logger.info(f"🎯 General query → Using alpha={alpha} (balanced)")
+                    
+                    response = collection.query.hybrid(
+                        query=query,  # متن query برای BM25
+                        vector=query_vector,  # vector برای semantic search
+                        alpha=alpha,  # وزن‌دهی بین vector و keyword
                         limit=limit,
-                        return_metadata=['distance', 'certainty']
+                        return_metadata=['distance', 'score', 'explain_score']
                     )
                     
                     objects = response.objects if response.objects else []
-                    logger.info(f"✅ {len(objects)} گره Markdown یافت شد")
+                    logger.info(f"✅ Hybrid Search: {len(objects)} گره Markdown یافت شد (Vector + BM25)")
 
                 except Exception as e:
                     logger.error(f"❌ خطا در جستجوی MarkdownNode: {str(e)}")
@@ -430,9 +448,14 @@ class RAGService(ABC):
                 seen_node_ids = set()  # برای جلوگیری از duplicate
                 
                 for i, obj in enumerate(objects):
-                    # در v4، metadata در obj.metadata قرار دارد
-                    certainty = obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5
-                    score = certainty  # Keep as float between 0-1
+                    # در v4 با Hybrid Search، score مستقیماً در metadata قرار دارد
+                    # Hybrid score بین vector similarity و BM25 است
+                    if hasattr(obj.metadata, 'score') and obj.metadata.score is not None:
+                        score = obj.metadata.score
+                    elif hasattr(obj.metadata, 'certainty') and obj.metadata.certainty is not None:
+                        score = obj.metadata.certainty
+                    else:
+                        score = 0.5  # fallback
                     
                     # در v4، properties در obj.properties قرار دارند
                     title = obj.properties.get("title", "")
