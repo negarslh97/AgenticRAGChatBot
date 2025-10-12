@@ -180,20 +180,19 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
                     failed += 1
                     continue
                 
-                # حذف chunks قبلی
+                # حذف chunks قبلی با syntax جدید Weaviate v4
                 if request.remove_old:
                     try:
                         with weaviate_client() as client:
+                            from weaviate.classes.query import Filter
                             collection = client.collections.get("MarkdownNode")
                             collection.data.delete_many(
-                                where={
-                                    "path": ["article_id"],
-                                    "operator": "Equal",
-                                    "valueText": article_id
-                                }
+                                where=Filter.by_property("article_id").equal(article_id)
                             )
+                            logger.debug(f"[Job {job_id}] Chunks قبلی حذف شدند")
                     except Exception as e:
-                        logger.warning(f"[Job {job_id}] خطا در حذف chunks قبلی: {e}")
+                        # اگر chunks قبلی وجود نداشت، مشکلی نیست
+                        logger.debug(f"[Job {job_id}] خطا در حذف chunks قبلی: {e}")
                 
                 # پارس و تقسیم
                 tree = markdown_parser.parse_to_tree(content, article_id, article_title=title)
@@ -215,8 +214,16 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
                 with weaviate_client() as client:
                     collection = client.collections.get("MarkdownNode")
                     
+                    # Safe handling برای metadata (جلوگیری از NoneType errors)
                     visibility = article.get("visibility", "public")
-                    category = article.get("category", {}).get("name", "عمومی") if isinstance(article.get("category"), dict) else "عمومی"
+                    
+                    # Safe category extraction
+                    category_obj = article.get("category")
+                    if category_obj and isinstance(category_obj, dict):
+                        category = category_obj.get("name", "عمومی")
+                    else:
+                        category = "عمومی"
+                    
                     full_article_content = content
                     
                     with collection.batch.dynamic() as batch:
@@ -351,7 +358,15 @@ async def get_all_reindex_jobs(
 async def debug_reindex_status(
     current_admin: Admin = Depends(get_current_admin)
 ):
-    """بررسی وضعیت MongoDB و Weaviate برای debugging"""
+    """
+    🔍 بررسی وضعیت MongoDB و Weaviate برای debugging
+    
+    اطلاعات بازگشتی:
+    - MongoDB: تعداد مقالات، نمونه مقالات
+    - Weaviate: تعداد chunks، تعداد مقالات ایندکس شده، نمونه chunks
+    - Embedder Config: تنظیمات مدل embedding
+    - Chunking Config: استراتژی chunking
+    """
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
         from app.core.config import settings
@@ -374,15 +389,49 @@ async def debug_reindex_status(
                 "content_length": len(article.get("content_markdown", ""))
             })
         
-        # شمارش chunks در Weaviate
+        # شمارش و نمونه‌برداری از chunks در Weaviate
         weaviate_chunks = 0
+        weaviate_sample_chunks = []
+        weaviate_articles_count = 0
         weaviate_error = None
         try:
             with weaviate_client() as client:
                 collection = client.collections.get("MarkdownNode")
-                # دریافت تعداد اشیاء
+                
+                # دریافت تعداد کل chunks
                 result = collection.aggregate.over_all(total_count=True)
                 weaviate_chunks = result.total_count if hasattr(result, 'total_count') else 0
+                
+                # دریافت نمونه chunks (5 عدد اول)
+                query_result = collection.query.fetch_objects(limit=5)
+                for obj in query_result.objects:
+                    props = obj.properties
+                    weaviate_sample_chunks.append({
+                        "article_id": props.get("article_id", "N/A"),
+                        "title": props.get("title", "N/A"),
+                        "content_preview": props.get("content", "")[:100] + "..." if props.get("content") else "",
+                        "content_length": len(props.get("content", "")),
+                        "level": props.get("level", 0),
+                        "visibility": props.get("visibility", "N/A"),
+                        "category": props.get("category", "N/A"),
+                    })
+                
+                # شمارش تعداد article_id های یکتا
+                try:
+                    # گروه‌بندی بر اساس article_id
+                    agg_result = collection.aggregate.over_all(
+                        group_by="article_id"
+                    )
+                    if hasattr(agg_result, 'groups') and agg_result.groups:
+                        weaviate_articles_count = len(agg_result.groups)
+                except:
+                    # اگر group by کار نکرد، از روش دستی استفاده می‌کنیم
+                    article_ids = set()
+                    all_chunks = collection.query.fetch_objects(limit=10000)
+                    for obj in all_chunks.objects:
+                        article_ids.add(obj.properties.get("article_id"))
+                    weaviate_articles_count = len(article_ids)
+                    
         except Exception as e:
             weaviate_error = str(e)
         
@@ -396,17 +445,97 @@ async def debug_reindex_status(
             },
             "weaviate": {
                 "total_chunks": weaviate_chunks,
+                "indexed_articles_count": weaviate_articles_count,
+                "avg_chunks_per_article": round(weaviate_chunks / weaviate_articles_count, 2) if weaviate_articles_count > 0 else 0,
+                "sample_chunks": weaviate_sample_chunks,
                 "error": weaviate_error
             },
             "embedder_config": {
                 "model": settings.embedder_model_loaded,
                 "api_key_set": bool(settings.embedder_api_key_loaded),
                 "base_url": settings.embedder_openai_base_url_loaded
+            },
+            "chunking_config": {
+                "max_chunk_size": 512,
+                "chunk_overlap": 50,
+                "strategy": "Small-to-Big Retrieval"
             }
         }
         
     except Exception as e:
         logger.error(f"Debug error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Debug error: {str(e)}"
+        )
+
+
+@router.get("/reindex/debug/article/{article_id}", tags=["Super Admin - Re-indexing"])
+async def debug_article_chunks(
+    article_id: str,
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """
+    🔍 مشاهده تمام chunks یک مقاله خاص در Weaviate
+    
+    این endpoint برای دیباگ و بررسی نحوه تقسیم یک مقاله به chunks مفید است.
+    """
+    try:
+        from app.infrastructure.connection_manager import weaviate_client
+        from weaviate.classes.query import Filter
+        
+        with weaviate_client() as client:
+            collection = client.collections.get("MarkdownNode")
+            
+            # جستجوی chunks این مقاله
+            query_result = collection.query.fetch_objects(
+                filters=Filter.by_property("article_id").equal(article_id),
+                limit=1000
+            )
+            
+            chunks = []
+            for obj in query_result.objects:
+                props = obj.properties
+                chunks.append({
+                    "node_id": props.get("node_id", ""),
+                    "title": props.get("title", ""),
+                    "content": props.get("content", ""),
+                    "content_length": len(props.get("content", "")),
+                    "level": props.get("level", 0),
+                    "path": props.get("path", ""),
+                    "order": props.get("order", 0),
+                    "parent_id": props.get("parent_id", ""),
+                    "visibility": props.get("visibility", ""),
+                    "category": props.get("category", "")
+                })
+            
+            # مرتب‌سازی بر اساس order
+            chunks.sort(key=lambda x: x["order"])
+            
+            # محاسبه آمار
+            if chunks:
+                chunk_sizes = [c["content_length"] for c in chunks]
+                stats = {
+                    "total_chunks": len(chunks),
+                    "avg_chunk_size": round(sum(chunk_sizes) / len(chunk_sizes), 2),
+                    "min_chunk_size": min(chunk_sizes),
+                    "max_chunk_size": max(chunk_sizes),
+                    "total_content_length": sum(chunk_sizes)
+                }
+            else:
+                stats = {
+                    "total_chunks": 0,
+                    "message": "هیچ chunk‌ای برای این مقاله پیدا نشد"
+                }
+            
+            return {
+                "article_id": article_id,
+                "stats": stats,
+                "chunks": chunks
+            }
+            
+    except Exception as e:
+        logger.error(f"Debug article error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Debug error: {str(e)}"

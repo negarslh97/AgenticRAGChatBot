@@ -53,9 +53,10 @@ class Settings(BaseSettings):
     reranker_timeout: int = 60  # تایم‌اوت به ثانیه
     
     # 🆕 RAG Retrieval Configuration
-    weaviate_retrieval_limit: int = 30      # تعداد اسناد برای بازیابی اولیه
-    reranker_top_k: int = 20                # تعداد اسناد برتر بعد از reranking
-    context_documents_count: int = 15       # تعداد اسناد برای context در RAG
+    # 🔥 OPTIMIZED for Small-to-Big Retrieval Strategy (Phase 1)
+    weaviate_retrieval_limit: int = 30      # تعداد اسناد برای بازیابی اولیه (افزایش یافته)
+    reranker_top_k: int = 30                # تعداد اسناد برتر بعد از reranking (افزایش یافته از 20)
+    context_documents_count: int = 5        # تعداد اسناد TOP برای ارسال full context (کاهش یافته اما با context غنی‌تر)
     max_sources_to_format: int = 10         # حداکثر تعداد منابع یکتا برای نمایش
     
     # 🆕 Hybrid Model Strategy (برای کاهش هزینه و بهبود سرعت)

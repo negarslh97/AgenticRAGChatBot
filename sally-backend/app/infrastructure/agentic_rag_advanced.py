@@ -736,12 +736,25 @@ class AdvancedAgenticRAG:
             
             try:
                 # آماده‌سازی context از نتایج جستجو
+                # 🔥 SMALL-TO-BIG RETRIEVAL (Phase 1): استفاده از full content
                 context_parts = []
-                for result in state["search_results"][:5]:
+                for idx, result in enumerate(state["search_results"][:5], 1):
+                    # 🎯 استفاده از full content اگر موجود باشد
+                    full_content = result.get('full_article_content', '')
+                    chunk_content = result.get('content', '')
+                    
+                    # اگر full content موجود است و بزرگتر از chunk است، از آن استفاده کن
+                    if full_content and len(full_content) > len(chunk_content):
+                        content_to_use = full_content
+                        logger.info(f"   📄 Result {idx}: Using FULL content ({len(full_content)} chars)")
+                    else:
+                        content_to_use = chunk_content[:1500]  # محدود کردن chunk به 1500 کاراکتر
+                        logger.info(f"   📄 Result {idx}: Using chunk content ({len(content_to_use)} chars)")
+                    
                     context_parts.append(f"""
 مسیر: {result.get('path', '')}
 عنوان: {result.get('title', '')}
-محتوا: {result.get('content', '')[:500]}
+محتوا: {content_to_use}
 ---
 """)
                 

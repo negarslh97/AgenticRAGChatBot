@@ -21,11 +21,15 @@ class MarkdownParser:
 
     def __init__(
         self, 
-        max_chunk_size: int = 1000,  # حداکثر اندازه chunk (کاراکتر)
-        chunk_overlap: int = 200      # همپوشانی بین chunks (کاراکتر)
+        max_chunk_size: int = 512,   # 🔥 OPTIMIZED: حداکثر اندازه chunk (کاراکتر) - کاهش یافته برای دقت بالاتر
+        chunk_overlap: int = 50       # 🔥 OPTIMIZED: همپوشانی بین chunks (کاراکتر) - برای حفظ پیوستگی
     ):
         """
         Initialize parser with chunking parameters.
+        
+        🔥 SMALL-TO-BIG RETRIEVAL STRATEGY:
+        - chunk_size=512: قطعات کوچکتر برای دقت بالاتر در جستجو
+        - chunk_overlap=50: همپوشانی برای حفظ context بین chunks
         
         Args:
             max_chunk_size: حداکثر تعداد کاراکتر در هر chunk
@@ -400,7 +404,8 @@ class MarkdownParser:
         return "\n".join(toc_lines)
 
 
-# Global instance با تنظیمات بهینه برای RAG
-# max_chunk_size=1000: حداکثر 1000 کاراکتر (حدود 200-250 کلمه)
-# chunk_overlap=200: 20% همپوشانی برای حفظ context
-markdown_parser = MarkdownParser(max_chunk_size=1000, chunk_overlap=200)
+# Global instance با تنظیمات بهینه برای Small-to-Big Retrieval
+# 🔥 OPTIMIZED FOR PRECISION:
+# max_chunk_size=512: chunks کوچکتر برای دقت بالاتر در retrieval
+# chunk_overlap=50: همپوشانی برای حفظ context بین chunks
+markdown_parser = MarkdownParser(max_chunk_size=512, chunk_overlap=50)

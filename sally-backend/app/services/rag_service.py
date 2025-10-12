@@ -1107,17 +1107,34 @@ class SimpleRAGService(RAGService):
                 # 🔥 ENHANCED: استفاده از تنظیمات برای تعداد documents در context
                 top_docs = relevant_docs[:settings.context_documents_count]
                 
-                # 🔥 ENHANCED: ساخت context با ساختار بهتر و اطلاعات بیشتر
+                # 🔥 SMALL-TO-BIG RETRIEVAL (Phase 1): 
+                # برای top documents، از full_article_content استفاده می‌کنیم
+                # این به LLM context کامل‌تر و غنی‌تری می‌دهد
                 context_parts = []
                 for i, doc in enumerate(top_docs, 1):
+                    # 🎯 استفاده از full_article_content اگر موجود باشد
+                    full_content = doc.get('full_article_content', '')
+                    chunk_content = doc.get('content', '')
+                    
+                    # استراتژی: اگر full content موجود است و معقول است، از آن استفاده کن
+                    # وگرنه از chunk content استفاده کن
+                    if full_content and len(full_content) > len(chunk_content):
+                        content_to_use = full_content
+                        content_type = "Full Article"
+                        logger.info(f"   📄 Doc {i}: Using FULL article content ({len(full_content)} chars)")
+                    else:
+                        content_to_use = chunk_content
+                        content_type = "Chunk"
+                        logger.info(f"   📄 Doc {i}: Using chunk content ({len(chunk_content)} chars)")
+                    
                     doc_context = f"""
-=== منبع {i} ===
+=== منبع {i} ({content_type}) ===
 عنوان: {doc['title']}
 مسیر: {doc.get('path', 'N/A')}
 امتیاز ارتباط: {doc.get('score', 0):.2f}
 
 محتوا:
-{doc['content']}
+{content_to_use}
 
 ---
 """
@@ -1324,14 +1341,23 @@ class AgenticRAGService(RAGService):
                     "suggested_actions": ["create_ticket", "refine_question"]
                 }
             
-            # ساخت context ساده
+            # ساخت context ساده با Small-to-Big strategy
             top_docs = relevant_docs[:5]
             context_parts = []
             for i, doc in enumerate(top_docs, 1):
+                # 🔥 استفاده از full content اگر موجود باشد
+                full_content = doc.get('full_article_content', '')
+                chunk_content = doc.get('content', '')
+                
+                if full_content and len(full_content) > len(chunk_content):
+                    content_to_use = full_content
+                else:
+                    content_to_use = chunk_content
+                
                 context_parts.append(f"""
 === منبع {i} ===
 عنوان: {doc['title']}
-محتوا: {doc['content']}
+محتوا: {content_to_use}
 ---
 """)
             

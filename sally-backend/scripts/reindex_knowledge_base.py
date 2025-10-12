@@ -158,8 +158,8 @@ class KnowledgeBaseReindexer:
                         logger.warning(f"   ⚠️  محتوای خالی یا کوتاه - رد شد")
                         continue
                     
-                    # 🎯 پارس کردن با chunking strategy جدید
-                    logger.info(f"   🔪 تقسیم به chunks (max_size=1000, overlap=200)...")
+                    # 🎯 پارس کردن با chunking strategy جدید (Small-to-Big)
+                    logger.info(f"   🔪 تقسیم به chunks (max_size=512, overlap=50)...")
                     tree = markdown_parser.parse_to_tree(
                         content,
                         article_id,
@@ -235,9 +235,18 @@ class KnowledgeBaseReindexer:
                 # Batch insert به Weaviate
                 logger.info(f"      💾 ذخیره در Weaviate...")
                 
-                # آماده‌سازی metadata
+                # آماده‌سازی metadata (safe handling of None)
+                if article_metadata is None:
+                    article_metadata = {}
+                
                 visibility = article_metadata.get("visibility", "public")
-                category = article_metadata.get("category", {}).get("name", "عمومی")
+                
+                # Safe category extraction
+                category_obj = article_metadata.get("category")
+                if category_obj and isinstance(category_obj, dict):
+                    category = category_obj.get("name", "عمومی")
+                else:
+                    category = "عمومی"
                 
                 # استخراج محتوای کامل مقاله برای context
                 full_article_content = article_metadata.get("content_markdown", "")
@@ -327,15 +336,12 @@ class KnowledgeBaseReindexer:
                 logger.info("🗑️  حذف chunks قبلی این مقاله از Weaviate...")
                 try:
                     with weaviate_client() as client:
+                        from weaviate.classes.query import Filter
                         collection = client.collections.get("MarkdownNode")
                         
-                        # حذف تمام nodes این مقاله
+                        # حذف تمام nodes این مقاله با syntax صحیح Weaviate v4
                         result = collection.data.delete_many(
-                            where={
-                                "path": ["article_id"],
-                                "operator": "Equal",
-                                "valueText": article_id
-                            }
+                            where=Filter.by_property("article_id").equal(article_id)
                         )
                         logger.info(f"   ✅ Chunks قبلی حذف شدند")
                 except Exception as e:
@@ -436,16 +442,19 @@ class KnowledgeBaseReindexer:
                     
                     logger.info(f"\n[{idx}/{total}] پردازش: {title}")
                     
-                    # حذف chunks قبلی
-                    with weaviate_client() as client:
-                        collection = client.collections.get("MarkdownNode")
-                        collection.data.delete_many(
-                            where={
-                                "path": ["article_id"],
-                                "operator": "Equal",
-                                "valueText": article_id
-                            }
-                        )
+                    # حذف chunks قبلی (skip delete - اگر وجود نداشت خطا نمی‌دهد)
+                    try:
+                        with weaviate_client() as client:
+                            from weaviate.classes.query import Filter
+                            collection = client.collections.get("MarkdownNode")
+                            # استفاده از syntax صحیح Weaviate v4
+                            collection.data.delete_many(
+                                where=Filter.by_property("article_id").equal(article_id)
+                            )
+                            logger.info(f"   🗑️  Chunks قبلی حذف شد")
+                    except Exception as delete_error:
+                        # اگر chunks قبلی وجود نداشت، مشکلی نیست
+                        logger.debug(f"   ℹ️  No previous chunks to delete or delete failed: {delete_error}")
                     
                     # پارس و ایندکس
                     content = article.get("content_markdown", "")
