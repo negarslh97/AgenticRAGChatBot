@@ -686,6 +686,7 @@ async def check_articles_sync_status(
 ):
     """
     Check which published articles are not synced to Weaviate.
+    🔥 بهینه‌سازی شده: از یک connection واحد برای بررسی همه مقالات استفاده می‌کند
     """
     try:
         from app.infrastructure.knowledge_base_repository import knowledge_base_repository
@@ -696,17 +697,31 @@ async def check_articles_sync_status(
         ).to_list()
         
         total_published = len(published_articles)
+        
+        if total_published == 0:
+            return {
+                "total_published": 0,
+                "synced": 0,
+                "not_synced": 0,
+                "not_synced_articles": [],
+                "sync_percentage": 100
+            }
+        
+        # 🔥 استفاده از متد بهینه‌سازی شده که یک connection واحد استفاده می‌کند
+        article_ids = [str(article.id) for article in published_articles]
+        sync_status = await knowledge_base_repository.check_multiple_articles_in_weaviate(article_ids)
+        
+        # محاسبه تعداد همگام‌سازی شده و لیست مقالات همگام نشده
         synced_count = 0
         not_synced = []
         
         for article in published_articles:
-            # Check if article exists in Weaviate
-            is_synced = await knowledge_base_repository.check_article_in_weaviate(str(article.id))
-            if is_synced:
+            article_id = str(article.id)
+            if sync_status.get(article_id, False):
                 synced_count += 1
             else:
                 not_synced.append({
-                    "id": str(article.id),
+                    "id": article_id,
                     "title": article.title,
                     "published_at": article.published_at.isoformat() if article.published_at else None
                 })

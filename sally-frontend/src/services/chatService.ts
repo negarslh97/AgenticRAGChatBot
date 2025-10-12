@@ -192,8 +192,8 @@ export const chatService = {
   },
 
   async sendAdminMessageStream(
-    content: string,
     conversationId: string | undefined,
+    content: string,
     ragType: 'simple' | 'agentic',
     onEvent: (evt: any) => void,
     model?: string,
@@ -208,6 +208,8 @@ export const chatService = {
       ...(model && { model }),
       ...(temperature !== undefined && { temperature }),
     }
+
+    console.log('🚀 Sending admin message:', { conversationId, content: content.substring(0, 50), ragType, model, temperature })
 
     const token = localStorage.getItem("token")
 

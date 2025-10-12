@@ -12,8 +12,53 @@ from app.services.rag_service import get_rag_service
 from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.use_cases.query_analyzer import analyze_query_complexity, generate_conversation_title
+from app.infrastructure.conversation_memory import ConversationMemoryManager
 
 logger = get_logger(__name__)
+
+
+async def load_conversation_history(conversation_id: str, max_messages: int = 10) -> List[Dict[str, str]]:
+    """
+    🧠 بارگذاری تاریخچه مکالمه از دیتابیس
+    
+    Args:
+        conversation_id: شناسه گفتگو
+        max_messages: تعداد حداکثر پیام‌ها (پیش‌فرض: 10)
+        
+    Returns:
+        لیست پیام‌ها به فرمت [{"role": "user"/"assistant", "content": "..."}]
+    """
+    conversation_history = []
+    try:
+        from bson import ObjectId
+        
+        # تبدیل conversation_id به ObjectId اگر لازم باشد
+        if isinstance(conversation_id, str):
+            try:
+                conv_id = ObjectId(conversation_id)
+            except:
+                logger.warning(f"⚠️ Invalid conversation_id format: {conversation_id}")
+                return conversation_history
+        else:
+            conv_id = conversation_id
+        
+        # Load previous messages from this conversation
+        messages = await Message.find(
+            Message.conversation_id == str(conv_id)
+        ).sort(+Message.created_at).to_list()
+        
+        # فقط max_messages پیام آخر را برگردان
+        for msg in messages[-max_messages:]:
+            conversation_history.append({
+                "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
+                "content": msg.content
+            })
+        
+        logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history (max: {max_messages})")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load conversation history: {e}", exc_info=True)
+    
+    return conversation_history
 
 class ChatUseCases:
     @staticmethod
@@ -200,23 +245,8 @@ class ChatUseCases:
         sources = []
         confidence = 0.5
         
-        # 💾 Load conversation history for context
-        conversation_history = []
-        try:
-            # Load previous messages from this conversation (last 10 messages)
-            messages = await Message.find(
-                {"conversation_id": str(conversation.id)}
-            ).sort("created_at", 1).to_list()
-            
-            for msg in messages[-10:]:  # Last 10 messages
-                conversation_history.append({
-                    "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
-                    "content": msg.content
-                })
-            
-            logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not load conversation history: {e}")
+        # 💾 Load conversation history for context (10 messages max)
+        conversation_history = await load_conversation_history(str(conversation.id), max_messages=10)
         
         # 🎯 QUERY ROUTER: تشخیص هوشمند نوع سوال (قبل از RAG)
         from app.utils.query_router import query_router
@@ -710,23 +740,8 @@ class ChatUseCases:
                 "conversation_id": str(conversation.id)
             }
         
-        # 💾 Load conversation history for context
-        conversation_history = []
-        try:
-            # Load previous messages from this conversation (last 10 messages)
-            messages = await Message.find(
-                {"conversation_id": str(conversation.id)}
-            ).sort("created_at", 1).to_list()
-            
-            for msg in messages[-10:]:  # Last 10 messages
-                conversation_history.append({
-                    "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
-                    "content": msg.content
-                })
-            
-            logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not load conversation history: {e}")
+        # 💾 Load conversation history for context (10 messages max)
+        conversation_history = await load_conversation_history(str(conversation.id), max_messages=10)
         
         # Add conversation history to context
         context["conversation_history"] = conversation_history
@@ -983,23 +998,8 @@ class ChatUseCases:
                 "conversation_id": str(conversation.id)
             }
         
-        # 💾 Load conversation history for context
-        conversation_history = []
-        try:
-            # Load previous messages from this conversation (last 10 messages)
-            messages = await Message.find(
-                {"conversation_id": str(conversation.id)}
-            ).sort("created_at", 1).to_list()
-            
-            for msg in messages[-10:]:  # Last 10 messages
-                conversation_history.append({
-                    "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
-                    "content": msg.content
-                })
-            
-            logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not load conversation history: {e}")
+        # 💾 Load conversation history for context (10 messages max)
+        conversation_history = await load_conversation_history(str(conversation.id), max_messages=10)
         
         # Stream AI response
         full_response = ""

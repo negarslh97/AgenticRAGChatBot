@@ -520,6 +520,55 @@ class KnowledgeBaseRepository:
             logger.error(traceback.format_exc())
             return False
 
+    async def check_multiple_articles_in_weaviate(self, article_ids: List[str]) -> Dict[str, bool]:
+        """
+        🔥 بررسی وجود چندین مقاله در Weaviate با یک connection
+        
+        این متد به جای باز کردن connection جداگانه برای هر مقاله،
+        یک connection واحد استفاده می‌کند و کارایی را بهبود می‌بخشد.
+        
+        Args:
+            article_ids: لیست شناسه‌های مقالات
+            
+        Returns:
+            دیکشنری که کلید article_id و مقدار True/False است
+        """
+        result = {aid: False for aid in article_ids}
+        
+        if not article_ids:
+            return result
+            
+        try:
+            from app.infrastructure.connection_manager import weaviate_client
+            from weaviate.classes.query import Filter
+            
+            with weaviate_client() as client:
+                collection = client.collections.get("MarkdownNode")
+                
+                # بررسی هر مقاله با یک connection
+                for article_id in article_ids:
+                    try:
+                        response = collection.query.fetch_objects(
+                            filters=Filter.by_property("article_id").equal(article_id),
+                            limit=1
+                        )
+                        result[article_id] = len(response.objects) > 0
+                    except Exception as e:
+                        logger.warning(f"⚠️ خطا در بررسی مقاله {article_id}: {e}")
+                        result[article_id] = False
+                
+                synced_count = sum(1 for v in result.values() if v)
+                logger.info(f"✅ بررسی {len(article_ids)} مقاله با یک connection: {synced_count} همگام‌سازی شده")
+                
+                return result
+            # ✅ client به صورت خودکار بسته می‌شود
+
+        except Exception as e:
+            logger.error(f"❌ خطا در بررسی وجود چندین مقاله در Weaviate: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return result
+
     async def _sync_to_weaviate(
         self,
         article: KnowledgeBaseArticle,

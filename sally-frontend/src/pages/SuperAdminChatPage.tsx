@@ -95,7 +95,8 @@ const AVAILABLE_MODELS = [
   
   // 🥇 سریع‌ترین (264 ch/s، 0% empty chunks)
   { id: 'google/gemini-2.5-flash', name: '🏆 Gemini 2.5 Flash', provider: 'Google', description: '✅ سریع‌ترین - 264 ch/s، رایگان' },
-  
+  { id: 'qwen/qwen3-235b-a22b:free', name: 'Qwen 3', provider: 'Alibaba', description: '✅ سریع‌ترین - 264 ch/s، رایگان' },
+
   // 🥈 مدل‌های رایگان عالی
   { id: 'deepseek/deepseek-chat-v3.1:free', name: '⭐ DeepSeek V3.1 (Free)', provider: 'DeepSeek', description: '✅ 117 ch/s، 0% empty، رایگان' },
   
@@ -253,8 +254,8 @@ const SuperAdminChatPage = () => {
             const currentConvId = selectedConversation.id.startsWith('new-') ? undefined : selectedConversation.id;
 
             await chatService.sendAdminMessageStream(
-                messageContent,
                 currentConvId,
+                messageContent,
                 ragType,
                 (evt: any) => {
                     if (!evt) return;
@@ -324,6 +325,89 @@ const SuperAdminChatPage = () => {
                             return updated;
                         });
                         setIsLoading(false);
+                        
+                        // 🔥 بعد از تکمیل پاسخ، لیست conversations رو refresh کن
+                        const finalConvId = evt.conversation_id || currentConvId;
+                        console.log('🔍 DEBUG: Starting conversation refresh...', { 
+                            finalConvId, 
+                            evt_conversation_id: evt.conversation_id,
+                            currentConvId,
+                            evt_rag_type: evt.rag_type 
+                        });
+                        
+                        if (finalConvId) {
+                            setTimeout(async () => {
+                                try {
+                                    console.log('📡 Fetching conversation from server:', finalConvId);
+                                    // دریافت اطلاعات به‌روز conversation از سرور
+                                    const updatedConv = await chatService.getConversation(finalConvId);
+                                    console.log('📥 Server response:', updatedConv);
+                                    
+                                    // به‌روزرسانی لیست conversations
+                                    setConversations(prev => {
+                                        console.log('📝 Current conversations before update:', prev.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
+                                        
+                                        const exists = prev.some(c => c.id === finalConvId);
+                                        console.log('🔍 Conversation exists in list:', exists);
+                                        
+                                        if (exists) {
+                                            // اگر موجود بود، اطلاعاتش رو update کن
+                                            const updated = prev.map(c => 
+                                                c.id === finalConvId 
+                                                    ? { 
+                                                        ...c, 
+                                                        title: updatedConv.title || c.title,
+                                                        rag_type: updatedConv.rag_type || evt.rag_type,
+                                                        updated_at: updatedConv.updated_at
+                                                    }
+                                                    : c
+                                            );
+                                            console.log('📝 Updated conversations:', updated.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
+                                            return updated;
+                                        } else {
+                                            // اگر موجود نبود (مکالمه جدید)، اضافه‌اش کن
+                                            const newConversation = {
+                                                id: finalConvId,
+                                                title: updatedConv.title || messageContent.slice(0, 50),
+                                                messages: [],
+                                                created_at: updatedConv.created_at || new Date().toISOString(),
+                                                updated_at: updatedConv.updated_at || new Date().toISOString(),
+                                                rag_type: updatedConv.rag_type || evt.rag_type
+                                            };
+                                            console.log('➕ Adding new conversation:', newConversation);
+                                            return [newConversation, ...prev];
+                                        }
+                                    });
+                                    
+                                    // به‌روزرسانی selectedConversation با عنوان و rag_type جدید
+                                    setSelectedConversation(prev => {
+                                        if (!prev) return prev;
+                                        const updated = {
+                                            ...prev,
+                                            title: updatedConv.title || prev.title,
+                                            rag_type: updatedConv.rag_type || evt.rag_type
+                                        };
+                                        console.log('🎯 Updated selectedConversation:', { 
+                                            old_title: prev.title, 
+                                            new_title: updated.title,
+                                            old_rag_type: prev.rag_type,
+                                            new_rag_type: updated.rag_type
+                                        });
+                                        return updated;
+                                    });
+                                    
+                                    console.log('✅ Conversation updated successfully:', { 
+                                        id: finalConvId, 
+                                        title: updatedConv.title,
+                                        rag_type: updatedConv.rag_type || evt.rag_type 
+                                    });
+                                } catch (error) {
+                                    console.error('❌ Failed to refresh conversation:', error);
+                                }
+                            }, 500); // کمی تاخیر تا سرور عنوان رو generate کنه
+                        } else {
+                            console.warn('⚠️ No finalConvId available for refresh');
+                        }
                     }
 
                     if (evt.type === 'error') {
@@ -1095,7 +1179,7 @@ const SuperAdminChatPage = () => {
                                                 )}
                                             
                                             {/* Get More Details Button */}
-                                            {message.role === 'assistant' && message.metadata?.can_get_more_details && (
+                                            {message.role === 'assistant' && message.metadata?.can_get_more_details && message.metadata?.rag_type === 'simple' && (
                                                 <div className="mt-3">
                                                     <button
                                                         onClick={async () => {
@@ -1106,27 +1190,200 @@ const SuperAdminChatPage = () => {
                                                             }
                                                             
                                                             console.log('🔥 Getting more details for query:', userQuery);
-                                                            console.log('🔥 Current rag_type:', ragType, '-> switching to: agentic');
+                                                            console.log('🔥 Switching from simple to agentic RAG');
                                                             
-                                                            // تنظیم موقت rag_type به agentic
-                                                            const previousRagType = ragType;
-                                                            setRagType('agentic');
+                                                            if (!selectedConversation?.id) {
+                                                                toast.error('گفتگوی فعال یافت نشد');
+                                                                return;
+                                                            }
                                                             
-                                                            // ارسال سوال با rag_type جدید
-                                                            setNewMessage(userQuery);
+                                                            setIsLoading(true);
                                                             
-                                                            // کمی صبر کنیم تا state به‌روز شود
-                                                            setTimeout(async () => {
-                                                                await handleSendMessage();
-                                                                // برگرداندن rag_type به حالت قبلی
-                                                                setRagType(previousRagType);
+                                                            // ایجاد پیام کاربر جدید با محتوای سوال قبلی
+                                                            const userTempId = Date.now().toString();
+                                                            const userMsg: Message = {
+                                                                id: userTempId,
+                                                                content: `🔍 ${userQuery}\n\n(درخواست توضیحات کامل)`,
+                                                                role: 'user',
+                                                                timestamp: new Date(),
+                                                                sender_type: 'SuperAdmin',
+                                                            };
+                                                            
+                                                            // ایجاد پیام موقت پاسخ
+                                                            const assistantTempId = (Date.now() + 1).toString();
+                                                            const assistantMsg: Message = {
+                                                                id: assistantTempId,
+                                                                content: '',
+                                                                role: 'assistant',
+                                                                timestamp: new Date(),
+                                                                sender_type: 'AI',
+                                                            };
+                                                            
+                                                            // اضافه کردن پیام‌ها به گفتگو
+                                                            setSelectedConversation(prev => {
+                                                                if (!prev) return prev;
+                                                                return {
+                                                                    ...prev,
+                                                                    messages: [...prev.messages, userMsg, assistantMsg]
+                                                                };
+                                                            });
+                                                            
+                                                            // اسکرول به انتهای صفحه
+                                                            setTimeout(() => {
+                                                                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
                                                             }, 100);
+                                                            
+                                                            try {
+                                                                // ارسال درخواست با Agentic RAG
+                                                                await chatService.sendAdminMessageStream(
+                                                                    selectedConversation.id,
+                                                                    userQuery, // سوال اصلی بدون اضافه کردن متن
+                                                                    'agentic', // 🔥 فورس به Agentic RAG
+                                                                    (evt: any) => {
+                                                                        if (!evt) return;
+                                                                        
+                                                                        if (evt.type === 'chunk') {
+                                                                            setSelectedConversation(prev => {
+                                                                                if (!prev) return prev;
+                                                                                const updated = { ...prev };
+                                                                                updated.messages = updated.messages.map(m =>
+                                                                                    m.id === assistantTempId
+                                                                                        ? { ...m, content: (m.content || '') + (evt.content || '') }
+                                                                                        : m
+                                                                                );
+                                                                                return updated;
+                                                                            });
+                                                                        }
+                                                                        
+                                                                        if (evt.type === 'complete') {
+                                                                            setSelectedConversation(prev => {
+                                                                                if (!prev) return prev;
+                                                                                const updated = { ...prev };
+                                                                                updated.messages = updated.messages.map(m =>
+                                                                                    m.id === assistantTempId
+                                                                                        ? {
+                                                                                            ...m,
+                                                                                            id: evt.message_id || assistantTempId,
+                                                                                            content: evt.full_response || m.content,
+                                                                                            complexity_fa: evt.complexity_fa,
+                                                                                            model: evt.model,
+                                                                                            confidence: evt.confidence,
+                                                                                            sources: evt.sources,
+                                                                                            metadata: {
+                                                                                                ...(m.metadata || {}),
+                                                                                                rag_type: 'agentic',
+                                                                                                can_get_more_details: false // دکمه رو برای پاسخ agentic نشون نده
+                                                                                            }
+                                                                                        }
+                                                                                        : m
+                                                                                );
+                                                                                return updated;
+                                                                            });
+                                                                            setIsLoading(false);
+                                                                            toast.success('✅ توضیحات کامل دریافت شد');
+                                                                            
+                                                                            // 🔥 به‌روزرسانی لیست conversations با rag_type جدید
+                                                                            if (selectedConversation?.id) {
+                                                                                console.log('🔍 DEBUG (Agentic): Starting conversation refresh...');
+                                                                                setTimeout(async () => {
+                                                                                    try {
+                                                                                        console.log('📡 Fetching Agentic conversation from server:', selectedConversation.id);
+                                                                                        const updatedConv = await chatService.getConversation(selectedConversation.id);
+                                                                                        console.log('📥 Server response (Agentic):', updatedConv);
+                                                                                        
+                                                                                        // به‌روزرسانی لیست conversations
+                                                                                        setConversations(prev => {
+                                                                                            console.log('📝 Current conversations before Agentic update:', prev.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
+                                                                                            
+                                                                                            const updated = prev.map(c => 
+                                                                                                c.id === selectedConversation.id 
+                                                                                                    ? { 
+                                                                                                        ...c, 
+                                                                                                        title: updatedConv.title || c.title,
+                                                                                                        rag_type: (updatedConv.rag_type as 'simple' | 'agentic' | 'detailed') || 'agentic', // این مکالمه حالا agentic شده
+                                                                                                        updated_at: updatedConv.updated_at
+                                                                                                    }
+                                                                                                    : c
+                                                                                            );
+                                                                                            
+                                                                                            console.log('📝 Updated conversations (Agentic):', updated.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
+                                                                                            return updated;
+                                                                                        });
+                                                                                        
+                                                                                        // به‌روزرسانی selectedConversation
+                                                                                        setSelectedConversation(prev => {
+                                                                                            if (!prev) return prev;
+                                                                                            const updated = {
+                                                                                                ...prev,
+                                                                                                rag_type: (updatedConv.rag_type as 'simple' | 'agentic' | 'detailed') || 'agentic'
+                                                                                            };
+                                                                                            console.log('🎯 Updated selectedConversation (Agentic):', { 
+                                                                                                old_rag_type: prev.rag_type,
+                                                                                                new_rag_type: updated.rag_type
+                                                                                            });
+                                                                                            return updated;
+                                                                                        });
+                                                                                        
+                                                                                        console.log('✅ Conversation upgraded to Agentic RAG');
+                                                                                    } catch (error) {
+                                                                                        console.error('❌ Failed to refresh Agentic conversation:', error);
+                                                                                    }
+                                                                                }, 300);
+                                                                            } else {
+                                                                                console.warn('⚠️ No selectedConversation available for Agentic refresh');
+                                                                            }
+                                                                        }
+                                                                        
+                                                                        if (evt.type === 'error') {
+                                                                            setSelectedConversation(prev => {
+                                                                                if (!prev) return prev;
+                                                                                const updated = { ...prev };
+                                                                                updated.messages = updated.messages.map(m =>
+                                                                                    m.id === assistantTempId
+                                                                                        ? {
+                                                                                            ...m,
+                                                                                            content: evt.error || 'خطایی رخ داد',
+                                                                                            is_failed: true,
+                                                                                            failure_reason: evt.error
+                                                                                        }
+                                                                                        : m
+                                                                                );
+                                                                                return updated;
+                                                                            });
+                                                                            setIsLoading(false);
+                                                                            toast.error('خطا در دریافت توضیحات کامل');
+                                                                        }
+                                                                    },
+                                                                    selectedModel,
+                                                                    temperature
+                                                                );
+                                                            } catch (error: any) {
+                                                                console.error('❌ Error getting more details:', error);
+                                                                setSelectedConversation(prev => {
+                                                                    if (!prev) return prev;
+                                                                    const updated = { ...prev };
+                                                                    updated.messages = updated.messages.map(m =>
+                                                                        m.id === assistantTempId
+                                                                            ? {
+                                                                                ...m,
+                                                                                content: error.message || 'خطایی رخ داد',
+                                                                                is_failed: true,
+                                                                                failure_reason: error.message
+                                                                            }
+                                                                            : m
+                                                                    );
+                                                                    return updated;
+                                                                });
+                                                                setIsLoading(false);
+                                                                toast.error('خطا در دریافت توضیحات کامل');
+                                                            }
                                                         }}
                                                         disabled={isLoading}
                                                         className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg"
                                                     >
                                                         <Sparkles className="w-4 h-4" />
-                                                        توضیحات کامل
+                                                        <span className="hidden md:inline">توضیحات کامل با Agentic RAG</span>
+                                                        <span className="md:hidden">توضیحات کامل</span>
                                                     </button>
                                                 </div>
                                             )}

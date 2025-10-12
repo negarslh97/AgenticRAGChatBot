@@ -20,12 +20,15 @@ const SyncStatusWidget: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false)
 
   useEffect(() => {
+    // 🔥 فقط در بارگذاری اولیه یکبار چک کن
+    loadStatus()
+    
     if (autoRefresh) {
-      loadStatus()
-      checkSyncStatus()
       const interval = setInterval(() => {
         loadStatus()
-        if (!isSyncing) {
+        // 🔥 فقط اگر در حال sync هستیم، checkSyncStatus رو صدا بزن
+        // در غیر این صورت فقط status عمومی رو بگیر
+        if (isSyncing) {
           checkSyncStatus()
         }
       }, 30000) // Refresh every 30 seconds
@@ -193,9 +196,19 @@ const SyncStatusWidget: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium">وضعیت همگام‌سازی:</span>
-                  <span className={`text-sm font-bold ${getSyncPercentage() === 100 ? 'text-green-600' : 'text-yellow-600'}`}>
-                    {getSyncPercentage().toFixed(0)}%
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold ${getSyncPercentage() === 100 ? 'text-green-600' : 'text-yellow-600'}`}>
+                      {getSyncPercentage().toFixed(0)}%
+                    </span>
+                    <button
+                      onClick={checkSyncStatus}
+                      disabled={syncCheckLoading}
+                      className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      title="چک دستی"
+                    >
+                      {syncCheckLoading ? '⏳' : '🔄'}
+                    </button>
+                  </div>
                 </div>
                 
                 {/* Progress Bar */}
@@ -236,6 +249,20 @@ const SyncStatusWidget: React.FC = () => {
                       همگام‌سازی {syncStatus.not_synced} مقاله
                     </span>
                   )}
+                </button>
+              )}
+              
+              {/* Manual Check Button - Always visible */}
+              {!syncStatus && (
+                <button
+                  onClick={checkSyncStatus}
+                  disabled={syncCheckLoading}
+                  className="w-full py-2 px-4 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-50 transition-all"
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    {syncCheckLoading ? <Clock className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    چک وضعیت همگام‌سازی
+                  </span>
                 </button>
               )}
 
@@ -286,6 +313,9 @@ const SyncStatusWidget: React.FC = () => {
       <div className="mt-4 pt-3 border-t border-gray-200">
         <p className="text-xs text-gray-500">
           💡 مقالات منتشر شده به صورت خودکار در Weaviate ذخیره می‌شوند
+        </p>
+        <p className="text-xs text-gray-400 mt-1">
+          🚀 بهینه‌سازی: اتصال به Weaviate فقط هنگام نیاز برقرار می‌شود
         </p>
       </div>
     </div>

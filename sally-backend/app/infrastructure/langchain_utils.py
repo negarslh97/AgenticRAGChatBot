@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.core.logging_config import get_logger, PerformanceLogger
 from app.infrastructure.langchain_callbacks import get_default_callbacks
 from app.prompts import get_prompt
+from app.infrastructure.conversation_memory import ConversationMemoryManager, format_history_for_prompt
 
 logger = get_logger(__name__)
 
@@ -649,19 +650,20 @@ class LangChainService:
 
 پاسخ شما:"""
             
-            # آماده‌سازی تاریخچه مکالمه
+            # 🧠 آماده‌سازی تاریخچه مکالمه با ConversationMemoryManager
             history_text = ""
             if conversation_history and len(conversation_history) > 0:
-                history_text = "\n\nتاریخچه مکالمه:\n"
-                # فقط 3 پیام آخر
-                recent_messages = conversation_history[-3:]
+                # فقط 6 پیام آخر برای محاوره (3 تبادل)
+                recent_messages = conversation_history[-6:]
+                history_text = "\n\nتاریخچه مکالمه اخیر:\n"
                 for msg in recent_messages:
                     role_fa = "کاربر" if msg.get("role") == "user" else "دستیار"
                     content = msg.get("content", "")
                     history_text += f"{role_fa}: {content}\n"
                 history_text += "\n"
-            
-            logger.info(f"📚 Conversation history: {len(conversation_history) if conversation_history else 0} messages")
+                logger.info(f"📚 Conversational history: {len(recent_messages)} messages (from {len(conversation_history)} total)")
+            else:
+                logger.info(f"📚 No conversation history available")
             
             # ساخت prompt template ساده
             from langchain_core.prompts import ChatPromptTemplate
@@ -796,18 +798,15 @@ class LangChainService:
             prompt_template = get_prompt(prompt_name)
             prompt = ChatPromptTemplate.from_template(prompt_template)
 
-            # Build conversation history text
+            # 🧠 Build conversation history با استفاده از ConversationMemoryManager
             history_text = ""
             if conversation_history and len(conversation_history) > 0:
-                history_text = "\n**تاریخچه مکالمه:**\n"
-                for msg in conversation_history:
-                    role_fa = "کاربر" if msg["role"] == "user" else "سالی"
-                    history_text += f"{role_fa}: {msg['content']}\n"
-                history_text += "\n"
+                # استفاده از helper function برای فرمت‌بندی
+                history_text = format_history_for_prompt(conversation_history[-10:])  # فقط 10 پیام آخر
+                logger.info(f"📚 Conversation history: {len(conversation_history)} messages (using last 10)")
             else:
                 history_text = "هیچ تاریخچه‌ای موجود نیست. این اولین پیام است.\n\n"
-            
-            logger.info(f"📚 Conversation history: {len(conversation_history) if conversation_history else 0} messages")
+                logger.info(f"📚 No conversation history available")
             
             chain = prompt | model
             
