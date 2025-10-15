@@ -40,6 +40,7 @@ import {
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
 import { MarkdownRenderer } from '../components/ui/markdown-renderer'
+import { VoiceInput } from '../components/ui/voice-input'
 import { chatService } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
@@ -726,19 +727,24 @@ const ChatPage = () => {
 
                 {/* Message input form */}
                 <footer className="p-4 bg-white shadow-[0_-2px_4px_-2px_rgba(0,0,0,0.05)]">
-                    <div className="flex gap-2">
-                        <Button
+                    <div className="flex gap-2 items-end">
+                        <button
                             onClick={handleSendMessage}
                             disabled={!newMessage.trim() || isLoading}
-                            size="icon"
-                            className="flex-shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
+                            className="whitespace-nowrap text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 text-white bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 h-10 w-10 md:h-12 md:w-12 rounded-xl flex items-center justify-center flex-shrink-0"
                         >
                             {isLoading ? (
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                <div className="animate-spin rounded-full h-4 w-4 md:h-5 md:w-5 border-2 border-white border-t-transparent"></div>
                             ) : (
-                                <Send className="h-4 w-4" />
+                                <Send className="h-4 w-4 md:h-5 md:h-5" />
                             )}
-                        </Button>
+                        </button>
+                        <VoiceInput
+                            onTranscriptionComplete={(text) => {
+                                setNewMessage(prev => prev ? `${prev}\n${text}` : text)
+                            }}
+                            disabled={isLoading}
+                        />
                         <Textarea
                             value={newMessage}
                             onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewMessage(e.target.value)}

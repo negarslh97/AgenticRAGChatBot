@@ -36,6 +36,7 @@ import {
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
 import { MarkdownRenderer } from '../components/ui/markdown-renderer'
+import { VoiceInput } from '../components/ui/voice-input'
 import { chatService } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
@@ -1406,17 +1407,6 @@ const SuperAdminChatPage = () => {
                 {selectedConversation && (
                     <div className="bg-white border-t border-gray-200 p-3 md:p-4">
                         <div className="flex items-end gap-2">
-                            <div className="flex-1">
-                                <Textarea
-                                    value={newMessage}
-                                    onChange={(e) => setNewMessage(e.target.value)}
-                                    onKeyPress={handleKeyPress}
-                                    placeholder="پیام خود را بنویسید..."
-                                    className="resize-none min-h-[40px] max-h-[120px] text-sm md:text-base"
-                                    rows={1}
-                                    disabled={isLoading}
-                                />
-                            </div>
                             <Button
                                 onClick={handleSendMessage}
                                 disabled={!newMessage.trim() || isLoading}
@@ -1428,6 +1418,23 @@ const SuperAdminChatPage = () => {
                                     <Send className="h-4 w-4 md:h-5 md:h-5" />
                                 )}
                             </Button>
+                            <VoiceInput
+                                onTranscriptionComplete={(text) => {
+                                    setNewMessage(prev => prev ? `${prev}\n${text}` : text)
+                                }}
+                                disabled={isLoading}
+                            />
+                            <div className="flex-1">
+                                <Textarea
+                                    value={newMessage}
+                                    onChange={(e) => setNewMessage(e.target.value)}
+                                    onKeyPress={handleKeyPress}
+                                    placeholder="پیام خود را بنویسید..."
+                                    className="resize-none min-h-[40px] max-h-[120px] text-sm md:text-base"
+                                    rows={1}
+                                    disabled={isLoading}
+                                />
+                            </div>
                         </div>
                         <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
                             <span className="hidden md:inline">Enter برای ارسال، Shift+Enter برای خط جدید</span>
