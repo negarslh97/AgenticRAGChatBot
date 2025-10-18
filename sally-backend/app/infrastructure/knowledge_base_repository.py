@@ -545,6 +545,10 @@ class KnowledgeBaseRepository:
             with weaviate_client() as client:
                 collection = client.collections.get("MarkdownNode")
                 
+                # 🔍 دیباگ: بررسی وضعیت collection قبل از query
+                logger.info(f"🔍 DEBUG: Collection exists: {client.collections.exists('MarkdownNode')}")
+                logger.info(f"🔍 DEBUG: Client ready: {client.is_ready()}")
+                
                 # بررسی هر مقاله با یک connection
                 for article_id in article_ids:
                     try:

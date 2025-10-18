@@ -8,6 +8,8 @@ services:
       - '8080'
       - --scheme
       - http
+      - --read-timeout=30s
+      - --write-timeout=30s
     ports:
       - "8080:8080"
       - "50051:50051"
@@ -18,16 +20,20 @@ services:
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
       PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
       ENABLE_API_BASED_MODULES: 'true'
+      
+      # ✅ FIX: Single-node configuration
       CLUSTER_HOSTNAME: 'node1'
-
+      DEFAULT_VECTORIZER_MODULE: 'none'
+      ENABLE_MODULES: ''
+      
       # OpenAI settings
       OPENAI_APIKEY: ${Embedder_API_KEY}
       OPENAI_BASE_URL: ${Embedder_OPENAI_BASE_URL}
+      
+      # ✅ FIX: Disable replication for single-node
       REPLICATION_FACTOR: '1'
-
-      # Optional: Ollama settings (if needed)
-      # OLLAMA_URL: ${OLLAMA_URL}
-
+      ENABLE_REPLICATION: 'false'
+      
       # Optional: Disable telemetry and set log level
       DISABLE_TELEMETRY: 'true'
       LOG_LEVEL: 'info'
