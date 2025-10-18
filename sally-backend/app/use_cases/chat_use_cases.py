@@ -106,6 +106,7 @@ class ChatUseCases:
 فقط عنوان را بنویس، بدون توضیح اضافی."""
 
                 model = langchain_service._get_model(settings.chat_model_loaded, force_json=False, temperature=0.3)
+                logger.info(f"💬 Chat - Using model: {settings.chat_model_loaded}")
                 from langchain_core.prompts import ChatPromptTemplate
                 
                 prompt_template = ChatPromptTemplate.from_template("{query}")
@@ -190,6 +191,7 @@ class ChatUseCases:
                 model_name=model or settings.rag_model_loaded,
                 temperature=temperature
             )
+            logger.info(f"🔍 RAG - Using model: {model or settings.rag_model_loaded}")
             await conversation.insert()
             logger.info(f"✅ Created admin conversation: {conversation.id} - '{smart_title}'")
         

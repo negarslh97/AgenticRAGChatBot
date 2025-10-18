@@ -239,6 +239,7 @@ class AdvancedAgenticRAG:
                 
                 # 🔥 استفاده از Hybrid Model Strategy
                 model_to_use = self._get_fast_model() if settings.use_hybrid_model_strategy else settings.chat_model_loaded
+                logger.info(f"🤖 Agentic RAG - Using FAST model: {model_to_use}")
                 
                 model = self.langchain_service._get_model(
                     model_to_use,
@@ -875,7 +876,9 @@ class AdvancedAgenticRAG:
         🔥 Hybrid Model Strategy: برای کاهش هزینه و افزایش سرعت
         """
         if settings.use_hybrid_model_strategy and settings.agentic_fast_model:
+            logger.info(f"⚡ Agentic RAG - Using FAST model: {settings.agentic_fast_model}")
             return settings.agentic_fast_model
+        logger.info(f"⚡ Agentic RAG - Using CHAT model as FAST: {settings.chat_model_loaded}")
         return settings.chat_model_loaded
     
     def _get_power_model(self) -> str:
@@ -885,7 +888,9 @@ class AdvancedAgenticRAG:
         🔥 Hybrid Model Strategy: برای کیفیت بالاتر در وظایف مهم
         """
         if settings.use_hybrid_model_strategy and settings.agentic_power_model:
+            logger.info(f"🚀 Agentic RAG - Using POWER model: {settings.agentic_power_model}")
             return settings.agentic_power_model
+        logger.info(f"🚀 Agentic RAG - Using RAG model as POWER: {settings.rag_model_loaded}")
         return settings.rag_model_loaded
     
     def _calculate_confidence(self, state: AgenticRAGState) -> float:

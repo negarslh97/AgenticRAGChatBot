@@ -26,13 +26,13 @@ export const transcriptionService = {
   async transcribeAudio(
     audioBlob: Blob,
     filename: string = 'audio.webm',
-    model: 'whisper' | 'vosk' = 'whisper'
+    model: 'whisper' | 'vosk' = 'vosk'
   ): Promise<string> {
     try {
       const formData = new FormData()
       formData.append('audio', audioBlob, filename)
 
-      const endpoint = model === 'whisper'
+      const endpoint = model === 'vosk'
         ? `${WHISPER_API_URL}/transcribe`
         : `${VOSK_API_URL}/transcribe`;
 

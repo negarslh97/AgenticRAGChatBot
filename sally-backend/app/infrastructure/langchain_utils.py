@@ -401,6 +401,7 @@ class LangChainService:
         """
         try:
             model = self._get_model(settings.chat_model_loaded, force_json=False)
+            logger.info(f"🗣️ LangChain - Using CHAT model: {settings.chat_model_loaded}")
 
             # Create prompt for chat
             system_message = "You are a helpful customer support assistant. Answer questions in Persian (Farsi)."
@@ -444,10 +445,11 @@ class LangChainService:
         try:
             # استفاده از مدل با streaming enabled
             model = self._get_model(
-                settings.chat_model_loaded, 
+                settings.chat_model_loaded,
                 force_json=False,
                 streaming=True
             )
+            logger.info(f"📝 LangChain - Using CHAT model for metadata: {settings.chat_model_loaded}")
             
             # Create prompt for chat
             system_message = "You are a helpful customer support assistant. Answer questions in Persian (Farsi)."
@@ -507,6 +509,7 @@ class LangChainService:
         try:
             model_name = custom_model or settings.rag_model_loaded
             temperature = custom_temperature if custom_temperature is not None else 0.3
+            logger.info(f"🔄 LangChain - Using RAG model: {model_name}")
             
             # 🎯 تطبیق max_tokens با نوع سوال
             # 🔥 OPTIMIZED: افزایش max_tokens برای پاسخ‌های جامع‌تر به سوالات پیچیده
@@ -626,6 +629,7 @@ class LangChainService:
         try:
             model_name = custom_model or settings.chat_model_loaded
             temperature = custom_temperature if custom_temperature is not None else 0.7  # دمای بالاتر برای طبیعی‌تر بودن
+            logger.info(f"💬 LangChain - Using CHAT model for conversational: {model_name}")
             
             logger.info(f"💬 Conversational streaming with model: {model_name}, temperature: {temperature}")
             
@@ -736,6 +740,7 @@ class LangChainService:
         try:
             model_name = custom_model or settings.rag_model_loaded
             temperature = custom_temperature if custom_temperature is not None else 0.3
+            logger.info(f"🎯 LangChain - Using RAG model for response: {model_name}")
             
             logger.info(f"🌊 Streaming with model: {model_name}, temperature: {temperature}")
             
