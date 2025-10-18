@@ -80,6 +80,8 @@ export interface SyncStatusResponse {
   last_sync?: string
   pending_operations: number
   health_status: string
+  embedder_model: string
+  embedder_api_key_set: boolean
 }
 
 export interface FileUploadResponse {
@@ -199,6 +201,43 @@ export const knowledgeBaseService = {
     return response.data
   },
 
+  async getDetailedSyncStatus(): Promise<{
+    total_published: number
+    new_articles: {
+      count: number
+      articles: Array<{
+        id: string
+        title: string
+        created_at: string | null
+        published_at: string | null
+      }>
+    }
+    modified_articles: {
+      count: number
+      articles: Array<{
+        id: string
+        title: string
+        updated_at: string
+        last_synced_at: string
+      }>
+    }
+    synced_articles: {
+      count: number
+    }
+    archived_in_weaviate: {
+      count: number
+      articles: Array<{
+        id: string
+        title: string
+        archived_at: string | null
+      }>
+    }
+    needs_action: boolean
+  }> {
+    const response = await api.get("/api/super-admin/kb/sync/detailed-status")
+    return response.data
+  },
+
   async syncAllArticlesToWeaviate(force: boolean = false): Promise<{
     success: boolean
     total_articles: number
@@ -208,6 +247,17 @@ export const knowledgeBaseService = {
     message: string
   }> {
     const response = await api.post(`/api/super-admin/kb/sync/sync-all-articles?force=${force}`)
+    return response.data
+  },
+
+  async removeArchivedFromWeaviate(): Promise<{
+    success: boolean
+    removed_count: number
+    total_archived: number
+    errors: string[] | null
+    message: string
+  }> {
+    const response = await api.post("/api/super-admin/kb/sync/remove-archived")
     return response.data
   },
 

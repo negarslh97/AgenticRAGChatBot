@@ -118,6 +118,8 @@ class SyncStatusResponse(BaseModel):
     last_sync: Optional[str] = None  # Change to string to handle None values
     pending_operations: int = 0
     health_status: str = "healthy"
+    embedder_model: str = "text-embedding-3-small"
+    embedder_api_key_set: bool = False
 
 class FileUploadResponse(BaseModel):
     success: bool
@@ -667,14 +669,25 @@ async def get_sync_status(
     try:
         stats = await get_system_stats()
         
+        # Debug log
+        embedder_model = settings.embedder_model_loaded
+        embedder_key = settings.embedder_api_key_loaded
+        logger.info(f"🔍 Sync Status - Embedder Model: {embedder_model}")
+        logger.info(f"🔍 Sync Status - API Key Set: {bool(embedder_key)}")
+        if embedder_key:
+            logger.info(f"🔍 API Key Preview: {embedder_key[:10]}...")
+        
         return SyncStatusResponse(
             status=stats['health']['status'],
             last_sync=stats['last_sync'],
             pending_operations=stats['pending_operations'],
-            health_status=stats['health']['status']
+            health_status=stats['health']['status'],
+            embedder_model=embedder_model,
+            embedder_api_key_set=bool(embedder_key)
         )
         
     except Exception as e:
+        logger.error(f"Error fetching sync status: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching sync status: {str(e)}"
@@ -738,6 +751,162 @@ async def check_articles_sync_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error checking sync status: {str(e)}"
+        )
+
+@router.get("/sync/detailed-status", tags=["Knowledge Base Management"])
+async def get_detailed_sync_status(
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    Get detailed sync status including:
+    - New articles (never synced)
+    - Modified articles (updated after last sync)
+    - Archived articles (in Weaviate but archived in MongoDB)
+    """
+    try:
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+        
+        # Get all published articles
+        published_articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED
+        ).to_list()
+        
+        # Get all archived articles
+        archived_articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.ARCHIVED
+        ).to_list()
+        
+        # Check sync status
+        all_article_ids = [str(article.id) for article in published_articles]
+        archived_ids = [str(article.id) for article in archived_articles]
+        sync_status = await knowledge_base_repository.check_multiple_articles_in_weaviate(all_article_ids + archived_ids)
+        
+        new_articles = []
+        modified_articles = []
+        synced_articles = []
+        archived_in_weaviate = []
+        
+        # Check published articles
+        for article in published_articles:
+            article_id = str(article.id)
+            is_in_weaviate = sync_status.get(article_id, False)
+            
+            if not is_in_weaviate:
+                # Article never synced
+                new_articles.append({
+                    "id": article_id,
+                    "title": article.title,
+                    "created_at": article.created_at.isoformat() if article.created_at else None,
+                    "published_at": article.published_at.isoformat() if article.published_at else None
+                })
+            else:
+                # Check if article was modified after last sync
+                last_updated = article.updated_at or article.published_at
+                last_synced_at = article.last_synced_at if hasattr(article, 'last_synced_at') else None
+                
+                if last_synced_at and last_updated and last_updated > last_synced_at:
+                    modified_articles.append({
+                        "id": article_id,
+                        "title": article.title,
+                        "updated_at": last_updated.isoformat(),
+                        "last_synced_at": last_synced_at.isoformat()
+                    })
+                else:
+                    synced_articles.append({
+                        "id": article_id,
+                        "title": article.title
+                    })
+        
+        # Check archived articles that are still in Weaviate
+        for article in archived_articles:
+            article_id = str(article.id)
+            if sync_status.get(article_id, False):
+                archived_in_weaviate.append({
+                    "id": article_id,
+                    "title": article.title,
+                    "archived_at": article.updated_at.isoformat() if article.updated_at else None
+                })
+        
+        return {
+            "total_published": len(published_articles),
+            "new_articles": {
+                "count": len(new_articles),
+                "articles": new_articles[:10]  # Show first 10
+            },
+            "modified_articles": {
+                "count": len(modified_articles),
+                "articles": modified_articles[:10]  # Show first 10
+            },
+            "synced_articles": {
+                "count": len(synced_articles)
+            },
+            "archived_in_weaviate": {
+                "count": len(archived_in_weaviate),
+                "articles": archived_in_weaviate[:10]  # Show first 10
+            },
+            "needs_action": len(new_articles) + len(modified_articles) + len(archived_in_weaviate) > 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting detailed sync status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting detailed sync status: {str(e)}"
+        )
+
+@router.post("/sync/remove-archived", tags=["Knowledge Base Management"])
+async def remove_archived_from_weaviate(
+    current_user: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    Remove archived articles from Weaviate
+    """
+    try:
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+        
+        # Get all archived articles
+        archived_articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.ARCHIVED
+        ).to_list()
+        
+        if not archived_articles:
+            return {
+                "success": True,
+                "removed_count": 0,
+                "message": "هیچ مقاله آرشیو شده‌ای یافت نشد"
+            }
+        
+        # Check which ones are in Weaviate
+        archived_ids = [str(article.id) for article in archived_articles]
+        sync_status = await knowledge_base_repository.check_multiple_articles_in_weaviate(archived_ids)
+        
+        removed_count = 0
+        errors = []
+        
+        for article in archived_articles:
+            article_id = str(article.id)
+            if sync_status.get(article_id, False):
+                try:
+                    await knowledge_base_repository.delete_article_from_weaviate(article_id)
+                    removed_count += 1
+                    logger.info(f"✅ مقاله آرشیو شده '{article.title}' از Weaviate حذف شد")
+                except Exception as e:
+                    errors.append(f"{article.title}: {str(e)}")
+                    logger.error(f"❌ خطا در حذف مقاله '{article.title}': {e}")
+        
+        return {
+            "success": True,
+            "removed_count": removed_count,
+            "total_archived": len(archived_articles),
+            "errors": errors if errors else None,
+            "message": f"{removed_count} مقاله آرشیو شده از Weaviate حذف شد"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error removing archived articles: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error removing archived articles: {str(e)}"
         )
 
 @router.post("/sync/sync-all-articles", tags=["Knowledge Base Management"])

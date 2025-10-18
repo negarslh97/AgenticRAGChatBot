@@ -23,6 +23,7 @@ services:
       # OpenAI settings
       OPENAI_APIKEY: ${Embedder_API_KEY}
       OPENAI_BASE_URL: ${Embedder_OPENAI_BASE_URL}
+      REPLICATION_FACTOR: '1'
 
       # Optional: Ollama settings (if needed)
       # OLLAMA_URL: ${OLLAMA_URL}

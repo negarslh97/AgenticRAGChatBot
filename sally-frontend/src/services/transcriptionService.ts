@@ -4,7 +4,8 @@
  * Handles audio transcription using Whisper API
  */
 
-const WHISPER_API_URL = '/whisper'  // از proxy استفاده می‌کنه -> http://192.168.10.222:6000
+const WHISPER_API_URL = '/whisper'  // Model 1
+const VOSK_API_URL = '/vosk'        // Model 2
 
 export interface TranscriptionResponse {
   transcription: string
@@ -19,21 +20,31 @@ export const transcriptionService = {
    * Transcribe audio file to text
    * @param audioBlob - Audio data as Blob
    * @param filename - Optional filename (default: audio.webm)
+   * @param model - 'whisper' or 'vosk' (default: whisper)
    * @returns Promise with transcription text
    */
-  async transcribeAudio(audioBlob: Blob, filename: string = 'audio.webm'): Promise<string> {
+  async transcribeAudio(
+    audioBlob: Blob,
+    filename: string = 'audio.webm',
+    model: 'whisper' | 'vosk' = 'whisper'
+  ): Promise<string> {
     try {
       const formData = new FormData()
       formData.append('audio', audioBlob, filename)
 
-      console.log('🎤 Sending audio to Whisper API:', {
-        url: `${WHISPER_API_URL}/transcribe`,
+      const endpoint = model === 'whisper'
+        ? `${WHISPER_API_URL}/transcribe`
+        : `${VOSK_API_URL}/transcribe`;
+
+      console.log('🎤 Sending audio to transcription API:', {
+        url: endpoint,
+        model,
         size: audioBlob.size,
         type: audioBlob.type,
         filename
       })
 
-      const response = await fetch(`${WHISPER_API_URL}/transcribe`, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         body: formData,
       })
