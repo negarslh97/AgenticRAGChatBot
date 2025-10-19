@@ -72,8 +72,9 @@ def main():
     print_section("4️⃣  OpenAI / LLM Settings")
     check_value("OpenAI API Key", settings.openai_api_key_loaded, is_secret=True)
     check_value("OpenAI Base URL", settings.openai_base_url_loaded)
-    check_value("OpenAI Model", settings.openai_model_loaded)
-    check_value("OpenAI Temperature", settings.openai_temperature_loaded)
+    check_value("Metadata Model", settings.metadata_model_loaded)
+    check_value("RAG Model", settings.rag_model_loaded)
+    check_value("Chat Model", settings.chat_model_loaded)
     
     # =================================================================
     # 5. Embedder Settings (for Weaviate)
@@ -88,7 +89,6 @@ def main():
     # =================================================================
     print_section("6️⃣  Ollama Settings (Local LLM)")
     check_value("Ollama URL", settings.ollama_url_loaded)
-    check_value("Ollama Model", settings.ollama_model_loaded)
     check_value("Ollama Embedding Model", settings.ollama_embedding_model_loaded)
     
     # =================================================================

@@ -26,6 +26,7 @@ from app.infrastructure.connection_manager import weaviate_client
 from app.infrastructure.markdown_parser import markdown_parser
 from openai import OpenAI
 import logging
+import os
 
 # تنظیم logging
 logging.basicConfig(
@@ -80,7 +81,11 @@ async def step2_create_schema():
             # ایجاد collection با schema بهینه
             logger.info("Creating 'MarkdownNode' collection...")
             
-            vectorizer_config = Configure.Vectorizer.none()
+            # استفاده از Server-Side Vectorization برای جستجوی معنایی
+            vectorizer_config = Configure.Vectorizer.text2vec_openai(
+                model=os.getenv("EMBEDDER_MODEL"),
+                base_url=os.getenv("Embedder_OPENAI_BASE_URL")
+            )
             
             client.collections.create(
                 name="MarkdownNode",

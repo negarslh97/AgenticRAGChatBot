@@ -91,7 +91,11 @@ class KnowledgeBaseReindexer:
                 from weaviate.classes.config import Configure, Property, DataType
                 
                 # استفاده از "none" vectorizer - ما خودمان vectorها را تولید می‌کنیم
-                vectorizer_config = Configure.Vectorizer.none()
+                # استفاده از Server-Side Vectorization برای جستجوی معنایی
+                vectorizer_config = Configure.Vectorizer.text2vec_openai(
+                    model=os.getenv("EMBEDDER_MODEL"),
+                    base_url=os.getenv("Embedder_OPENAI_BASE_URL")
+                )
                 
                 client.collections.create(
                     name="MarkdownNode",

@@ -367,23 +367,8 @@ class RAGService(ABC):
             for i, eq in enumerate(expanded_queries[:3], 1):
                 logger.info(f"   {i}. {eq[:80]}...")
 
-            # تولید vector از query اصلی
-            logger.info(f"🔢 تولید vector از query برای جستجو...")
-            embedder_base_url = settings.embedder_openai_base_url_loaded  
-            embedder_model = settings.embedder_model_loaded
-            
-            openai_client = OpenAI(
-                api_key=embedder_api_key,
-                base_url=embedder_base_url
-            )
-            
-            response = openai_client.embeddings.create(
-                model=embedder_model,
-                input=query
-            )
-            
-            query_vector = response.data[0].embedding
-            logger.info(f"✅ Query vector تولید شد (ابعاد: {len(query_vector)})")
+            # استفاده از Server-Side Vectorization - دیگر نیازی به تولید vector نیست
+            logger.info(f"🔢 استفاده از Server-Side Vectorization برای جستجو...")
 
             # استفاده از Connection Manager - کل عملیات داخل with
             with weaviate_client() as client:
@@ -402,36 +387,19 @@ class RAGService(ABC):
                 
                 logger.info(f"⚡ Executing Enhanced Weaviate Hybrid Search (limit: {limit})...")
                 
-                # 🔥 STEP 2: Hybrid Search - ترکیب vector و keyword (BM25)
-                # این قابلیت قوی‌ترین روش برای پیدا کردن اسناد مرتبط است
+                # 🔥 STEP 2: Semantic Search with Server-Side Vectorization
+                # استفاده از near_text مستقیماً با متن query
                 try:
-                    # 🎯 Hybrid Search: ترکیب vector similarity با keyword matching (BM25)
-                    # alpha=0.5 یعنی وزن برابر برای vector و keyword
-                    # alpha=0.7 یعنی بیشتر vector (برای سوالات مفهومی)
-                    # alpha=0.3 یعنی بیشتر keyword (برای جستجوی دقیق)
-                    
-                    # 🧠 تشخیص هوشمند نوع سوال برای تنظیم alpha
-                    alpha = 0.5  # پیش‌فرض: وزن برابر
-                    
-                    # اگر سوال حاوی کلمات کلیدی خاص است، keyword را قوی‌تر کن
-                    technical_keywords = ['حساب', 'سند', 'بستانکار', 'بدهکار', 'مانده', 'تعدیل', 'معین', 'کل']
-                    if any(keyword in query for keyword in technical_keywords):
-                        alpha = 0.3  # بیشتر keyword-based
-                        logger.info(f"🎯 Detected technical keywords → Using alpha={alpha} (more keyword-focused)")
-                    else:
-                        alpha = 0.5  # متعادل
-                        logger.info(f"🎯 General query → Using alpha={alpha} (balanced)")
-                    
-                    response = collection.query.hybrid(
-                        query=query,  # متن query برای BM25
-                        vector=query_vector,  # vector برای semantic search
-                        alpha=alpha,  # وزن‌دهی بین vector و keyword
+                    logger.info(f"🎯 استفاده از near_text با Server-Side Vectorization...")
+
+                    response = collection.query.near_text(
+                        query=query,  # <--- ارسال مستقیم متن query
                         limit=limit,
-                        return_metadata=['distance', 'score', 'explain_score']
+                        return_metadata=['distance', 'certainty']
                     )
-                    
+
                     objects = response.objects if response.objects else []
-                    logger.info(f"✅ Hybrid Search: {len(objects)} گره Markdown یافت شد (Vector + BM25)")
+                    logger.info(f"✅ Semantic Search: {len(objects)} گره Markdown یافت شد (Server-Side Vectorization)")
 
                 except Exception as e:
                     logger.error(f"❌ خطا در جستجوی MarkdownNode: {str(e)}")
@@ -448,11 +416,8 @@ class RAGService(ABC):
                 seen_node_ids = set()  # برای جلوگیری از duplicate
                 
                 for i, obj in enumerate(objects):
-                    # در v4 با Hybrid Search، score مستقیماً در metadata قرار دارد
-                    # Hybrid score بین vector similarity و BM25 است
-                    if hasattr(obj.metadata, 'score') and obj.metadata.score is not None:
-                        score = obj.metadata.score
-                    elif hasattr(obj.metadata, 'certainty') and obj.metadata.certainty is not None:
+                    # در v4 با near_text، certainty در metadata قرار دارد
+                    if hasattr(obj.metadata, 'certainty') and obj.metadata.certainty is not None:
                         score = obj.metadata.certainty
                     else:
                         score = 0.5  # fallback

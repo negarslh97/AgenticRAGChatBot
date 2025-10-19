@@ -13,6 +13,7 @@ services:
     ports:
       - "8080:8080"
       - "50051:50051"
+      - "2112:2112"
     restart: on-failure:0
     environment:
       # Basic settings
@@ -23,8 +24,8 @@ services:
       
       # ✅ FIX: Single-node configuration
       CLUSTER_HOSTNAME: 'node1'
-      DEFAULT_VECTORIZER_MODULE: 'none'
-      ENABLE_MODULES: ''
+      DEFAULT_VECTORIZER_MODULE: 'text2vec-openai'
+      ENABLE_MODULES: 'text2vec-openai'
       
       # OpenAI settings
       OPENAI_APIKEY: ${Embedder_API_KEY}
@@ -37,6 +38,9 @@ services:
       # Optional: Disable telemetry and set log level
       DISABLE_TELEMETRY: 'true'
       LOG_LEVEL: 'info'
+
+      # Enable Prometheus monitoring
+      PROMETHEUS_MONITORING_ENABLED: 'true'
     volumes:
       - weaviate_data:/var/lib/weaviate
 

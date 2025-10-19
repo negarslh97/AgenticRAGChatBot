@@ -228,10 +228,14 @@ class WeaviateMongoDBConnector:
             embedder_model = settings.embedder_model_loaded
 
             logger.info(f"🔢 Embedder Model: {embedder_model}")
-            logger.info(f"🔧 استفاده از Client-Side Vectorization (تولید vector در Python)")
+            logger.info(f"🔧 استفاده از Server-Side Vectorization (text2vec-openai)")
 
-            # استفاده از "none" vectorizer - ما خودمان vectorها را تولید می‌کنیم
-            vectorizer_config = Configure.Vectorizer.none()
+            # استفاده از text2vec-openai vectorizer - Weaviate خودش vectorها را تولید می‌کند
+            vectorizer_config = Configure.Vectorizer.text2vec_openai(
+                model=embedder_model,
+                api_key=embedder_api_key,
+                base_url=embedder_openai_base_url
+            )
 
             try:
                 # ایجاد collection با v4 API
@@ -327,7 +331,7 @@ class WeaviateMongoDBConnector:
 
     async def save_markdown_tree(self, tree, full_content: str) -> bool:
         """
-        ذخیره ساختار درختی Markdown در Weaviate با Client-Side Vectorization
+        ذخیره ساختار درختی Markdown در Weaviate با Server-Side Vectorization
 
         Args:
             tree: ساختار درختی Markdown
@@ -346,38 +350,11 @@ class WeaviateMongoDBConnector:
                 logger.info("⚠️ درخت خالی است، چیزی برای ذخیره وجود ندارد")
                 return True
 
-            # تولید vectorها برای همه گره‌ها یکجا (بهینه‌تر)
-            logger.info(f"🔢 تولید {len(all_nodes)} vector با OpenAI...")
-            from openai import OpenAI
-            
-            embedder_api_key = settings.embedder_api_key_loaded
-            embedder_base_url = settings.embedder_openai_base_url_loaded
-            embedder_model = settings.embedder_model_loaded
-            
-            openai_client = OpenAI(
-                api_key=embedder_api_key,
-                base_url=embedder_base_url
-            )
-            
-            # ایجاد متن‌های ترکیبی برای vectorization
-            texts_to_vectorize = []
-            for node in all_nodes:
-                # ترکیب title و content برای vector بهتر
-                combined_text = f"{node.title}\n\n{node.content}"
-                texts_to_vectorize.append(combined_text)
-            
-            # تولید vectorها به صورت batch
-            response = openai_client.embeddings.create(
-                model=embedder_model,
-                input=texts_to_vectorize
-            )
-            
-            vectors = [item.embedding for item in response.data]
-            logger.info(f"✅ {len(vectors)} vector تولید شد (ابعاد: {len(vectors[0])})")
+            logger.info(f"🔢 ذخیره {len(all_nodes)} گره با Server-Side Vectorization (text2vec-openai)...")
 
             saved_count = 0
 
-            for idx, node in enumerate(all_nodes):
+            for node in all_nodes:
                 try:
                     # آماده‌سازی داده‌ها برای Weaviate
                     node_data = {
@@ -392,20 +369,18 @@ class WeaviateMongoDBConnector:
                         "full_content": full_content
                     }
 
-                    # ذخیره در Weaviate با vector تولید شده
+                    # ذخیره در Weaviate با Server-Side Vectorization
+                    # Weaviate خودش vectorها را تولید می‌کند
                     collection = self.weaviate_client.collections.get("MarkdownNode")
-                    
+
                     # بررسی اتصال قبل از ذخیره
                     if not self.weaviate_client.is_ready():
                         logger.error("❌ Weaviate آماده نیست")
                         continue
-                    
-                    # اضافه کردن vector به همراه data
-                    collection.data.insert(
-                        properties=node_data,
-                        vector=vectors[idx]  # vector از OpenAI
-                    )
-                    logger.info(f"✅ گره '{node.title}' با vector ذخیره شد")
+
+                    # ذخیره بدون vector - Weaviate خودش تولید می‌کند
+                    collection.data.insert(properties=node_data)
+                    logger.info(f"✅ گره '{node.title}' با Server-Side Vectorization ذخیره شد")
 
                     saved_count += 1
 
@@ -413,7 +388,7 @@ class WeaviateMongoDBConnector:
                     logger.error(f"❌ خطا در ذخیره گره '{node.title}': {str(e)}")
                     continue
 
-            logger.info(f"✅ {saved_count} گره با vectorization ذخیره شد")
+            logger.info(f"✅ {saved_count} گره با Server-Side Vectorization ذخیره شد")
             return True
 
         except Exception as e:
@@ -559,29 +534,13 @@ class WeaviateMongoDBConnector:
 
     # تابع display_article_content حذف شده است
 
-    def display_weaviate_objects(self, class_name: str = "MarkdownNode", limit: int = 5) -> bool:
+    def display_weaviate_objects(self, class_name: str = "MarkdownNode", limit: int = 5, properties: Optional[List[str]] = None) -> bool:
         """نمایش اشیاء ذخیره شده در Weaviate"""
         try:
             logger.info(f"🔍 نمایش اشیاء کلاس {class_name} در Weaviate...")
 
-            if not hasattr(self, 'weaviate_client') or not self.weaviate_client:
-                if not self.connect_weaviate():
-                    logger.error("❌ اتصال به Weaviate ناموفق بود")
-                    return False
-
-            # دریافت اشیاء از Weaviate با v4 API
-            collection = self.weaviate_client.collections.get(class_name)
-            if class_name == "MarkdownNode":
-                response = collection.query.fetch_objects(
-                    limit=limit,
-                    return_properties=["node_id", "article_id", "title", "content", "path"]
-                )
-            else:
-                response = collection.query.fetch_objects(
-                    limit=limit,
-                    return_properties=["title", "content"]
-                )
-            objects = [obj.properties for obj in response.objects]
+            # استفاده از تابع retrieve_weaviate_data برای دریافت داده‌ها
+            objects = self.retrieve_weaviate_data(class_name, properties, limit)
 
             if not objects:
                 logger.info(f"⚠️ هیچ شیئی از کلاس {class_name} یافت نشد")
@@ -629,6 +588,49 @@ class WeaviateMongoDBConnector:
         except Exception as e:
             logger.error(f"❌ خطا در نمایش اشیاء Weaviate: {str(e)}")
             return False
+
+    def retrieve_weaviate_data(self, class_name: str, properties: Optional[List[str]] = None, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Retrieves data from Weaviate.
+
+        Args:
+            class_name: The name of the class to retrieve data from.
+            properties: A list of properties to retrieve. If None, all properties are retrieved.
+            limit: The maximum number of objects to retrieve.
+
+        Returns:
+            A list of dictionaries, where each dictionary represents an object and its properties.
+        """
+        try:
+            logger.info(f"🔍 Retrieving objects from class {class_name} in Weaviate...")
+
+            if not hasattr(self, 'weaviate_client') or not self.weaviate_client:
+                if not self.connect_weaviate():
+                    logger.error("❌ Connection to Weaviate failed")
+                    return []
+
+            collection = self.weaviate_client.collections.get(class_name)
+
+            if properties:
+                response = collection.query.fetch_objects(
+                    limit=limit,
+                    return_properties=properties
+                )
+            else:
+                response = collection.query.fetch_objects(limit=limit)
+
+            objects = [obj.properties for obj in response.objects]
+
+            if not objects:
+                logger.info(f"⚠️ No objects found in class {class_name}")
+                return []
+
+            return objects
+
+        except Exception as e:
+            logger.error(f"❌ Error retrieving objects from Weaviate: {str(e)}")
+            return []
+
 
     def display_file_uploads(self) -> bool:
         """نمایش فایل‌های آپلود شده"""
@@ -913,16 +915,16 @@ class WeaviateMongoDBConnector:
 
     async def migrate_article_with_vectorization(self, article_id: str) -> bool:
         """
-        ذخیره یک مقاله خاص با vectorization فعال در Weaviate
-        
+        ذخیره یک مقاله خاص با Server-Side Vectorization در Weaviate
+
         Args:
             article_id: شناسه مقاله در MongoDB
-            
+
         Returns:
             True اگر ذخیره موفق باشد
         """
         try:
-            logger.info(f"🚀 شروع ذخیره مقاله {article_id} با vectorization...")
+            logger.info(f"🚀 شروع ذخیره مقاله {article_id} با Server-Side Vectorization...")
             
             # اتصال به MongoDB اگر هنوز متصل نیست
             if not self.mongodb_client:
@@ -1007,9 +1009,9 @@ class WeaviateMongoDBConnector:
             except Exception as delete_error:
                 logger.warning(f"⚠️ خطا در حذف گره‌های قدیمی: {str(delete_error)}")
             
-            # ذخیره گره‌های جدید با vectorization
+            # ذخیره گره‌های جدید با Server-Side Vectorization
             saved_count = 0
-            
+
             for node in tree.get_all_nodes():
                 try:
                     node_data = {
@@ -1023,23 +1025,23 @@ class WeaviateMongoDBConnector:
                         "order": node.order,
                         "full_content": article['content_markdown']
                     }
-                    
-                    # ذخیره در Weaviate با vectorization
+
+                    # ذخیره در Weaviate با Server-Side Vectorization
                     collection = self.weaviate_client.collections.get("MarkdownNode")
                     uuid = collection.data.insert(properties=node_data)
-                    logger.info(f"✅ گره '{node.title}' با vectorization ذخیره شد - UUID: {uuid}")
-                    
+                    logger.info(f"✅ گره '{node.title}' با Server-Side Vectorization ذخیره شد - UUID: {uuid}")
+
                     saved_count += 1
-                    
+
                 except Exception as e:
                     logger.error(f"❌ خطا در ذخیره گره '{node.title}': {str(e)}")
                     continue
             
-            logger.info(f"🎉 {saved_count} گره با vectorization ذخیره شد")
-            
+            logger.info(f"🎉 {saved_count} گره با Server-Side Vectorization ذخیره شد")
+
             # تست جستجوی معنایی
             logger.info("🔍 تست جستجوی معنایی...")
-            
+
             try:
                 search_response = collection.query.near_text(
                     query=article['title'][:50],  # جستجو بر اساس عنوان مقاله
@@ -1047,16 +1049,16 @@ class WeaviateMongoDBConnector:
                     return_properties=["title", "content", "path"],
                     return_metadata=["certainty"]
                 )
-                
+
                 logger.info("📊 نتایج جستجوی معنایی:")
                 for i, obj in enumerate(search_response.objects, 1):
                     props = obj.properties
                     certainty = obj.metadata.certainty if obj.metadata else 0
                     logger.info(f"  {i}. '{props.get('title', 'نامشخص')}' - اطمینان: {certainty:.3f}")
-                    
+
             except Exception as search_error:
                 logger.warning(f"⚠️ خطا در تست جستجو: {str(search_error)}")
-            
+
             # نمایش آمار نهایی
             try:
                 aggregate_result = collection.aggregate.over_all(total_count=True)
@@ -1064,8 +1066,8 @@ class WeaviateMongoDBConnector:
                 logger.info(f"📊 تعداد کل گره‌ها در Weaviate: {total_count}")
             except Exception as stats_error:
                 logger.warning(f"⚠️ خطا در دریافت آمار: {str(stats_error)}")
-            
-            logger.info("🎉 ذخیره مقاله با vectorization تکمیل شد!")
+
+            logger.info("🎉 ذخیره مقاله با Server-Side Vectorization تکمیل شد!")
             return True
             
         except Exception as e:
@@ -1148,17 +1150,17 @@ class WeaviateMongoDBConnector:
             # ذخیره در Weaviate
             collection = self.weaviate_client.collections.get("MarkdownNode")
             saved_count = 0
-            
+
             for node_data in nodes_data:
                 try:
                     uuid = collection.data.insert(properties=node_data)
-                    logger.info(f"✅ گره '{node_data['title']}' با vectorization ذخیره شد")
+                    logger.info(f"✅ گره '{node_data['title']}' با Server-Side Vectorization ذخیره شد")
                     saved_count += 1
                 except Exception as e:
                     logger.error(f"❌ خطا در ذخیره گره '{node_data['title']}': {str(e)}")
-            
-            logger.info(f"🎉 {saved_count} گره با vectorization ذخیره شد")
-            
+
+            logger.info(f"🎉 {saved_count} گره با Server-Side Vectorization ذخیره شد")
+
             # تست جستجو
             try:
                 search_response = collection.query.near_text(
@@ -1167,16 +1169,16 @@ class WeaviateMongoDBConnector:
                     return_properties=["title", "content"],
                     return_metadata=["certainty"]
                 )
-                
+
                 logger.info("📊 نتایج جستجوی معنایی:")
                 for i, obj in enumerate(search_response.objects, 1):
                     props = obj.properties
                     certainty = obj.metadata.certainty if obj.metadata else 0
                     logger.info(f"  {i}. '{props.get('title', 'نامشخص')}' - اطمینان: {certainty:.3f}")
-                    
+
             except Exception as search_error:
                 logger.warning(f"⚠️ خطا در تست جستجو: {str(search_error)}")
-            
+
             return True
             
         except Exception as e:

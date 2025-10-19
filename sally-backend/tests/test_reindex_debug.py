@@ -23,6 +23,7 @@ from app.infrastructure.connection_manager import weaviate_client
 from app.infrastructure.markdown_parser import markdown_parser
 from openai import OpenAI
 import logging
+import os
 
 # تنظیم logging
 logging.basicConfig(
@@ -268,7 +269,11 @@ async def test_full_reindex_single_article(mongodb_client, openai_client):
                 logger.info("📝 Creating MarkdownNode collection...")
                 from weaviate.classes.config import Configure, Property, DataType
                 
-                vectorizer_config = Configure.Vectorizer.none()
+                # استفاده از Server-Side Vectorization برای جستجوی معنایی
+                vectorizer_config = Configure.Vectorizer.text2vec_openai(
+                    model=os.getenv("EMBEDDER_MODEL"),
+                    base_url=os.getenv("Embedder_OPENAI_BASE_URL")
+                )
                 client.collections.create(
                     name="MarkdownNode",
                     vectorizer_config=vectorizer_config,
