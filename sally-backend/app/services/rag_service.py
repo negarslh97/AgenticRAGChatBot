@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 import logging
 import requests  # 🆕 برای ارتباط با API خارجی reranker
+from bson import ObjectId
 from app.core.config import settings
 from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility, Customer, Admin, ArticleCategory, ArticleTag
 
@@ -137,8 +138,12 @@ class RAGService(ABC):
         articles_map = {}
         if article_ids:
             try:
-                logger.info(f"📊 Fetching {len(set(article_ids))} unique articles from MongoDB in single batch query...")
-                articles_cursor = KnowledgeBaseArticle.find({"_id": {"$in": article_ids}})
+                # 🔥 FIX: تبدیل رشته‌ها به ObjectId قبل از کوئری
+                # اضافه کردن یک بررسی برای اطمینان از معتبر بودن شناسه
+                object_ids = [ObjectId(aid) for aid in set(article_ids) if ObjectId.is_valid(aid)]
+
+                logger.info(f"📊 Fetching {len(set(object_ids))} unique articles from MongoDB in single batch query...")
+                articles_cursor = KnowledgeBaseArticle.find({"_id": {"$in": object_ids}})
                 articles_map = {str(article.id): article async for article in articles_cursor}
                 logger.info(f"✅ Fetched {len(articles_map)} articles from MongoDB in a single query.")
             except Exception as e:
@@ -700,20 +705,17 @@ class RAGService(ABC):
         # 🔥 RECALIBRATED: thresholds واقع‌بینانه‌تر برای rerank scores
         
         if query_type == "general":
-            # برای سوالات عمومی: معیار ملایم‌تر اما calibrated
-            # Rerank API scores معمولاً بین 0 تا 1 هستند
-            if top_doc_score >= 0.7:
+            # برای سوالات عمومی با Reranker: آستانه‌های کالیبره شده
+            if top_doc_score >= 0.8:  # امتیاز بسیار بالا برای reranker
                 semantic_match = 1.0
-            elif top_doc_score >= 0.55:
+            elif top_doc_score >= 0.5:  # امتیاز خوب
                 semantic_match = 0.95
-            elif top_doc_score >= 0.4:
+            elif top_doc_score >= 0.2:  # امتیاز قابل قبول
                 semantic_match = 0.90
-            elif top_doc_score >= 0.25:
+            elif top_doc_score >= 0.05: # ارتباط ضعیف
                 semantic_match = 0.85
-            elif top_doc_score >= 0.1:
-                semantic_match = 0.75
             else:
-                semantic_match = 0.65
+                semantic_match = 0.75
         else:  # specific or explanation
             # برای سوالات خاص: معیار دقیق‌تر
             if top_doc_score >= 0.9:
@@ -750,9 +752,9 @@ class RAGService(ABC):
             base_richness = 0.60
         
         # 🔥 IMPROVED: اضافه کردن وزن برای documents با score بالا (calibrated)
-        # تعداد documents با کیفیت بالا
-        high_quality_docs = sum(1 for s in scores if s >= 0.6)  # threshold کاهش یافت
-        medium_quality_docs = sum(1 for s in scores if 0.3 <= s < 0.6)
+        # تعداد documents با کیفیت بالا - آستانه کاهش یافته برای reranker
+        high_quality_docs = sum(1 for s in scores if s >= 0.3)  # threshold کاهش یافت
+        medium_quality_docs = sum(1 for s in scores if 0.1 <= s < 0.3)
         
         # محاسبه ضریب کیفیت
         quality_factor = (high_quality_docs * 1.0 + medium_quality_docs * 0.5) / len(scores) if scores else 0
@@ -825,9 +827,9 @@ class RAGService(ABC):
                    f"semantic={factors['semantic_match']:.2f} [top_score={top_doc_score:.2f}], "
                    f"richness={factors['context_richness']:.2f}, "
                    f"quality={factors['answer_quality']:.2f}")
-        logger.info(f"   ⚖️ Weights: semantic={weights['semantic_match']:.0%}, "
-                   f"context={weights['context_richness']:.0%}, "
-                   f"answer={weights['answer_quality']:.0%}")
+        logger.info(f"   ⚖️ Weights: semantic={weights.get('semantic_match', 0):.0%}, "
+                    f"context_richness={weights.get('context_richness', 0):.0%}, "
+                    f"answer={weights.get('answer_quality', 0):.0%}")
         
         return {
             "confidence_score": round(confidence_score, 2),
