@@ -63,14 +63,17 @@ def detect_model_provider(model_name: str) -> ModelProvider:
     
     # ✅ Ollama: prefix با "ollama:"
     if model_lower.startswith("ollama:"):
+        logger.debug(f"🔍 Detected Ollama model: {model_name}")
         return ModelProvider.OLLAMA
-    
+
     # ✅ OpenAI رسمی: شروع با "gpt-" (gpt-4o, gpt-3.5-turbo, gpt-4-turbo, ...)
     if model_lower.startswith("gpt-"):
+        logger.debug(f"🔍 Detected OpenAI official model: {model_name}")
         return ModelProvider.OPENAI
-    
+
     # ✅ OpenRouter: همه بقیه مدل‌ها
     # (google/gemini, x-ai/grok, anthropic/claude, meta-llama/*, mistralai/*, deepseek/*, qwen/*, openai/o1-*, ...)
+    logger.debug(f"🔍 Detected OpenRouter model: {model_name}")
     return ModelProvider.OPENROUTER
 
 
@@ -105,31 +108,40 @@ class LangChainService:
         logger.info("🎯 LangChainService initialized")
 
     def _get_model(
-        self, 
-        model_name: str, 
-        force_json: bool = False, 
+        self,
+        model_name: str,
+        force_json: bool = False,
         max_tokens: int = 500,
         temperature: float = 0.7,
         streaming: bool = False
     ) -> Union[ChatOpenAI, Any]:
         """
         دریافت یا ایجاد یک instance از LLM model (پشتیبانی از همه provider ها)
-        
+
         Args:
             model_name: نام مدل (e.g., "gpt-4o", "ollama:llama3.2", "claude-3-5-sonnet")
             force_json: فعال کردن JSON mode (فقط برای OpenAI)
             max_tokens: حداکثر توکن‌های خروجی
             temperature: دمای sampling
             streaming: فعال کردن streaming
-            
+
         Returns:
             LLM instance (ChatOpenAI, ChatOllama, ChatAnthropic, etc.)
         """
+        # 🎯 Gemini models: double the max_tokens and adjust temperature for better output quality
+        if model_name and "gemini" in model_name.lower():
+            original_max_tokens = max_tokens
+            max_tokens = max_tokens * 2
+            # 🎯 Lower temperature for more accurate responses with Gemini
+            original_temperature = temperature
+            temperature = min(temperature, 0.2)  # Cap temperature at 0.2 for Gemini
+            logger.info(f"🔥 Gemini model detected: {model_name} - Doubling max_tokens from {original_max_tokens} to {max_tokens}, adjusting temperature from {original_temperature} to {temperature}")
+
         cache_key = f"{model_name}_{'json' if force_json else 'text'}_{max_tokens}_{temperature}_{'stream' if streaming else 'batch'}"
-        
+
         if cache_key not in self._models:
             provider = detect_model_provider(model_name)
-            
+
             logger.info(
                 f"🤖 Loading model: {model_name} (Provider: {provider.value})",
                 extra={
