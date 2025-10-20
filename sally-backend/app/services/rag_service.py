@@ -638,13 +638,110 @@ class RAGService(ABC):
             documents.sort(key=lambda x: x.get("score", 0), reverse=True)
             return documents[:top_k]
     
+    async def _calculate_groundedness_score(self, query: str, answer: str, sources: List[Dict[str, Any]], top_score: float = None) -> float:
+        """
+        🔥 ENHANCED: Groundedness Check - بررسی سخت‌گیرانه اینکه آیا پاسخ واقعاً توسط منابع پشتیبانی می‌شود
+
+        این متد از LLM استفاده می‌کند تا بررسی کند آیا پاسخ نهایی واقعاً
+        بر اساس اطلاعات منابع ارائه شده ساخته شده یا خیر.
+
+        Args:
+            query: سوال کاربر
+            answer: پاسخ تولید شده
+            sources: منابع استفاده شده
+            top_score: بالاترین امتیاز retrieval برای تصمیم‌گیری اولیه
+
+        Returns:
+            امتیاز groundedness بین 0 تا 1
+        """
+        try:
+            # 🔥 NEW: اگر retrieval scores بسیار پایین هستند، مستقیماً امتیاز پایینی بده
+            if top_score is not None and top_score < 0.1:
+                logger.warning(f"⚠️ Top retrieval score too low ({top_score:.3f}) - skipping groundedness check and assigning low score")
+                return 0.1  # امتیاز بسیار پایین برای retrieval ضعیف
+
+            # 🔥 NEW: بررسی پاسخ‌های "نمی‌دانم" - اگر پاسخ نشان‌دهنده عدم وجود اطلاعات است، امتیاز بالا بده
+            no_info_phrases = ["متاسفانه اطلاعات مربوط به این سوال در پایگاه دانش من موجود نیست", "اطلاعاتی ندارم"]
+            if any(phrase in answer for phrase in no_info_phrases):
+                logger.warning("⚠️ Answer indicates no information found. Assigning low groundedness score.")
+                return 0.1 # امتیاز پایین چون به هیچ منبعی متصل نیست
+
+            # اگر LLM در دسترس نیست، امتیاز پیش‌فرض بده
+            if not settings.openai_api_key_loaded:
+                logger.warning("⚠️ OpenAI API key not available for groundedness check")
+                return 0.5  # امتیاز پیش‌فرض پایین‌تر
+
+            from app.infrastructure.langchain_utils import langchain_service
+
+            # ساخت prompt سخت‌گیرانه‌تر برای بررسی groundedness
+            sources_text = "\n".join([f"- {src.get('title', 'N/A')}: {src.get('content', '')[:300]}" for src in sources[:5]])  # بیشتر منابع، محتوای بیشتر
+
+            # 🔥 ENHANCED: Prompt سخت‌گیرانه‌تر
+            groundedness_prompt = f"""
+            شما یک ارزیاب بسیار سخت‌گیر کیفیت پاسخ هستید. وظیفه شما بررسی دقیق این است که آیا پاسخ ارائه شده واقعاً بر اساس منابع داده شده ساخته شده یا خیر.
+
+            **دستورالعمل‌های حیاتی:**
+            - پاسخ باید مستقیماً از منابع استخراج شده باشد
+            - اگر پاسخ شامل هر گونه اطلاعات خارج از منابع است، امتیاز را کاهش دهید
+            - اگر پاسخ از ترکیب منابع نامرتبط ساخته شده، امتیاز بسیار پایینی بدهید
+            - اگر پاسخ ساختگی یا استنباطی است، امتیاز صفر بدهید
+
+            سوال کاربر: {query}
+
+            پاسخ تولید شده:
+            {answer}
+
+            منابع موجود (بررسی کنید آیا پاسخ واقعاً از این منابع استخراج شده):
+            {sources_text}
+
+            **ارزیابی سخت‌گیرانه:**
+            - 1.0: پاسخ کاملاً بر اساس منابع و دقیق است (هیچ اطلاعات اضافی ندارد)
+            - 0.9: پاسخ عمدتاً بر اساس منابع است با حداقل تفسیر
+            - 0.7: پاسخ تا حدودی بر اساس منابع است اما ممکن است اطلاعات اضافی جزئی داشته باشد
+            - 0.5: پاسخ کمترین ارتباط را با منابع دارد
+            - 0.3: پاسخ تقریباً هیچ ارتباطی با منابع ندارد
+            - 0.1: پاسخ کاملاً خارج از منابع است یا ساختگی است
+            - 0.0: پاسخ کاملاً غلط و نامرتبط است
+
+            **نکته مهم:** اگر منابع شامل عبارت "متاسفانه اطلاعات مربوط به این سوال در پایگاه دانش من موجود نیست" هستند یا پاسخ مشابه آن است، امتیاز 1.0 بدهید.
+
+            فقط امتیاز عددی بدهید (مثال: 0.85)
+            """
+
+            # فراخوانی LLM برای ارزیابی
+            groundedness_response = await langchain_service.generate_chat_response([
+                {"role": "user", "content": groundedness_prompt}
+            ])
+
+            # استخراج امتیاز عددی از پاسخ
+            import re
+            score_match = re.search(r'(\d+\.?\d*)', groundedness_response.strip())
+            if score_match:
+                score = float(score_match.group(1))
+                score = max(0.0, min(1.0, score))  # محدود کردن به بازه 0-1
+
+                # 🔥 ENHANCED: اگر retrieval score متوسط است، groundedness را سخت‌تر ارزیابی کن
+                if top_score is not None and 0.1 <= top_score < 0.3:
+                    score = score * 0.8  # کاهش 20% برای retrieval متوسط
+
+                logger.info(f"🔍 Groundedness Score: {score:.2f} (top_retrieval: {top_score:.3f})")
+                return score
+            else:
+                logger.warning("⚠️ Could not parse groundedness score from LLM response")
+                return 0.3  # امتیاز پیش‌فرض پایین‌تر
+
+        except Exception as e:
+            logger.error(f"❌ Groundedness check failed: {e}")
+            return 0.3  # امتیاز پیش‌فرض پایین‌تر در صورت خطا
+
     def _calculate_advanced_confidence(
-        self, 
-        query: str, 
-        retrieved_docs: List[Dict[str, Any]], 
+        self,
+        query: str,
+        retrieved_docs: List[Dict[str, Any]],
         answer: str = None,
         verification_result: Dict[str, Any] = None,
-        query_type: str = "general"  # 🎯 تطبیق با نوع سوال
+        query_type: str = "general",  # 🎯 تطبیق با نوع سوال
+        groundedness_score: float = None  # 🔥 NEW: امتیاز groundedness
     ) -> Dict[str, float]:
         """
         محاسبه پیشرفته درصد اطمینان بر اساس multiple factors
@@ -702,10 +799,27 @@ class RAGService(ABC):
         factors['source_diversity'] = source_diversity
         
         # 3️⃣ تطابق معنایی (0-1): آیا top document واقعاً مرتبط است؟
-        # 🔥 RECALIBRATED: thresholds واقع‌بینانه‌تر برای rerank scores
-        
+        # 🔥 ENHANCED: تحلیل پیشرفته با توزیع امتیازات
+
+        # محاسبه confidence interval برای semantic match
+        if scores:
+            # استفاده از آمار برای تصمیم‌گیری بهتر
+            mean_score = sum(scores) / len(scores)
+            std_dev = (sum((s - mean_score) ** 2 for s in scores) / len(scores)) ** 0.5
+
+            # 🔥 NEW: محاسبه statistical significance
+            # آیا top score واقعاً بهتر از میانگین است؟
+            score_significance = (top_doc_score - mean_score) / max(std_dev, 0.01)
+
+            logger.info(f"📈 Semantic Analysis: top={top_doc_score:.3f}, mean={mean_score:.3f}, "
+                       f"std={std_dev:.3f}, significance={score_significance:.2f}")
+        else:
+            score_significance = 0.0
+
         if query_type == "general":
             # برای سوالات عمومی با Reranker: آستانه‌های کالیبره شده
+            base_semantic = 0.75  # baseline برای سوالات عمومی
+
             if top_doc_score >= 0.8:  # امتیاز بسیار بالا برای reranker
                 semantic_match = 1.0
             elif top_doc_score >= 0.5:  # امتیاز خوب
@@ -715,9 +829,18 @@ class RAGService(ABC):
             elif top_doc_score >= 0.05: # ارتباط ضعیف
                 semantic_match = 0.85
             else:
-                semantic_match = 0.75
+                semantic_match = base_semantic
+
+            # 🔥 ENHANCED: تقویت بر اساس statistical significance
+            if score_significance > 2.0:  # top score بسیار بالاتر از میانگین
+                semantic_match = min(semantic_match + 0.05, 1.0)
+            elif score_significance < -1.0:  # top score پایین‌تر از میانگین
+                semantic_match = max(semantic_match - 0.1, 0.5)
+
         else:  # specific or explanation
             # برای سوالات خاص: معیار دقیق‌تر
+            base_semantic = 0.60  # baseline سخت‌گیرانه‌تر برای سوالات خاص
+
             if top_doc_score >= 0.9:
                 semantic_match = 1.0
             elif top_doc_score >= 0.8:
@@ -731,12 +854,40 @@ class RAGService(ABC):
             elif top_doc_score >= 0.4:
                 semantic_match = 0.65
             else:
-                semantic_match = 0.50
+                semantic_match = base_semantic
+
+            # 🔥 ENHANCED: statistical adjustment برای سوالات خاص
+            if score_significance > 1.5:
+                semantic_match = min(semantic_match + 0.03, 1.0)
+            elif score_significance < -0.5:
+                semantic_match = max(semantic_match - 0.05, 0.4)
+
         factors['semantic_match'] = semantic_match
         
         # 4️⃣ غنای Context (0-1): تعداد و کیفیت اسناد
         doc_count = len(retrieved_docs)
-        
+
+        # 🔥 ENHANCED: تحلیل توزیع امتیازات برای بهینه‌سازی بهتر
+        if scores:
+            # محاسبه آماری پیشرفته
+            score_distribution = {
+                'excellent': sum(1 for s in scores if s >= 0.8),  # امتیاز عالی
+                'good': sum(1 for s in scores if 0.6 <= s < 0.8),  # امتیاز خوب
+                'fair': sum(1 for s in scores if 0.3 <= s < 0.6),  # امتیاز متوسط
+                'poor': sum(1 for s in scores if s < 0.3)  # امتیاز ضعیف
+            }
+
+            # 🔥 NEW: محاسبه diversity در امتیازات (پرهیز از تمرکز روی امتیازات مشابه)
+            unique_scores = len(set(round(s, 2) for s in scores))  # امتیازات منحصر به فرد
+            score_diversity = min(unique_scores / len(scores), 1.0)
+
+            logger.info(f"📊 Score Distribution: excellent={score_distribution['excellent']}, "
+                       f"good={score_distribution['good']}, fair={score_distribution['fair']}, "
+                       f"poor={score_distribution['poor']}, diversity={score_diversity:.2f}")
+        else:
+            score_distribution = {'excellent': 0, 'good': 0, 'fair': 0, 'poor': 0}
+            score_diversity = 0.0
+
         # 🔥 IMPROVED: Base richness با thresholds واقع‌بینانه‌تر
         if doc_count >= 15:
             base_richness = 1.0
@@ -750,17 +901,21 @@ class RAGService(ABC):
             base_richness = 0.75
         else:
             base_richness = 0.60
-        
-        # 🔥 IMPROVED: اضافه کردن وزن برای documents با score بالا (calibrated)
-        # تعداد documents با کیفیت بالا - آستانه کاهش یافته برای reranker
-        high_quality_docs = sum(1 for s in scores if s >= 0.3)  # threshold کاهش یافت
-        medium_quality_docs = sum(1 for s in scores if 0.1 <= s < 0.3)
-        
-        # محاسبه ضریب کیفیت
-        quality_factor = (high_quality_docs * 1.0 + medium_quality_docs * 0.5) / len(scores) if scores else 0
-        
-        # ترکیب base richness با quality factor
-        context_richness = base_richness * (0.6 + quality_factor * 0.4)
+
+        # 🔥 ENHANCED: محاسبه کیفیت پیشرفته با توزیع امتیازات
+        # امتیازدهی بر اساس توزیع کیفیت
+        quality_score = (
+            score_distribution['excellent'] * 1.0 +  # امتیاز کامل برای عالی
+            score_distribution['good'] * 0.8 +        # امتیاز خوب برای خوب
+            score_distribution['fair'] * 0.5 +        # امتیاز متوسط برای متوسط
+            score_distribution['poor'] * 0.2          # امتیاز کم برای ضعیف
+        ) / max(doc_count, 1)
+
+        # اضافه کردن امتیاز diversity
+        quality_factor = quality_score * (0.8 + score_diversity * 0.2)
+
+        # ترکیب base richness با quality factor پیشرفته
+        context_richness = base_richness * (0.5 + quality_factor * 0.5)
         factors['context_richness'] = min(context_richness, 1.0)
         
         # 5️⃣ کیفیت پاسخ (0-1): از verification اگر موجود باشد
@@ -782,26 +937,34 @@ class RAGService(ABC):
         else:
             answer_quality = 0.80  # 🔥 پیش‌فرض بالاتر
         factors['answer_quality'] = answer_quality
+
+        # 🔥 NEW: Groundedness Check - بررسی پشتیبانی پاسخ توسط منابع
+        if groundedness_score is not None:
+            factors['groundedness'] = groundedness_score
+        else:
+            factors['groundedness'] = 0.8  # امتیاز پیش‌فرض اگر groundedness check انجام نشده
         
         # 🎯 محاسبه نمره نهایی با وزن‌های تطبیقی بر اساس نوع سوال
-        # 🔥 RECALIBRATED: وزن‌های بهتر برای balance بین factors
+        # 🔥 ENHANCED: اضافه کردن وزن groundedness
         if query_type == "general":
             # برای سوالات عمومی/پیچیده: تأکید بر context و quality
             weights = {
-                'retrieval_quality': 0.18,    # 18% - کیفیت جستجو (افزایش)
-                'source_diversity': 0.12,     # 12% - تنوع منابع
-                'semantic_match': 0.25,       # 25% - تطابق معنایی (مهم‌ترین)
-                'context_richness': 0.22,     # 22% - غنای context
-                'answer_quality': 0.23        # 23% - کیفیت پاسخ
+                'retrieval_quality': 0.15,    # 15% - کیفیت جستجو
+                'source_diversity': 0.10,     # 10% - تنوع منابع
+                'semantic_match': 0.20,       # 20% - تطابق معنایی
+                'context_richness': 0.18,     # 18% - غنای context
+                'answer_quality': 0.17,       # 17% - کیفیت پاسخ
+                'groundedness': 0.20          # 🔥 20% - پشتیبانی توسط منابع
             }
         else:  # specific or explanation
             # برای سوالات خاص: semantic و retrieval مهم‌تر
             weights = {
-                'retrieval_quality': 0.28,    # 28% - کیفیت جستجو (افزایش)
-                'source_diversity': 0.10,     # 10% - تنوع منابع
-                'semantic_match': 0.30,       # 30% - تطابق معنایی (بسیار مهم)
-                'context_richness': 0.14,     # 14% - غنای context
-                'answer_quality': 0.18        # 18% - کیفیت پاسخ
+                'retrieval_quality': 0.20,    # 20% - کیفیت جستجو
+                'source_diversity': 0.08,     # 8% - تنوع منابع
+                'semantic_match': 0.25,       # 25% - تطابق معنایی
+                'context_richness': 0.12,     # 12% - غنای context
+                'answer_quality': 0.15,       # 15% - کیفیت پاسخ
+                'groundedness': 0.20          # 🔥 20% - پشتیبانی توسط منابع
             }
         
         confidence_score = sum(factors[k] * weights[k] for k in weights.keys())
@@ -823,13 +986,17 @@ class RAGService(ABC):
         logger.info(f"🎯 Advanced Confidence Calculated ({query_type} query):")
         logger.info(f"   📊 Final Score: {confidence_score:.2f} ({confidence_level})")
         logger.info(f"   🔍 Factors: retrieval={factors['retrieval_quality']:.2f}, "
-                   f"diversity={factors['source_diversity']:.2f}, "
-                   f"semantic={factors['semantic_match']:.2f} [top_score={top_doc_score:.2f}], "
-                   f"richness={factors['context_richness']:.2f}, "
-                   f"quality={factors['answer_quality']:.2f}")
-        logger.info(f"   ⚖️ Weights: semantic={weights.get('semantic_match', 0):.0%}, "
+                    f"diversity={factors['source_diversity']:.2f}, "
+                    f"semantic={factors['semantic_match']:.2f} [top_score={top_doc_score:.2f}], "
+                    f"richness={factors['context_richness']:.2f}, "
+                    f"quality={factors['answer_quality']:.2f}, "
+                    f"groundedness={factors.get('groundedness', 0):.2f}")
+        logger.info(f"   ⚖️ Weights: retrieval_quality={weights.get('retrieval_quality', 0):.0%}, "
+                    f"source_diversity={weights.get('source_diversity', 0):.0%}, "
+                    f"semantic_match={weights.get('semantic_match', 0):.0%}, "
                     f"context_richness={weights.get('context_richness', 0):.0%}, "
-                    f"answer={weights.get('answer_quality', 0):.0%}")
+                    f"answer_quality={weights.get('answer_quality', 0):.0%}, "
+                    f"groundedness={weights.get('groundedness', 0):.0%}")
         
         return {
             "confidence_score": round(confidence_score, 2),
@@ -1143,13 +1310,25 @@ class SimpleRAGService(RAGService):
                 total_rag_time = time.time() - start_time
                 logger.info(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
 
-                # 🎯 محاسبه پیشرفته confidence
+                # 🔥 ENHANCED: Groundedness Check - بررسی پشتیبانی پاسخ توسط منابع
+                formatted_sources_for_groundedness = self._format_sources_markdown(relevant_docs)
+                # 🔥 NEW: ارسال top_score برای تصمیم‌گیری بهتر
+                top_score = max([doc.get('score', 0) for doc in relevant_docs]) if relevant_docs else 0
+                groundedness_score = await self._calculate_groundedness_score(
+                    query=query,
+                    answer=rag_response,
+                    sources=formatted_sources_for_groundedness,
+                    top_score=top_score
+                )
+
+                # 🎯 محاسبه پیشرفته confidence با groundedness
                 confidence_analysis = self._calculate_advanced_confidence(
                     query=query,
                     retrieved_docs=relevant_docs,
                     answer=rag_response,
                     verification_result=verification_result,
-                    query_type=query_type  # 🎯 تطبیق با نوع سوال
+                    query_type=query_type,  # 🎯 تطبیق با نوع سوال
+                    groundedness_score=groundedness_score  # 🔥 NEW: امتیاز groundedness
                 )
                 
                 # 🔥 ENHANCED: برگرداندن 5 source به جای 3 + quality metrics + confidence analysis

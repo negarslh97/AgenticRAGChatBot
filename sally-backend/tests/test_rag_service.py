@@ -4,7 +4,7 @@ Tests for RAG Service with Weaviate integration
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
-from app.infrastructure.rag_service import SimpleRAGService, AgenticRAGService, get_rag_service
+from app.services.rag_service import SimpleRAGService, AgenticRAGService, get_rag_service
 from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
 from app.domain.entities import ArticleVisibility, Customer, Admin
 
