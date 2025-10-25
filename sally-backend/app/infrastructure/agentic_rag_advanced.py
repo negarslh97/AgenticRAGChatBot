@@ -205,6 +205,7 @@ class AdvancedAgenticRAG:
         """
         with PerformanceLogger(logger, "analyze_query"):
             logger.info(f"🔍 Analyzing query complexity: {state['query'][:100]}")
+            logger.info(f"📊 Query length: {len(state['query'])} characters")
             
             # بررسی تاریخچه مکالمه
             if state.get("conversation_history") and len(state["conversation_history"]) > 0:
@@ -260,6 +261,7 @@ class AdvancedAgenticRAG:
                     state["query_complexity"] = QueryComplexity.SIMPLE
                 
                 logger.info(f"✅ Query complexity: {state['query_complexity'].value}")
+                logger.info(f"🤖 Using model: {model_to_use} for complexity analysis")
                 state["action_history"].append(AgentAction.PLAN)
                 
             except Exception as e:
@@ -274,7 +276,8 @@ class AdvancedAgenticRAG:
         تقسیم سوال پیچیده به زیرسوالات
         """
         with PerformanceLogger(logger, "decompose_query"):
-            logger.info(f"🔨 Decomposing complex query")
+            logger.info(f"🔨 Decomposing complex query: {state['query'][:100]}")
+            logger.info(f"🤖 Using fast model: {fast_model}")
             
             try:
                 prompt = ChatPromptTemplate.from_template("""
@@ -402,16 +405,17 @@ class AdvancedAgenticRAG:
     async def tree_search(self, state: AgenticRAGState) -> AgenticRAGState:
         """
         جستجوی درختی هوشمند در Weaviate
-        
+
         این متد از ساختار سلسله مراتبی markdown استفاده می‌کند:
         - جستجو در گره‌های markdown
         - پیدا کردن والدین و فرزندان مرتبط
         - استخراج context کامل از درخت
-        
+
         🔥 با fallback به simple_search در صورت خطا
         """
         with PerformanceLogger(logger, "tree_search"):
-            logger.info(f"🌳 Performing tree-aware search")
+            logger.info(f"🌳 Performing tree-aware search for: {state['query'][:100]}")
+            logger.info(f"🔍 Search limit: {limit} nodes")
             
             try:
                 # جستجوی vector در Weaviate
@@ -419,23 +423,25 @@ class AdvancedAgenticRAG:
                 
                 if results:
                     logger.info(f"✅ Found {len(results)} relevant nodes")
-                    
+                    logger.info(f"📊 Top scores: {[f'{r.get('score', 0):.3f}' for r in results[:3]]}")
+
                     # غنی‌سازی با context درختی
                     enriched_results = await self._enrich_with_tree_context(results)
-                    
+                    logger.info(f"🔗 Enriched with {len(enriched_results)} total nodes (including parents)")
+
                     state["search_results"].extend(enriched_results)
-                    
+
                     # ذخیره context درختی برای استفاده بعدی
                     if not state.get("tree_context"):
                         state["tree_context"] = {}
-                    
+
                     for result in enriched_results:
                         article_id = result.get("article_id")
                         if article_id:
                             if article_id not in state["tree_context"]:
                                 state["tree_context"][article_id] = []
                             state["tree_context"][article_id].append(result)
-                    
+
                     logger.info(f"📊 Tree context includes {len(state['tree_context'])} articles")
                 else:
                     logger.warning(f"⚠️ No results found for query")
@@ -733,7 +739,8 @@ class AdvancedAgenticRAG:
         ترکیب اطلاعات و تولید پاسخ نهایی با در نظر گرفتن تاریخچه
         """
         with PerformanceLogger(logger, "synthesize_answer"):
-            logger.info(f"💡 Synthesizing final answer")
+            logger.info(f"💡 Synthesizing final answer using {len(state['search_results'])} search results")
+            logger.info(f"🎯 Using power model: {power_model}")
             
             try:
                 # آماده‌سازی context از نتایج جستجو
@@ -814,6 +821,8 @@ class AdvancedAgenticRAG:
                 state["sources"] = sources
                 
                 logger.info(f"✅ Answer synthesized (confidence: {state['confidence_score']:.2f})")
+                logger.info(f"📝 Response length: {len(state['final_response'])} characters")
+                logger.info(f"📚 Sources extracted: {len(state['sources'])}")
                 state["action_history"].append(AgentAction.SYNTHESIZE)
                 
             except Exception as e:
@@ -1019,6 +1028,8 @@ class AdvancedAgenticRAG:
                 logger.info("🚀 Starting Advanced Agentic RAG Workflow")
                 logger.info(f"📝 Query: {query}")
                 logger.info(f"🆔 Session: {initial_state['session_id']}")
+                logger.info(f"👤 User ID: {user_id or 'Anonymous'}")
+                logger.info(f"💬 Conversation History: {len(conversation_history) if conversation_history else 0} messages")
                 logger.info("="*80)
                 
                 # اجرای workflow
@@ -1036,12 +1047,26 @@ class AdvancedAgenticRAG:
                 logger.info(f"📚 Sources: {len(final_state['sources'])}")
                 logger.info(f"⚠️  Errors: {len(final_state['errors'])}")
                 logger.info(f"💭 Reflection Notes: {len(final_state['reflection_notes'])}")
+                logger.info(f"🔄 Query Complexity: {final_state['query_complexity'].value if final_state['query_complexity'] else 'unknown'}")
+                logger.info(f"🔄 Retry Count: {final_state['retry_count']}")
                 logger.info("="*80)
                 
                 # لاگ action history
                 logger.info("📋 Action History:")
                 for i, action in enumerate(final_state["action_history"], 1):
                     logger.info(f"   {i}. {action.value}")
+
+                # لاگ errors اگر وجود داشته باشد
+                if final_state["errors"]:
+                    logger.info("❌ Errors Encountered:")
+                    for i, error in enumerate(final_state["errors"], 1):
+                        logger.info(f"   {i}. {error}")
+
+                # لاگ reflection notes اگر وجود داشته باشد
+                if final_state["reflection_notes"]:
+                    logger.info("💭 Reflection Notes:")
+                    for i, note in enumerate(final_state["reflection_notes"], 1):
+                        logger.info(f"   {i}. {note}")
                 
                 return {
                     "response": final_state["final_response"],

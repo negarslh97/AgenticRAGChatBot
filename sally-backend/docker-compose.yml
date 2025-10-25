@@ -19,30 +19,40 @@ services:
       # Basic settings
       QUERY_DEFAULTS_LIMIT: 25
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
-      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
       ENABLE_API_BASED_MODULES: 'true'
-      
+
       # ✅ FIX: Single-node configuration
       CLUSTER_HOSTNAME: 'node1'
       DEFAULT_VECTORIZER_MODULE: 'text2vec-openai'
       ENABLE_MODULES: 'text2vec-openai'
-      
+
       # OpenAI settings
       OPENAI_APIKEY: ${Embedder_API_KEY}
       OPENAI_BASE_URL: ${Embedder_OPENAI_BASE_URL}
-      
+
       # ✅ FIX: Disable replication for single-node
       REPLICATION_FACTOR: '1'
       ENABLE_REPLICATION: 'false'
-      
-      # Optional: Disable telemetry and set log level
+
+      # ✅ Enhanced Persistence settings for data durability
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      PERSISTENCE_FLUSH_IDLE_MEMTABLES_AFTER: '10'
+      PERSISTENCE_MAX_SSTABLE_SIZE_FOR_MERGE: '10485760'
+      PERSISTENCE_LSM_ACCESS_STRATEGY: 'mmap'
+      PERSISTENCE_INVERTED_INDEX_CONFIG_MAXIMUM_CHUNK_SIZE: '10485760'
+
+      # ✅ Backup and recovery settings
+      BACKUP_FILESYSTEM_PATH: '/var/lib/weaviate/backups'
+
+      # ✅ Memory management for better performance
+      QUERY_MAXIMUM_RESULTS: 10000
+      MEMORY_PRESSURE_THRESHOLD: '0.85'
+
+      # ✅ Disable telemetry and set log level
       DISABLE_TELEMETRY: 'true'
       LOG_LEVEL: 'info'
 
       # Enable Prometheus monitoring
       PROMETHEUS_MONITORING_ENABLED: 'true'
     volumes:
-      - weaviate_data:/var/lib/weaviate
-
-volumes:
-  weaviate_data:
+      - ./weaviate_data:/var/lib/weaviate

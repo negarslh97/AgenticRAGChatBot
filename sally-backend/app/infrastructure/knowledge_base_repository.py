@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from bson import ObjectId
 import logging
+import hashlib
 
 from app.domain.entities import (
     KnowledgeBaseArticle, ArticleStatus, ArticleVisibility,
@@ -320,52 +321,60 @@ class KnowledgeBaseRepository:
         category_id: Optional[str] = None,
         limit: int = 20
     ) -> List[Dict[str, Any]]:
-        """جستجو در Weaviate با استفاده از MarkdownNode collection"""
+        """جستجو در Weaviate با استفاده از collection مناسب بر اساس مدل embedder"""
         try:
             # ✅ استفاده از Connection Manager
             from app.infrastructure.connection_manager import weaviate_client
             from openai import OpenAI
             from app.core.config import settings
-            
+
+            # تعیین collection بر اساس مدل embedder
+            embedder_model = settings.embedder_model_loaded
+            if embedder_model and "large" in embedder_model.lower():
+                collection_name = "MarkdownNode_Large"
+            else:
+                collection_name = "MarkdownNode_Small"
+
+            logger.info(f"🔍 جستجو در collection: {collection_name}")
+
             # تولید vector از query
             embedder_api_key = settings.embedder_api_key_loaded
             embedder_base_url = settings.embedder_openai_base_url_loaded
-            embedder_model = settings.embedder_model_loaded
-            
+
             openai_client = OpenAI(
                 api_key=embedder_api_key,
                 base_url=embedder_base_url
             )
-            
+
             response = openai_client.embeddings.create(
                 model=embedder_model,
                 input=query
             )
             query_vector = response.data[0].embedding
-            
+
             with weaviate_client() as client:
-                collection = client.collections.get("MarkdownNode")
-                
+                collection = client.collections.get(collection_name)
+
                 # جستجوی vector-based
                 search_response = collection.query.near_vector(
                     near_vector=query_vector,
                     limit=limit,
                     return_metadata=['distance', 'certainty']
                 )
-                
+
                 processed_results = []
                 seen_article_ids = set()
-                
+
                 for obj in search_response.objects:
                     article_id = obj.properties.get("article_id", "")
-                    
+
                     # جلوگیری از تکرار مقالات
                     if article_id in seen_article_ids:
                         continue
                     seen_article_ids.add(article_id)
-                    
+
                     certainty = obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5
-                    
+
                     processed_results.append({
                         "id": article_id,
                         "title": obj.properties.get("title", ""),
@@ -373,7 +382,7 @@ class KnowledgeBaseRepository:
                         "score": certainty,
                         "source": "weaviate"
                     })
-                
+
                 return processed_results
             # ✅ client به صورت خودکار بسته می‌شود
 
@@ -481,7 +490,7 @@ class KnowledgeBaseRepository:
 
     async def check_article_in_weaviate(self, article_id: str) -> bool:
         """
-        بررسی وجود مقاله در Weaviate
+        بررسی وجود مقاله در Weaviate در collection مناسب
 
         Args:
             article_id: شناسه مقاله
@@ -493,24 +502,34 @@ class KnowledgeBaseRepository:
             # ✅ استفاده از Connection Manager به جای ایجاد اتصال جدید
             from app.infrastructure.connection_manager import weaviate_client
             from weaviate.classes.query import Filter
-            
+            from app.core.config import settings
+
+            # بررسی هر دو collection
+            embedder_model = settings.embedder_model_loaded
+            if embedder_model and "large" in embedder_model.lower():
+                collection_name = "MarkdownNode_Large"
+            else:
+                collection_name = "MarkdownNode_Small"
+
+            logger.info(f"🔍 بررسی مقاله {article_id} در collection: {collection_name}")
+
             with weaviate_client() as client:
                 # جستجوی گره‌های مربوط به این article_id
-                collection = client.collections.get("MarkdownNode")
-                
+                collection = client.collections.get(collection_name)
+
                 # Query for nodes with this article_id using proper Filter syntax
                 response = collection.query.fetch_objects(
                     filters=Filter.by_property("article_id").equal(article_id),
                     limit=1
                 )
-                
+
                 has_nodes = len(response.objects) > 0
-                
+
                 if has_nodes:
-                    logger.info(f"✅ مقاله {article_id} در Weaviate یافت شد ({len(response.objects)} گره)")
+                    logger.info(f"✅ مقاله {article_id} در {collection_name} یافت شد ({len(response.objects)} گره)")
                 else:
-                    logger.info(f"❌ مقاله {article_id} در Weaviate یافت نشد")
-                
+                    logger.info(f"❌ مقاله {article_id} در {collection_name} یافت نشد")
+
                 return has_nodes
             # ✅ client به صورت خودکار بسته می‌شود
 
@@ -523,32 +542,42 @@ class KnowledgeBaseRepository:
     async def check_multiple_articles_in_weaviate(self, article_ids: List[str]) -> Dict[str, bool]:
         """
         🔥 بررسی وجود چندین مقاله در Weaviate با یک connection
-        
+
         این متد به جای باز کردن connection جداگانه برای هر مقاله،
         یک connection واحد استفاده می‌کند و کارایی را بهبود می‌بخشد.
-        
+
         Args:
             article_ids: لیست شناسه‌های مقالات
-            
+
         Returns:
             دیکشنری که کلید article_id و مقدار True/False است
         """
         result = {aid: False for aid in article_ids}
-        
+
         if not article_ids:
             return result
-            
+
         try:
             from app.infrastructure.connection_manager import weaviate_client
             from weaviate.classes.query import Filter
-            
+            from app.core.config import settings
+
+            # تعیین collection بر اساس مدل embedder
+            embedder_model = settings.embedder_model_loaded
+            if embedder_model and "large" in embedder_model.lower():
+                collection_name = "MarkdownNode_Large"
+            else:
+                collection_name = "MarkdownNode_Small"
+
+            logger.info(f"🔍 بررسی چندین مقاله در collection: {collection_name}")
+
             with weaviate_client() as client:
-                collection = client.collections.get("MarkdownNode")
-                
+                collection = client.collections.get(collection_name)
+
                 # 🔍 دیباگ: بررسی وضعیت collection قبل از query
-                logger.info(f"🔍 DEBUG: Collection exists: {client.collections.exists('MarkdownNode')}")
+                logger.info(f"🔍 DEBUG: Collection exists: {client.collections.exists(collection_name)}")
                 logger.info(f"🔍 DEBUG: Client ready: {client.is_ready()}")
-                
+
                 # بررسی هر مقاله با یک connection
                 for article_id in article_ids:
                     try:
@@ -560,10 +589,10 @@ class KnowledgeBaseRepository:
                     except Exception as e:
                         logger.warning(f"⚠️ خطا در بررسی مقاله {article_id}: {e}")
                         result[article_id] = False
-                
+
                 synced_count = sum(1 for v in result.values() if v)
-                logger.info(f"✅ بررسی {len(article_ids)} مقاله با یک connection: {synced_count} همگام‌سازی شده")
-                
+                logger.info(f"✅ بررسی {len(article_ids)} مقاله در {collection_name}: {synced_count} همگام‌سازی شده")
+
                 return result
             # ✅ client به صورت خودکار بسته می‌شود
 
@@ -579,7 +608,7 @@ class KnowledgeBaseRepository:
         operation: str
     ) -> None:
         """
-        همگام‌سازی ساختار درختی Markdown مقاله با Weaviate
+        همگام‌سازی incremental ساختار درختی Markdown مقاله با Weaviate
 
         Args:
             article: مقاله برای همگام‌سازی
@@ -588,87 +617,336 @@ class KnowledgeBaseRepository:
         try:
             # ✅ استفاده از Connection Manager به جای ایجاد اتصال جدید
             from app.infrastructure.connection_manager import weaviate_client
-            from weaviate.classes.query import Filter
-            
+            from app.core.config import settings
+
+            # تعیین collection بر اساس مدل embedder فعلی
+            embedder_model = settings.embedder_model_loaded
+            if embedder_model and "large" in embedder_model.lower():
+                collection_name = "MarkdownNode_Large"
+            else:
+                collection_name = "MarkdownNode_Small"
+
+            logger.info(f"📁 استفاده از collection: {collection_name} برای مقاله '{article.title}'")
+
             with weaviate_client() as client:
                 if operation == "delete":
-                    # حذف گره‌های Markdown از Weaviate
-                    collection = client.collections.get("MarkdownNode")
+                    # حذف گره‌های Markdown از collection مناسب
+                    collection = client.collections.get(collection_name)
+                    from weaviate.classes.query import Filter
                     collection.data.delete_many(
                         where=Filter.by_property("article_id").equal(str(article.id))
                     )
-                    logger.info(f"🗑️ گره‌های Markdown مقاله '{article.title}' از Weaviate حذف شدند")
+                    logger.info(f"🗑️ گره‌های Markdown مقاله '{article.title}' از {collection_name} حذف شدند")
 
                 elif operation in ["create", "update"]:
-                    # ذخیره ساختار درختی Markdown
-                    try:
-                        from app.infrastructure.markdown_parser import markdown_parser
-                        from openai import OpenAI
+                    # استفاده از incremental sync برای کارایی بهتر
+                    await self._incremental_sync_to_weaviate(article, client, collection_name)
 
-                        # ایجاد درخت Markdown با عنوان مقاله به عنوان root node
-                        tree = markdown_parser.parse_to_tree(
-                            article.content_markdown, 
-                            str(article.id),
-                            article_title=article.title  # ✅ عنوان اصلی از MongoDB
-                        )
-
-                        if tree.get_all_nodes():
-                            # ذخیره درخت در Weaviate با vectorization
-                            from app.core.config import settings
-                            
-                            all_nodes = tree.get_all_nodes()
-                            logger.info(f"🔢 تولید {len(all_nodes)} vector با OpenAI...")
-                            
-                            # تولید vectorها
-                            embedder_api_key = settings.embedder_api_key_loaded
-                            embedder_base_url = settings.embedder_openai_base_url_loaded
-                            embedder_model = settings.embedder_model_loaded
-                            
-                            openai_client = OpenAI(
-                                api_key=embedder_api_key,
-                                base_url=embedder_base_url
-                            )
-                            
-                            texts_to_vectorize = [f"{node.title}\n\n{node.content}" for node in all_nodes]
-                            response = openai_client.embeddings.create(
-                                model=embedder_model,
-                                input=texts_to_vectorize
-                            )
-                            vectors = [item.embedding for item in response.data]
-                            
-                            # حذف گره‌های قدیمی
-                            collection = client.collections.get("MarkdownNode")
-                            collection.data.delete_many(
-                                where=Filter.by_property("article_id").equal(str(article.id))
-                            )
-                            
-                            # ذخیره گره‌های جدید
-                            for idx, node in enumerate(all_nodes):
-                                node_data = {
-                                    "node_id": node.id,
-                                    "article_id": str(article.id),
-                                    "title": node.title,
-                                    "level": node.level,
-                                    "content": node.content,
-                                    "parent_id": node.parent_id,
-                                    "path": node.path,
-                                    "order": node.order,
-                                    "full_content": article.content_markdown
-                                }
-                                collection.data.insert(properties=node_data, vector=vectors[idx])
-                            
-                            logger.info(f"🌳 ساختار درختی مقاله '{article.title}' ذخیره شد ({len(all_nodes)} گره)")
-                        else:
-                            logger.info(f"📄 مقاله '{article.title}' فاقد ساختار درختی است")
-
-                    except Exception as tree_e:
-                        logger.warning(f"⚠️ خطا در ذخیره ساختار درختی: {str(tree_e)}")
-                        # ادامه عملیات بدون شکست خوردن کل فرآیند
             # ✅ client به صورت خودکار بسته می‌شود
 
         except Exception as e:
             logger.error(f"❌ خطا در همگام‌سازی با Weaviate: {str(e)}")
             # ادامه عملیات بدون شکست خوردن کل فرآیند
+
+    async def _incremental_sync_to_weaviate(self, article: KnowledgeBaseArticle, client, collection_name: str) -> None:
+        """
+        همگام‌سازی incremental با Weaviate - فقط تغییرات را اعمال می‌کند
+
+        Args:
+            article: مقاله برای همگام‌سازی
+            client: Weaviate client instance
+            collection_name: نام collection هدف
+        """
+        try:
+            from app.infrastructure.markdown_parser import markdown_parser
+
+            # ایجاد درخت Markdown جدید
+            tree = markdown_parser.parse_to_tree(
+                article.content_markdown,
+                str(article.id),
+                article_title=article.title
+            )
+
+            new_nodes = tree.get_all_nodes()
+            if not new_nodes:
+                logger.info(f"📄 مقاله '{article.title}' فاقد ساختار درختی است")
+                return
+
+            # دریافت گره‌های موجود از Weaviate
+            existing_nodes = await self._get_existing_nodes(str(article.id), client, collection_name)
+
+            # تشخیص تغییرات
+            changes = self._detect_changes(existing_nodes, new_nodes)
+
+            if not changes['has_changes']:
+                logger.info(f"ℹ️ مقاله '{article.title}' تغییری نکرده - رد شد")
+                return
+
+            # اعمال تغییرات incremental
+            await self._apply_incremental_changes(article, changes, client, collection_name)
+
+            # لاگ خلاصه عملیات
+            logger.info(f"✅ مقاله '{article.title}' در {collection_name} همگام‌سازی شد - اضافه: {len(changes['to_add'])}, بروزرسانی: {len(changes['to_update'])}, حذف: {len(changes['to_delete'])}")
+
+        except Exception as e:
+            logger.error(f"❌ خطا در همگام‌سازی incremental: {str(e)}")
+            raise
+
+    async def _get_existing_nodes(self, article_id: str, client, collection_name: str) -> List[Dict[str, Any]]:
+        """
+        دریافت گره‌های موجود مقاله از Weaviate
+
+        Args:
+            article_id: شناسه مقاله
+            client: Weaviate client instance
+            collection_name: نام collection
+
+        Returns:
+            لیست گره‌های موجود با UUID و hash محتوا
+        """
+        try:
+            collection = client.collections.get(collection_name)
+            from weaviate.classes.query import Filter
+
+            # دریافت تمام گره‌های مقاله
+            response = collection.query.fetch_objects(
+                filters=Filter.by_property("article_id").equal(article_id),
+                return_properties=["node_id", "title", "content", "level", "path", "order", "parent_id"]
+            )
+
+            existing_nodes = []
+            for obj in response.objects:
+                # محاسبه hash محتوا برای مقایسه سریع
+                content_hash = self._calculate_content_hash(obj.properties)
+
+                node_data = {
+                    'node_id': obj.properties.get('node_id'),
+                    'title': obj.properties.get('title', ''),
+                    'content': obj.properties.get('content', ''),
+                    'level': obj.properties.get('level', 1),
+                    'path': obj.properties.get('path', ''),
+                    'order': obj.properties.get('order', 0),
+                    'parent_id': obj.properties.get('parent_id', ''),
+                    'weaviate_uuid': obj.uuid,
+                    'content_hash': content_hash
+                }
+                existing_nodes.append(node_data)
+
+            logger.debug(f"📋 {len(existing_nodes)} گره موجود برای مقاله {article_id} در {collection_name} یافت شد")
+            return existing_nodes
+
+        except Exception as e:
+            logger.error(f"❌ خطا در دریافت گره‌های موجود: {str(e)}")
+            return []
+
+    def _calculate_content_hash(self, node_properties: Dict[str, Any]) -> str:
+        """
+        محاسبه hash محتوا برای مقایسه سریع گره‌ها
+
+        Args:
+            node_properties: ویژگی‌های گره
+
+        Returns:
+            hash رشته‌ای از محتوا
+        """
+        # ترکیب محتوای کلیدی برای hash
+        content_parts = [
+            node_properties.get('title', ''),
+            node_properties.get('content', ''),
+            str(node_properties.get('level', 1)),
+            node_properties.get('path', ''),
+            str(node_properties.get('order', 0)),
+            node_properties.get('parent_id', '')
+        ]
+
+        content_str = '|'.join(content_parts)
+        return hashlib.md5(content_str.encode('utf-8')).hexdigest()
+
+    def _detect_changes(self, existing_nodes: List[Dict[str, Any]], new_nodes: List[Any]) -> Dict[str, Any]:
+        """
+        تشخیص تغییرات بین گره‌های موجود و جدید
+
+        Args:
+            existing_nodes: گره‌های موجود در Weaviate
+            new_nodes: گره‌های جدید از markdown parser
+
+        Returns:
+            دیکشنری تغییرات با کلیدهای to_add, to_update, to_delete
+        """
+        changes = {
+            'has_changes': False,
+            'to_add': [],
+            'to_update': [],
+            'to_delete': []
+        }
+
+        # تبدیل لیست‌ها به dictionary برای مقایسه سریع‌تر
+        existing_dict = {node['node_id']: node for node in existing_nodes}
+        new_dict = {node.id: node for node in new_nodes}
+
+        # 1. گره‌های جدید (در new_nodes وجود دارد اما نه در existing_nodes)
+        for node_id, new_node in new_dict.items():
+            if node_id not in existing_dict:
+                changes['to_add'].append(new_node)
+                changes['has_changes'] = True
+
+        # 2. گره‌های تغییر یافته (در هر دو وجود دارد اما محتوا متفاوت است)
+        for node_id, existing_node in existing_dict.items():
+            if node_id in new_dict:
+                new_node = new_dict[node_id]
+                new_hash = self._calculate_node_hash(new_node)
+
+                if existing_node['content_hash'] != new_hash:
+                    changes['to_update'].append({
+                        'existing': existing_node,
+                        'new': new_node
+                    })
+                    changes['has_changes'] = True
+
+        # 3. گره‌های حذف شده (در existing_nodes وجود دارد اما نه در new_nodes)
+        for node_id, existing_node in existing_dict.items():
+            if node_id not in new_dict:
+                changes['to_delete'].append(existing_node)
+                changes['has_changes'] = True
+
+        logger.debug(f"🔍 تغییرات تشخیص داده شد - اضافه: {len(changes['to_add'])}, بروزرسانی: {len(changes['to_update'])}, حذف: {len(changes['to_delete'])}")
+
+        return changes
+
+    def _calculate_node_hash(self, node: Any) -> str:
+        """
+        محاسبه hash برای گره جدید (از markdown parser)
+
+        Args:
+            node: گره از markdown parser
+
+        Returns:
+            hash محتوا
+        """
+        content_parts = [
+            node.title,
+            node.content,
+            str(node.level),
+            node.path,
+            str(node.order),
+            node.parent_id or ''
+        ]
+
+        content_str = '|'.join(content_parts)
+        return hashlib.md5(content_str.encode('utf-8')).hexdigest()
+
+    async def _apply_incremental_changes(self, article: KnowledgeBaseArticle, changes: Dict[str, Any], client, collection_name: str) -> None:
+        """
+        اعمال تغییرات incremental در Weaviate با استفاده از batch operations
+
+        Args:
+            article: مقاله
+            changes: دیکشنری تغییرات
+            client: Weaviate client instance
+            collection_name: نام collection
+        """
+        try:
+            collection = client.collections.get(collection_name)
+
+            # آماده‌سازی OpenAI client برای تولید vectorها
+            from app.core.config import settings
+            from openai import OpenAI
+
+            embedder_api_key = settings.embedder_api_key_loaded
+            embedder_base_url = settings.embedder_openai_base_url_loaded
+            embedder_model = settings.embedder_model_loaded
+
+            openai_client = OpenAI(
+                api_key=embedder_api_key,
+                base_url=embedder_base_url
+            )
+
+            # 1. حذف گره‌های قدیمی
+            if changes['to_delete']:
+                logger.info(f"🗑️ حذف {len(changes['to_delete'])} گره قدیمی...")
+                delete_uuids = [node['weaviate_uuid'] for node in changes['to_delete']]
+
+                # استفاده از batch delete
+                with collection.batch.delete() as batch_delete:
+                    for uuid in delete_uuids:
+                        batch_delete.by_id(uuid)
+
+                logger.info(f"✅ {len(changes['to_delete'])} گره حذف شد")
+
+            # 2. بروزرسانی گره‌های تغییر یافته
+            if changes['to_update']:
+                logger.info(f"🔄 بروزرسانی {len(changes['to_update'])} گره...")
+
+                # تولید vectorها برای گره‌های بروزرسانی
+                update_texts = [f"{change['new'].title}\n\n{change['new'].content}" for change in changes['to_update']]
+                update_response = openai_client.embeddings.create(
+                    model=embedder_model,
+                    input=update_texts
+                )
+                update_vectors = [item.embedding for item in update_response.data]
+
+                # اعمال بروزرسانی‌ها
+                with collection.batch.update() as batch_update:
+                    for change, vector in zip(changes['to_update'], update_vectors):
+                        existing = change['existing']
+                        new_node = change['new']
+
+                        properties = self._node_to_properties(new_node, article)
+
+                        batch_update.by_id(
+                            uuid=existing['weaviate_uuid'],
+                            properties=properties,
+                            vector=vector
+                        )
+
+                logger.info(f"✅ {len(changes['to_update'])} گره بروزرسانی شد")
+
+            # 3. اضافه کردن گره‌های جدید
+            if changes['to_add']:
+                logger.info(f"➕ اضافه کردن {len(changes['to_add'])} گره جدید...")
+
+                # تولید vectorها برای گره‌های جدید
+                add_texts = [f"{node.title}\n\n{node.content}" for node in changes['to_add']]
+                add_response = openai_client.embeddings.create(
+                    model=embedder_model,
+                    input=add_texts
+                )
+                add_vectors = [item.embedding for item in add_response.data]
+
+                # اعمال اضافه کردن‌ها
+                with collection.batch.insert() as batch_insert:
+                    for node, vector in zip(changes['to_add'], add_vectors):
+                        properties = self._node_to_properties(node, article)
+                        batch_insert.properties(properties).vector(vector)
+
+                logger.info(f"✅ {len(changes['to_add'])} گره اضافه شد")
+
+        except Exception as e:
+            logger.error(f"❌ خطا در اعمال تغییرات incremental: {str(e)}")
+            raise
+
+    def _node_to_properties(self, node: Any, article: KnowledgeBaseArticle) -> Dict[str, Any]:
+        """
+        تبدیل گره به properties برای Weaviate
+
+        Args:
+            node: گره از markdown parser
+            article: مقاله والد
+
+        Returns:
+            دیکشنری properties
+        """
+        return {
+            "node_id": node.id,
+            "article_id": str(article.id),
+            "title": node.title,
+            "level": node.level,
+            "content": node.content,
+            "parent_id": node.parent_id,
+            "path": node.path,
+            "order": node.order,
+            "full_content": article.content_markdown
+        }
 
     # =============== STATISTICS ===============
 

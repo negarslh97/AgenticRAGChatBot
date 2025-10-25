@@ -10,7 +10,9 @@ import {
   BookOpen,
   Activity,
   Settings,
-  Crown
+  Crown,
+  Database,
+  Zap
 } from 'lucide-react'
 
 interface DashboardStats {
@@ -30,6 +32,19 @@ interface DashboardStats {
   activityLogs: {
     total: number
   }
+  weaviateCollections?: {
+    small: {
+      name: string
+      count: number
+      model: string
+    }
+    large: {
+      name: string
+      count: number
+      model: string
+    }
+    currentModel: string
+  }
 }
 
 const SuperAdminDashboard: React.FC = () => {
@@ -39,7 +54,12 @@ const SuperAdminDashboard: React.FC = () => {
     users: { totalAdmins: 0, totalCustomers: 0 },
     tickets: { open: 0, awaitingReply: 0, resolved: 0 },
     knowledgeBase: { published: 0, drafts: 0 },
-    activityLogs: { total: 0 }
+    activityLogs: { total: 0 },
+    weaviateCollections: {
+      small: { name: 'MarkdownNode_Small', count: 0, model: 'text-embedding-3-small' },
+      large: { name: 'MarkdownNode_Large', count: 0, model: 'text-embedding-3-large' },
+      currentModel: 'text-embedding-3-small'
+    }
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -97,7 +117,12 @@ const SuperAdminDashboard: React.FC = () => {
         users: { totalAdmins: 0, totalCustomers: 0 },
         tickets: { open: 0, awaitingReply: 0, resolved: 0 },
         knowledgeBase: { published: 0, drafts: 0 },
-        activityLogs: { total: 0 }
+        activityLogs: { total: 0 },
+        weaviateCollections: {
+          small: { name: 'MarkdownNode_Small', count: 0, model: 'text-embedding-3-small' },
+          large: { name: 'MarkdownNode_Large', count: 0, model: 'text-embedding-3-large' },
+          currentModel: 'text-embedding-3-small'
+        }
       })
     } finally {
       setLoading(false)
@@ -195,6 +220,30 @@ const SuperAdminDashboard: React.FC = () => {
         {
           label: 'مشاهده لاگ‌های فعالیت',
           onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+        }
+      ]
+    },
+    {
+      title: 'Weaviate Collections',
+      stats: [
+        { label: 'Small Collection', value: stats.weaviateCollections?.small.count || 0 },
+        { label: 'Large Collection', value: stats.weaviateCollections?.large.count || 0 },
+        {
+          label: 'Current Model',
+          value: (
+            <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-mono bg-blue-50 text-blue-700 border border-blue-200">
+              {stats.weaviateCollections?.currentModel || 'Unknown'}
+            </span>
+          )
+        }
+      ],
+      description: 'آمار collections Weaviate بر اساس مدل embedding',
+      icon: Database,
+      iconColor: 'text-indigo-600',
+      actions: [
+        {
+          label: 'مشاهده جزئیات',
+          onClick: () => alert(`مدل فعلی: ${stats.weaviateCollections?.currentModel}\nSmall: ${stats.weaviateCollections?.small.count} گره\nLarge: ${stats.weaviateCollections?.large.count} گره`)
         }
       ]
     },

@@ -57,6 +57,25 @@ class WeaviateMongoDBConnector:
         self.collection_name = "SallyChatBot"
         self._use_connection_manager = False  # برای CLI این False است
 
+    def get_collection_name(self, embedder_model: str = None) -> str:
+        """
+        تعیین نام collection بر اساس مدل embedder
+
+        Args:
+            embedder_model: مدل embedder (اختیاری، اگر None باشد از تنظیمات استفاده می‌کند)
+
+        Returns:
+            نام collection مناسب
+        """
+        if embedder_model is None:
+            embedder_model = settings.embedder_model_loaded
+
+        # بررسی مدل embedder و تعیین collection مناسب
+        if embedder_model and "large" in embedder_model.lower():
+            return "MarkdownNode_Large"
+        else:
+            return "MarkdownNode_Small"
+
     def connect_weaviate(self, use_manager: bool = False) -> bool:
         """
         اتصال به Weaviate
@@ -173,7 +192,7 @@ class WeaviateMongoDBConnector:
             return False
 
     def log_vectorizer_info(self) -> None:
-        """لاگ گرفتن اطلاعات vectorizer و مدل"""
+        """لاگ گرفتن اطلاعات vectorizer و مدل برای هر دو collection"""
         try:
             logger.info("🔍 بررسی اطلاعات Vectorizer...")
 
@@ -181,54 +200,72 @@ class WeaviateMongoDBConnector:
                 logger.warning("⚠️ Weaviate client موجود نیست")
                 return
 
-            # دریافت اطلاعات collection MarkdownNode
-            try:
-                collection = self.weaviate_client.collections.get("MarkdownNode")
-                config = collection.config.get()
-                
-                logger.info(f"🤖 کلاس 'MarkdownNode' از vectorizer استفاده می‌کند (ساختار درختی Markdown)")
-                
-                # دریافت اطلاعات vectorizer
-                vectorizer_config = config.vectorizer_config
-                if vectorizer_config:
-                    logger.info(f"   📏 Vectorizer: {vectorizer_config}")
-                
-                # تلاش برای دریافت یک object و بررسی ابعاد vector آن
+            # بررسی هر دو collection
+            collections_to_check = ["MarkdownNode_Small", "MarkdownNode_Large"]
+
+            for collection_name in collections_to_check:
                 try:
-                    response = collection.query.fetch_objects(
-                        include_vector=True,
-                        limit=1
-                    )
-                    
-                    if response.objects and len(response.objects) > 0:
-                        vector = response.objects[0].vector
-                        dimensions = len(vector.get('default', [])) if isinstance(vector, dict) else len(vector) if vector else 1536
-                        logger.info(f"   📐 ابعاد vector: {dimensions}")
-                    else:
-                        logger.info(f"   📐 ابعاد vector: 1536 (پیش‌فرض)")
-                        
+                    if not self.weaviate_client.collections.exists(collection_name):
+                        logger.info(f"ℹ️ Collection {collection_name} وجود ندارد")
+                        continue
+
+                    collection = self.weaviate_client.collections.get(collection_name)
+                    config = collection.config.get()
+
+                    logger.info(f"🤖 Collection '{collection_name}' از vectorizer استفاده می‌کند")
+
+                    # دریافت اطلاعات vectorizer
+                    vectorizer_config = config.vectorizer_config
+                    if vectorizer_config:
+                        logger.info(f"   📏 Vectorizer: {vectorizer_config}")
+
+                    # شمارش اشیاء
+                    try:
+                        aggregate_result = collection.aggregate.over_all(total_count=True)
+                        total_count = aggregate_result.total_count
+                        logger.info(f"   📊 تعداد اشیاء: {total_count}")
+                    except:
+                        logger.info(f"   📊 تعداد اشیاء: نامشخص")
+
+                    # تلاش برای دریافت یک object و بررسی ابعاد vector آن
+                    try:
+                        response = collection.query.fetch_objects(
+                            include_vector=True,
+                            limit=1
+                        )
+
+                        if response.objects and len(response.objects) > 0:
+                            vector = response.objects[0].vector
+                            dimensions = len(vector.get('default', [])) if isinstance(vector, dict) else len(vector) if vector else 1536
+                            logger.info(f"   📐 ابعاد vector: {dimensions}")
+                        else:
+                            logger.info(f"   📐 ابعاد vector: نامشخص (collection خالی)")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ نتوانست اطلاعات vector را دریافت کند: {str(e)}")
+
                 except Exception as e:
-                    logger.warning(f"   ⚠️ نتوانست اطلاعات vector را دریافت کند: {str(e)}")
-                    logger.info(f"   📐 ابعاد vector: 1536 (پیش‌فرض)")
-                    
-            except Exception as e:
-                logger.error(f"❌ خطا در دریافت اطلاعات collection: {str(e)}")
+                    logger.error(f"❌ خطا در دریافت اطلاعات collection {collection_name}: {str(e)}")
 
         except Exception as e:
             logger.error(f"❌ خطا در دریافت اطلاعات vectorizer: {str(e)}")
 
-    def create_weaviate_schema(self) -> bool:
-        """ایجاد schema های Weaviate"""
+    def create_weaviate_schema(self, embedder_model: str = None) -> bool:
+        """ایجاد schema های Weaviate بر اساس مدل embedder"""
         try:
             logger.info("🏗️ ایجاد schema های Weaviate...")
 
             # تنظیم API key و مدل برای embedder
             embedder_api_key = settings.embedder_api_key_loaded
             embedder_openai_base_url = settings.embedder_openai_base_url_loaded
-            embedder_model = settings.embedder_model_loaded
+            if embedder_model is None:
+                embedder_model = settings.embedder_model_loaded
 
             logger.info(f"🔢 Embedder Model: {embedder_model}")
             logger.info(f"🔧 استفاده از Server-Side Vectorization (text2vec-openai)")
+
+            # تعیین نام collection بر اساس مدل
+            collection_name = self.get_collection_name(embedder_model)
+            logger.info(f"📁 Collection Name: {collection_name}")
 
             # استفاده از text2vec-openai vectorizer - Weaviate خودش vectorها را تولید می‌کند
             vectorizer_config = Configure.Vectorizer.text2vec_openai(
@@ -237,17 +274,31 @@ class WeaviateMongoDBConnector:
                 base_url=embedder_openai_base_url
             )
 
+            # تنظیمات vector index بر اساس مدل
+            if "large" in embedder_model.lower():
+                # برای مدل large، تنظیمات بهینه‌سازی شده برای دقت بالاتر
+                vector_index_config = Configure.VectorIndex.hnsw(
+                    distance_metric=VectorDistances.COSINE,
+                    ef_construction=256,  # بالاتر برای دقت بهتر
+                    max_connections=128   # بالاتر برای مدل بزرگ‌تر
+                )
+                description = "گره‌های ساختار درختی Markdown - مدل Large (text-embedding-3-large)"
+            else:
+                # برای مدل small، تنظیمات بهینه‌سازی شده برای سرعت
+                vector_index_config = Configure.VectorIndex.hnsw(
+                    distance_metric=VectorDistances.COSINE,
+                    ef_construction=128,
+                    max_connections=64
+                )
+                description = "گره‌های ساختار درختی Markdown - مدل Small (text-embedding-3-small)"
+
             try:
                 # ایجاد collection با v4 API
                 self.weaviate_client.collections.create(
-                    name="MarkdownNode",
-                    description="گره‌های ساختار درختی Markdown",
+                    name=collection_name,
+                    description=description,
                     vectorizer_config=vectorizer_config,
-                    vector_index_config=Configure.VectorIndex.hnsw(
-                        distance_metric=VectorDistances.COSINE,
-                        ef_construction=128,
-                        max_connections=64
-                    ),
+                    vector_index_config=vector_index_config,
                     properties=[
                         Property(
                             name="node_id",
@@ -312,16 +363,23 @@ class WeaviateMongoDBConnector:
                             data_type=DataType.TEXT,
                             description="محتوای کامل مقاله برای زمینه",
                             skip_vectorization=True
+                        ),
+                        Property(
+                            name="embedder_model",
+                            data_type=DataType.TEXT,
+                            description="مدل embedder استفاده شده",
+                            skip_vectorization=True,
+                            index_filterable=True
                         )
                     ]
                 )
-                logger.info("✅ Collection MarkdownNode (ساختار درختی) ایجاد شد")
+                logger.info(f"✅ Collection {collection_name} ({description}) ایجاد شد")
             except Exception as e:
                 error_msg = str(e).lower()
                 if "already exists" in error_msg or "duplicate" in error_msg:
-                    logger.info("ℹ️ Collection MarkdownNode قبلاً ایجاد شده")
+                    logger.info(f"ℹ️ Collection {collection_name} قبلاً ایجاد شده")
                 else:
-                    logger.warning(f"⚠️ Collection MarkdownNode ایجاد نشد: {str(e)}")
+                    logger.warning(f"⚠️ Collection {collection_name} ایجاد نشد: {str(e)}")
 
             return True
 
@@ -329,19 +387,24 @@ class WeaviateMongoDBConnector:
             logger.error(f"❌ خطا در ایجاد schema: {str(e)}")
             return False
 
-    async def save_markdown_tree(self, tree, full_content: str) -> bool:
+    async def save_markdown_tree(self, tree, full_content: str, embedder_model: str = None) -> bool:
         """
         ذخیره ساختار درختی Markdown در Weaviate با Server-Side Vectorization
 
         Args:
             tree: ساختار درختی Markdown
             full_content: محتوای کامل مقاله برای زمینه
+            embedder_model: مدل embedder (اختیاری)
 
         Returns:
             True اگر ذخیره موفق باشد
         """
         try:
             logger.info(f"🌳 شروع ذخیره درخت Markdown برای مقاله {tree.article_id}")
+
+            # تعیین collection بر اساس مدل embedder
+            collection_name = self.get_collection_name(embedder_model)
+            logger.info(f"📁 استفاده از collection: {collection_name}")
 
             # دریافت همه گره‌ها
             all_nodes = tree.get_all_nodes()
@@ -366,12 +429,13 @@ class WeaviateMongoDBConnector:
                         "parent_id": node.parent_id,
                         "path": node.path,
                         "order": node.order,
-                        "full_content": full_content
+                        "full_content": full_content,
+                        "embedder_model": embedder_model or settings.embedder_model_loaded
                     }
 
                     # ذخیره در Weaviate با Server-Side Vectorization
                     # Weaviate خودش vectorها را تولید می‌کند
-                    collection = self.weaviate_client.collections.get("MarkdownNode")
+                    collection = self.weaviate_client.collections.get(collection_name)
 
                     # بررسی اتصال قبل از ذخیره
                     if not self.weaviate_client.is_ready():
@@ -380,7 +444,7 @@ class WeaviateMongoDBConnector:
 
                     # ذخیره بدون vector - Weaviate خودش تولید می‌کند
                     collection.data.insert(properties=node_data)
-                    logger.info(f"✅ گره '{node.title}' با Server-Side Vectorization ذخیره شد")
+                    logger.info(f"✅ گره '{node.title}' در {collection_name} ذخیره شد")
 
                     saved_count += 1
 
@@ -388,7 +452,7 @@ class WeaviateMongoDBConnector:
                     logger.error(f"❌ خطا در ذخیره گره '{node.title}': {str(e)}")
                     continue
 
-            logger.info(f"✅ {saved_count} گره با Server-Side Vectorization ذخیره شد")
+            logger.info(f"✅ {saved_count} گره در {collection_name} ذخیره شد")
             return True
 
         except Exception as e:
@@ -397,12 +461,13 @@ class WeaviateMongoDBConnector:
             logger.error(traceback.format_exc())
             return False
 
-    def delete_markdown_nodes(self, article_id: str) -> bool:
+    def delete_markdown_nodes(self, article_id: str, embedder_model: str = None) -> bool:
         """
         حذف همه گره‌های Markdown یک مقاله از Weaviate
 
         Args:
             article_id: شناسه مقاله
+            embedder_model: مدل embedder (اختیاری)
 
         Returns:
             True اگر حذف موفق باشد
@@ -410,12 +475,16 @@ class WeaviateMongoDBConnector:
         try:
             logger.info(f"🗑️ شروع حذف گره‌های Markdown برای مقاله {article_id}")
 
-            # حذف از collection MarkdownNode با v4 API
-            collection = self.weaviate_client.collections.get("MarkdownNode")
+            # تعیین collection بر اساس مدل embedder
+            collection_name = self.get_collection_name(embedder_model)
+            logger.info(f"📁 حذف از collection: {collection_name}")
+
+            # حذف از collection مناسب با v4 API
+            collection = self.weaviate_client.collections.get(collection_name)
             collection.data.delete_many(
                 where=Filter.by_property("article_id").equal(article_id)
             )
-            logger.info("✅ گره‌های Markdown حذف شدند")
+            logger.info(f"✅ گره‌های Markdown از {collection_name} حذف شدند")
 
             return True
 
@@ -470,13 +539,20 @@ class WeaviateMongoDBConnector:
             # بررسی collection های Weaviate
             if hasattr(self, 'weaviate_client') and self.weaviate_client:
                 try:
-                    # بررسی وجود collection با v4 API
-                    if self.weaviate_client.collections.exists("MarkdownNode"):
+                    # بررسی وجود هر دو collection با v4 API
+                    small_exists = self.weaviate_client.collections.exists("MarkdownNode_Small")
+                    large_exists = self.weaviate_client.collections.exists("MarkdownNode_Large")
+
+                    if small_exists or large_exists:
                         result["schema_exists"] = True
-                        logger.info("✅ Collection MarkdownNode موجود است")
+                        logger.info("✅ حداقل یکی از collections موجود است")
+                        if small_exists:
+                            logger.info("✅ Collection MarkdownNode_Small موجود است")
+                        if large_exists:
+                            logger.info("✅ Collection MarkdownNode_Large موجود است")
                     else:
-                        result["errors"].append("Missing MarkdownNode collection")
-                        logger.warning("⚠️ Collection MarkdownNode یافت نشد")
+                        result["errors"].append("Missing both MarkdownNode collections")
+                        logger.warning("⚠️ هیچ کدام از collections MarkdownNode یافت نشد")
                 except Exception as e:
                     result["errors"].append(f"Schema check error: {str(e)}")
                     logger.error(f"❌ خطای بررسی schema: {str(e)}")
@@ -485,40 +561,31 @@ class WeaviateMongoDBConnector:
             if result["weaviate_connection"]:
                 self.log_vectorizer_info()
 
-            # شمارش داده‌ها
+            # شمارش داده‌ها برای هر دو collection
             if result["weaviate_connection"] and hasattr(self, 'weaviate_client') and self.weaviate_client:
                 try:
-                    # شمارش گره‌های Markdown با v4 API
-                    if self.weaviate_client.collections.exists("MarkdownNode"):
-                        collection = self.weaviate_client.collections.get("MarkdownNode")
+                    total_count = 0
 
-                        # استفاده از متد ساده query برای شمارش دقیق
-                        try:
-                            query_result = collection.query.fetch_objects(limit=10000)  # محدودیت بالا برای شمارش همه
-                            count = len(query_result.objects)
-                            result["data_counts"]["markdown_nodes"] = count
-                            logger.info(f"📊 آمار داده‌ها - گره‌های Markdown: {count}")
-                        except Exception as query_error:
-                            logger.warning(f"⚠️ خطا در شمارش با query: {query_error}")
-                            # استفاده از iterator به عنوان fallback
+                    # شمارش گره‌های هر دو collection
+                    collections_to_count = ["MarkdownNode_Small", "MarkdownNode_Large"]
+
+                    for collection_name in collections_to_count:
+                        if self.weaviate_client.collections.exists(collection_name):
+                            collection = self.weaviate_client.collections.get(collection_name)
+
+                            # استفاده از aggregate برای شمارش دقیق
                             try:
-                                objects = collection.iterator(include_vector=False)
-                                count = sum(1 for _ in objects)
-                                result["data_counts"]["markdown_nodes"] = count
-                                logger.info(f"📊 آمار داده‌ها - گره‌های Markdown: {count} (iterator)")
-                            except Exception as iter_error:
-                                logger.warning(f"⚠️ خطا در شمارش با iterator: {iter_error}")
-                                # استفاده از aggregate به عنوان آخرین گزینه
-                                try:
-                                    aggregate_result = collection.aggregate.over_all(total_count=True)
-                                    result["data_counts"]["markdown_nodes"] = aggregate_result.total_count
-                                    logger.info(f"📊 آمار داده‌ها - گره‌های Markdown: {result['data_counts']['markdown_nodes']} (aggregate)")
-                                except Exception as agg_error:
-                                    logger.warning(f"⚠️ خطا در شمارش با aggregate: {agg_error}")
-                                    result["data_counts"]["markdown_nodes"] = 0
-                    else:
-                        result["data_counts"]["markdown_nodes"] = 0
-                        logger.info("📊 آمار داده‌ها - گره‌های Markdown: 0 (collection وجود ندارد)")
+                                aggregate_result = collection.aggregate.over_all(total_count=True)
+                                count = aggregate_result.total_count
+                                result["data_counts"][f"{collection_name}_nodes"] = count
+                                total_count += count
+                                logger.info(f"📊 آمار داده‌ها - {collection_name}: {count}")
+                            except Exception as agg_error:
+                                logger.warning(f"⚠️ خطا در شمارش {collection_name}: {agg_error}")
+                                result["data_counts"][f"{collection_name}_nodes"] = 0
+
+                    result["data_counts"]["markdown_nodes"] = total_count
+                    logger.info(f"📊 آمار داده‌ها - کل گره‌های Markdown: {total_count}")
 
                 except Exception as e:
                     result["errors"].append(f"Data count error: {str(e)}")
@@ -786,44 +853,56 @@ class WeaviateMongoDBConnector:
             return False
 
     def delete_all_from_weaviate(self) -> bool:
-        """حذف همه گره‌های Markdown از Weaviate"""
+        """حذف همه گره‌های Markdown از هر دو collection Weaviate"""
         try:
             logger.info("🗑️ شروع حذف همه گره‌های Markdown از Weaviate...")
-            
+
             if not hasattr(self, 'weaviate_client') or not self.weaviate_client:
                 if not self.connect_weaviate():
                     logger.error("❌ اتصال به Weaviate ناموفق بود")
                     return False
-            
-            # حذف collection کامل
-            collection_name = "MarkdownNode"
-            
-            if self.weaviate_client.collections.exists(collection_name):
-                # دریافت تعداد کل اشیاء قبل از حذف
-                collection = self.weaviate_client.collections.get(collection_name)
-                try:
-                    aggregate_result = collection.aggregate.over_all(total_count=True)
-                    total_count = aggregate_result.total_count
-                    logger.info(f"📊 تعداد گره‌های موجود: {total_count}")
-                except:
-                    total_count = "نامشخص"
-                
-                # حذف collection
-                self.weaviate_client.collections.delete(collection_name)
-                logger.info(f"✅ Collection {collection_name} و {total_count} گره حذف شدند")
-                
-                # ایجاد مجدد collection خالی
-                success = self.create_weaviate_schema()
-                if success:
-                    logger.info("✅ Collection خالی مجدداً ایجاد شد")
+
+            # حذف هر دو collection
+            collections_to_delete = ["MarkdownNode_Small", "MarkdownNode_Large"]
+            success_count = 0
+
+            for collection_name in collections_to_delete:
+                if self.weaviate_client.collections.exists(collection_name):
+                    # دریافت تعداد کل اشیاء قبل از حذف
+                    collection = self.weaviate_client.collections.get(collection_name)
+                    try:
+                        aggregate_result = collection.aggregate.over_all(total_count=True)
+                        total_count = aggregate_result.total_count
+                        logger.info(f"📊 تعداد گره‌های موجود در {collection_name}: {total_count}")
+                    except:
+                        total_count = "نامشخص"
+
+                    # حذف collection
+                    self.weaviate_client.collections.delete(collection_name)
+                    logger.info(f"✅ Collection {collection_name} و {total_count} گره حذف شدند")
+                    success_count += 1
                 else:
-                    logger.warning("⚠️ خطا در ایجاد مجدد collection")
-                    
-            else:
-                logger.info("ℹ️ Collection MarkdownNode وجود ندارد")
-            
+                    logger.info(f"ℹ️ Collection {collection_name} وجود ندارد")
+
+            # ایجاد مجدد هر دو collection خالی
+            if success_count > 0:
+                logger.info("🔄 ایجاد مجدد collections خالی...")
+                # ایجاد collection برای مدل small
+                success_small = self.create_weaviate_schema("text-embedding-3-small")
+                # ایجاد collection برای مدل large
+                success_large = self.create_weaviate_schema("text-embedding-3-large")
+
+                if success_small and success_large:
+                    logger.info("✅ هر دو collection خالی مجدداً ایجاد شدند")
+                elif success_small:
+                    logger.info("✅ Collection Small ایجاد شد، Large ناموفق بود")
+                elif success_large:
+                    logger.info("✅ Collection Large ایجاد شد، Small ناموفق بود")
+                else:
+                    logger.warning("⚠️ هیچ collection جدیدی ایجاد نشد")
+
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ خطا در حذف از Weaviate: {str(e)}")
             return False
