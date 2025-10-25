@@ -56,18 +56,13 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
         from app.core.config import settings
         from app.infrastructure.connection_manager import weaviate_client
         from app.infrastructure.markdown_parser import markdown_parser
-        from openai import OpenAI
         from weaviate.classes.config import Configure, Property, DataType
         
         # اتصال به MongoDB
         mongodb_client = AsyncIOMotorClient(settings.database_url)
         db = mongodb_client.get_database()
         
-        # اتصال به OpenAI
-        openai_client = OpenAI(
-            api_key=settings.embedder_api_key_loaded,
-            base_url=settings.embedder_openai_base_url_loaded
-        )
+        # ❌ حذف اتصال به OpenAI - تولید embeddings توسط Weaviate انجام می‌شود
         
         reindex_jobs[job_id]["message"] = "اتصال به پایگاه‌های داده برقرار شد"
         reindex_jobs[job_id]["progress"] = 10
@@ -85,24 +80,16 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
                     except:
                         pass
                     
-                    # ایجاد مجدد
-                    vectorizer_config = Configure.Vectorizer.none()
+                    # ایجاد مجدد با Server-Side Vectorization
+                    from app.core.weaviate_utils import get_weaviate_collection_name, get_weaviate_vectorizer_config, get_weaviate_properties
+
+                    collection_name = get_weaviate_collection_name()
+                    vectorizer_config = get_weaviate_vectorizer_config()
+
                     client.collections.create(
-                        name="MarkdownNode",
+                        name=collection_name,
                         vectorizer_config=vectorizer_config,
-                        properties=[
-                            Property(name="node_id", data_type=DataType.TEXT),
-                            Property(name="article_id", data_type=DataType.TEXT),
-                            Property(name="title", data_type=DataType.TEXT),
-                            Property(name="content", data_type=DataType.TEXT),
-                            Property(name="full_content", data_type=DataType.TEXT),
-                            Property(name="level", data_type=DataType.INT),
-                            Property(name="path", data_type=DataType.TEXT),
-                            Property(name="order", data_type=DataType.INT),
-                            Property(name="parent_id", data_type=DataType.TEXT),
-                            Property(name="visibility", data_type=DataType.TEXT),
-                            Property(name="category", data_type=DataType.TEXT),
-                        ]
+                        properties=get_weaviate_properties()
                     )
                     logger.info(f"[Job {job_id}] Collection جدید ایجاد شد")
             except Exception as e:
@@ -197,37 +184,32 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
                 # پارس و تقسیم
                 tree = markdown_parser.parse_to_tree(content, article_id, article_title=title)
                 nodes = tree.get_all_nodes()
-                
+
                 logger.info(f"[Job {job_id}] {len(nodes)} chunk ایجاد شد")
-                
-                # تولید embeddings
-                texts_to_vectorize = [f"{node.title}\n\n{node.content}" for node in nodes]
-                embedder_model = settings.embedder_model_loaded
-                
-                response = openai_client.embeddings.create(
-                    model=embedder_model,
-                    input=texts_to_vectorize
-                )
-                vectors = [item.embedding for item in response.data]
-                
-                # ذخیره در Weaviate
+
+                # ❌ حذف کامل بخش تولید embeddings توسط OpenAI
+                # تولید embeddings توسط Weaviate انجام می‌شود
+
+                # ذخیره در Weaviate با Server-Side Vectorization
                 with weaviate_client() as client:
-                    collection = client.collections.get("MarkdownNode")
-                    
+                    from app.core.weaviate_utils import get_weaviate_collection_name
+                    collection_name = get_weaviate_collection_name()
+                    collection = client.collections.get(collection_name)
+
                     # Safe handling برای metadata (جلوگیری از NoneType errors)
                     visibility = article.get("visibility", "public")
-                    
+
                     # Safe category extraction
                     category_obj = article.get("category")
                     if category_obj and isinstance(category_obj, dict):
                         category = category_obj.get("name", "عمومی")
                     else:
                         category = "عمومی"
-                    
+
                     full_article_content = content
-                    
+
                     with collection.batch.dynamic() as batch:
-                        for node, vector in zip(nodes, vectors):
+                        for node in nodes:  # حلقه ساده روی nodes
                             properties = {
                                 "node_id": node.id,
                                 "article_id": article_id,
@@ -241,7 +223,8 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
                                 "visibility": visibility,
                                 "category": category
                             }
-                            batch.add_object(properties=properties, vector=vector)
+                            # ✅ فقط properties ارسال می‌شود، Weaviate خودش vector تولید می‌کند
+                            batch.add_object(properties=properties)
                 
                 total_chunks += len(nodes)
                 successful += 1

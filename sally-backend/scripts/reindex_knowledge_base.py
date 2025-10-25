@@ -28,7 +28,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.config import settings
 from app.infrastructure.connection_manager import weaviate_client
 from app.infrastructure.markdown_parser import markdown_parser
-from openai import OpenAI
 import logging
 
 # تنظیم logging
@@ -49,20 +48,13 @@ class KnowledgeBaseReindexer:
     def __init__(self):
         self.mongodb_client = None
         self.db = None
-        self.openai_client = None
         
     async def initialize(self):
         """راه‌اندازی اتصالات"""
         logger.info("🔌 اتصال به MongoDB...")
         self.mongodb_client = AsyncIOMotorClient(settings.database_url)
         self.db = self.mongodb_client.get_database()
-        
-        logger.info("🔌 راه‌اندازی OpenAI client برای embeddings...")
-        self.openai_client = OpenAI(
-            api_key=settings.embedder_api_key_loaded,
-            base_url=settings.embedder_openai_base_url_loaded
-        )
-        
+
         logger.info("✅ اتصالات برقرار شد")
     
     async def step1_clear_weaviate(self):
@@ -90,29 +82,16 @@ class KnowledgeBaseReindexer:
                 logger.info("🏗️  ایجاد مجدد collection با schema بهینه...")
                 from weaviate.classes.config import Configure, Property, DataType
                 
-                # استفاده از "none" vectorizer - ما خودمان vectorها را تولید می‌کنیم
-                # استفاده از Server-Side Vectorization برای جستجوی معنایی
-                vectorizer_config = Configure.Vectorizer.text2vec_openai(
-                    model=os.getenv("EMBEDDER_MODEL"),
-                    base_url=os.getenv("Embedder_OPENAI_BASE_URL")
-                )
+                # استفاده از Server-Side Vectorization
+                from app.core.weaviate_utils import get_weaviate_collection_name, get_weaviate_vectorizer_config, get_weaviate_properties
+
+                vectorizer_config = get_weaviate_vectorizer_config()
                 
+                collection_name = get_weaviate_collection_name()
                 client.collections.create(
-                    name="MarkdownNode",
+                    name=collection_name,
                     vectorizer_config=vectorizer_config,
-                    properties=[
-                        Property(name="node_id", data_type=DataType.TEXT),
-                        Property(name="article_id", data_type=DataType.TEXT),
-                        Property(name="title", data_type=DataType.TEXT),
-                        Property(name="content", data_type=DataType.TEXT),
-                        Property(name="full_content", data_type=DataType.TEXT),
-                        Property(name="level", data_type=DataType.INT),
-                        Property(name="path", data_type=DataType.TEXT),
-                        Property(name="order", data_type=DataType.INT),
-                        Property(name="parent_id", data_type=DataType.TEXT),
-                        Property(name="visibility", data_type=DataType.TEXT),
-                        Property(name="category", data_type=DataType.TEXT),
-                    ]
+                    properties=get_weaviate_properties()
                 )
                 
                 logger.info("✅ Collection جدید ایجاد شد")
@@ -213,51 +192,38 @@ class KnowledgeBaseReindexer:
             raise
     
     async def _index_chunks_to_weaviate(self, nodes, article_id, article_metadata):
-        """ایندکس کردن chunks در Weaviate با batch processing"""
+        """ایندکس کردن chunks در Weaviate با Server-Side Vectorization"""
         try:
+            from app.core.weaviate_utils import get_weaviate_collection_name
+
             with weaviate_client() as client:
-                collection = client.collections.get("MarkdownNode")
-                
-                # تولید embeddings برای همه nodes به صورت batch
-                logger.info(f"      🔢 تولید embeddings برای {len(nodes)} chunk...")
-                
-                texts_to_vectorize = [
-                    f"{node.title}\n\n{node.content}" 
-                    for node in nodes
-                ]
-                
-                # Batch embedding generation
-                embedder_model = settings.embedder_model_loaded
-                response = self.openai_client.embeddings.create(
-                    model=embedder_model,
-                    input=texts_to_vectorize
-                )
-                
-                vectors = [item.embedding for item in response.data]
-                logger.info(f"      ✅ {len(vectors)} embedding تولید شد")
-                
-                # Batch insert به Weaviate
-                logger.info(f"      💾 ذخیره در Weaviate...")
-                
+                collection_name = get_weaviate_collection_name()
+                collection = client.collections.get(collection_name)
+
+                # ❌ حذف کامل بخش تولید embeddings توسط OpenAI
+                # تولید embeddings توسط Weaviate انجام می‌شود
+
+                logger.info(f"      💾 ذخیره در Weaviate (Server-Side Vectorization)...")
+
                 # آماده‌سازی metadata (safe handling of None)
                 if article_metadata is None:
                     article_metadata = {}
-                
+
                 visibility = article_metadata.get("visibility", "public")
-                
+
                 # Safe category extraction
                 category_obj = article_metadata.get("category")
                 if category_obj and isinstance(category_obj, dict):
                     category = category_obj.get("name", "عمومی")
                 else:
                     category = "عمومی"
-                
+
                 # استخراج محتوای کامل مقاله برای context
                 full_article_content = article_metadata.get("content_markdown", "")
-                
-                # Insert با batch
+
+                # Insert با batch - فقط properties ارسال می‌شود
                 with collection.batch.dynamic() as batch:
-                    for node, vector in zip(nodes, vectors):
+                    for node in nodes:  # حلقه ساده روی nodes
                         properties = {
                             "node_id": node.id,
                             "article_id": article_id,
@@ -271,15 +237,16 @@ class KnowledgeBaseReindexer:
                             "visibility": visibility,
                             "category": category
                         }
-                        
+
+                        # ✅ فقط properties ارسال می‌شود، Weaviate خودش vector تولید می‌کند
                         batch.add_object(
-                            properties=properties,
-                            vector=vector
+                            properties=properties
+                            # vector=vector  <--- حذف شد
                         )
-                
-                logger.info(f"      ✅ همه chunks ذخیره شدند")
+
+                logger.info(f"      ✅ {len(nodes)} chunk با Server-Side Vectorization ذخیره شد")
                 return len(nodes)
-                
+
         except Exception as e:
             logger.error(f"      ❌ خطا در ایندکس کردن: {e}")
             raise

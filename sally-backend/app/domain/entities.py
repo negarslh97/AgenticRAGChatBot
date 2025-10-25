@@ -299,6 +299,7 @@ class KnowledgeBaseArticle(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     published_at: Optional[datetime] = None
+    last_synced_at: Optional[datetime] = None  # تاریخ آخرین همگام‌سازی با Weaviate
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
