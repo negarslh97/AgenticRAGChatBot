@@ -3,7 +3,7 @@ import api from "./authService"
 export interface ChatMessage {
   id: string
   content: string
-  sender_type: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'customer' | 'admin' | 'super_admin' | 'guest' | 'ai'
+  sender_type: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'AI'
   sender_id?: string
   is_failed?: boolean
   failure_reason?: string

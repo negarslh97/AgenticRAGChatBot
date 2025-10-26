@@ -45,7 +45,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
         const welcomeMessage: ChatMessage = {
           id: "welcome",
           content: "👋 Hi! I'm Sally, your AI assistant. How can I help you today?",
-          sender_type: "ai" as const,
+          sender_type: "AI" as const,
           created_at: new Date().toISOString(),
         }
         console.log("Setting welcome message:", welcomeMessage)
@@ -70,7 +70,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       const welcomeMessage: ChatMessage = {
         id: "welcome",
         content: "👋 Hi! I'm Sally, your AI assistant. How can I help you today?",
-        sender_type: "ai" as const,
+        sender_type: "AI" as const,
         created_at: new Date().toISOString(),
       }
       setMessages([welcomeMessage])
@@ -123,7 +123,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       const aiMessage: ChatMessage = {
         id: response.message_id,
         content: response.message,
-        sender_type: "ai" as const,
+        sender_type: "AI" as const,
         created_at: new Date().toISOString(),
         metadata: {
           sources: response.sources,
@@ -148,7 +148,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
   }
 
   const renderMessage = (message: ChatMessage) => {
-    const isUser = message.sender_type !== 'ai'
+    const isUser = message.sender_type !== 'AI'
     const sources = message.metadata?.sources || []
     const suggestedActions = message.metadata?.suggested_actions || []
     const canGetMoreDetails = message.metadata?.can_get_more_details || false
@@ -216,7 +216,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
     }
 
     const userMessage = messages[aiMessageIndex - 1]
-    if (userMessage.sender_type === 'ai') {
+    if (userMessage.sender_type === 'AI') {
       toast.error("Unable to find the original question")
       return
     }
@@ -225,7 +225,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
     const tempMessage: ChatMessage = {
       id: `temp_detailed_${Date.now()}`,
       content: "در حال دریافت توضیحات کامل...",
-      sender_type: "ai" as const,
+      sender_type: "AI" as const,
       created_at: new Date().toISOString(),
     }
 
@@ -250,7 +250,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       const detailedMessage: ChatMessage = {
         id: response.message_id,
         content: response.message,
-        sender_type: "ai" as const,
+        sender_type: "AI" as const,
         created_at: new Date().toISOString(),
         metadata: {
           sources: response.sources,

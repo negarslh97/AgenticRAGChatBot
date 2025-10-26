@@ -3,6 +3,7 @@ Custom Callbacks برای monitoring و logging عملیات LangChain
 """
 
 import time
+import contextvars
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
@@ -11,6 +12,22 @@ from langchain_core.outputs import LLMResult
 from app.core.logging_config import get_logger, PerformanceLogger
 
 logger = get_logger(__name__)
+
+# Context variables for per-request tracking
+current_request_token_usage: contextvars.ContextVar[Optional[Dict[str, int]]] = contextvars.ContextVar(
+    'current_request_token_usage',
+    default=None
+)
+
+current_request_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    'current_request_id',
+    default=None
+)
+
+current_request_cost: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar(
+    'current_request_cost',
+    default=None
+)
 
 
 class DetailedLoggingCallback(BaseCallbackHandler):
@@ -53,18 +70,28 @@ class DetailedLoggingCallback(BaseCallbackHandler):
         """Log when LLM completes"""
         run_id = kwargs.get('run_id')
         start_time = self.start_times.get(run_id)
-        
+
         if start_time:
             duration_ms = (time.time() - start_time) * 1000
             del self.start_times[run_id]
         else:
             duration_ms = None
-        
+
         # Extract token usage if available
         token_usage = {}
         if response.llm_output:
             token_usage = response.llm_output.get('token_usage', {})
-        
+
+        # Store token usage in context variable for per-request access
+        if token_usage:
+            current_request_token_usage.set(token_usage)
+
+            # Calculate and store cost if we have token usage
+            # This is a simplified calculation - you might want to use actual pricing
+            cost = calculate_request_cost(token_usage)
+            if cost is not None:
+                current_request_cost.set(cost)
+
         logger.info(
             f"✅ LLM Request Completed",
             extra={
@@ -401,7 +428,7 @@ performance_callback = PerformanceCallback()
 def get_default_callbacks() -> List[BaseCallbackHandler]:
     """
     دریافت لیست callbacks پیش‌فرض
-    
+
     Returns:
         لیست callback handlers
     """
@@ -410,4 +437,84 @@ def get_default_callbacks() -> List[BaseCallbackHandler]:
         token_callback,
         performance_callback
     ]
+
+
+def get_current_request_token_usage() -> Optional[Dict[str, int]]:
+    """
+    دریافت مصرف توکن درخواست فعلی از context variable
+
+    Returns:
+        Dict containing token usage or None if not available
+    """
+    try:
+        token_usage = current_request_token_usage.get()
+        if token_usage:
+            return {
+                'prompt_tokens': token_usage.get('prompt_tokens', 0),
+                'completion_tokens': token_usage.get('completion_tokens', 0),
+                'total_tokens': token_usage.get('total_tokens', 0)
+            }
+    except LookupError:
+        pass
+    return None
+
+
+def get_current_request_id() -> Optional[str]:
+    """Get the current request ID from context variable"""
+    try:
+        return current_request_id.get()
+    except LookupError:
+        return None
+
+
+def set_current_request_id(request_id: str):
+    """Set the current request ID in context variable"""
+    current_request_id.set(request_id)
+
+
+def get_current_request_cost() -> Optional[float]:
+    """Get the current request cost from context variable"""
+    try:
+        return current_request_cost.get()
+    except LookupError:
+        return None
+
+
+def set_current_request_cost(cost: float):
+    """Set the current request cost in context variable"""
+    current_request_cost.set(cost)
+
+
+def calculate_request_cost(token_usage: Dict[str, int]) -> Optional[float]:
+    """
+    Calculate the estimated cost of a request based on token usage.
+
+    This is a simplified calculation. In production, you should use actual pricing
+    from your LLM provider and consider different models/pricing tiers.
+    """
+    try:
+        # Simplified pricing (example rates - update with actual pricing)
+        # These are example rates for GPT-4o (as of 2024)
+        input_cost_per_1k = 0.005  # $0.005 per 1K input tokens
+        output_cost_per_1k = 0.015  # $0.015 per 1K output tokens
+
+        input_tokens = token_usage.get('prompt_tokens', 0)
+        output_tokens = token_usage.get('completion_tokens', 0)
+
+        input_cost = (input_tokens / 1000) * input_cost_per_1k
+        output_cost = (output_tokens / 1000) * output_cost_per_1k
+
+        total_cost = input_cost + output_cost
+        return round(total_cost, 6)  # Round to 6 decimal places
+
+    except Exception as e:
+        logger.warning(f"Could not calculate request cost: {e}")
+        return None
+
+
+def reset_current_request_context():
+    """Reset all current request context variables"""
+    current_request_token_usage.set(None)
+    current_request_id.set(None)
+    current_request_cost.set(None)
 

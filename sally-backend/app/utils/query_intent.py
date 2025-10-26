@@ -1,5 +1,5 @@
 """
-Query Router - تشخیص هوشمند نوع سوال
+Query Intent - تشخیص هوشمند نوع سوال
 🎯 هدف: تشخیص اینکه آیا سوال نیاز به RAG دارد یا یک گفتگوی محاوره‌ای ساده است
 
 این ماژول قبل از اجرای پایپلاین سنگین RAG، سوال را تحلیل می‌کند و مسیر مناسب را انتخاب می‌کند:
@@ -27,7 +27,7 @@ class QueryIntent(str, Enum):
     INTRODUCTION = "introduction"      # معرفی خود
 
 
-class QueryRouter:
+class QueryIntent:
     """
     Query Router - مسیریابی هوشمند سوالات
     
@@ -79,7 +79,7 @@ class QueryRouter:
                 "reason": "دلیل تصمیم‌گیری"
             }
         """
-        logger.info(f"🔍 Query Router analyzing: '{query[:100]}...'")
+        logger.info(f"🔍 Query Intent analyzing: '{query[:100]}...'")
         
         try:
             # 🎯 تشخیص سریع الگوهای رایج (بدون فراخوانی LLM)
@@ -227,5 +227,5 @@ class QueryRouter:
 
 
 # 🔥 Singleton instance
-query_router = QueryRouter()
+query_intent = QueryIntent()
 

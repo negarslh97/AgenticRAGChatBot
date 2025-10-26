@@ -166,11 +166,13 @@ class MessageRating(BaseModel):
 class Message(Document):
     """
     Message belongs to a conversation.
-    
+
     ✅ استاندارد ذخیره‌سازی:
     - sender_type: از Enum استفاده می‌کند (SuperAdmin, Admin, Customer, Guest, AI)
     - metadata: شامل تمام اطلاعات مدل، token usage، sources و غیره
     - rating: امتیاز کاربر برای پاسخ‌های AI
+    - response_time: زمان پاسخگویی مدل (برای پیام‌های AI)
+    - feedback_id: پیوند به بازخورد کاربر (برای پاسخ‌های AI)
     """
     conversation_id: str
     content: str
@@ -180,10 +182,12 @@ class Message(Document):
     failure_reason: Optional[str] = None  # دلیل خطا (در صورت وجود)
     metadata: Optional[Dict[str, Any]] = None  # اطلاعات کامل (model, tokens, sources, confidence, ...)
     rating: Optional[MessageRating] = None  # امتیاز کاربر (برای پاسخ‌های AI)
+    response_time: Optional[float] = None  # زمان پاسخگویی مدل (ثانیه) - برای پیام‌های AI
+    feedback_id: Optional[str] = None  # پیوند به بازخورد کاربر (برای پاسخ‌های AI)
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     class Settings:
         name = "messages"
 

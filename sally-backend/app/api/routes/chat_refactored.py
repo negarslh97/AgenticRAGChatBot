@@ -375,7 +375,7 @@ async def rate_message(
             raise HTTPException(status_code=404, detail="Message not found")
 
         # Check if message is from AI
-        if message.sender_type != "ai":
+        if message.sender_type != "AI":
             raise HTTPException(status_code=400, detail="Only AI messages can be rated")
 
         # Get the conversation to check ownership

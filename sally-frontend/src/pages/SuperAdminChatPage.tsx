@@ -486,7 +486,7 @@ const SuperAdminChatPage = () => {
             const formattedMessages: Message[] = messages.map(msg => ({
                 id: msg.id,
                 content: msg.content,
-                role: msg.sender_type === 'ai' ? 'assistant' : 'user',
+                role: msg.sender_type === 'AI' ? 'assistant' : 'user',
                 timestamp: new Date(msg.created_at),
                 sender_type: msg.sender_type as any,
                 is_failed: msg.is_failed,

@@ -10,7 +10,7 @@ interface NavbarProps {
 }
 
 const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
-  const { user, logout, isAuthenticated } = useAuth()
+  const { user, userType, logout, isAuthenticated, getDashboardByRole } = useAuth()
 
   const handleLogout = () => {
     logout()
@@ -35,7 +35,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
             </Button>
           )}
 
-          <Link to={user ? "/dashboard" : "/"}>
+          <Link to={user ? (userType ? getDashboardByRole(userType) : "/dashboard") : "/"}>
             <img
                 src={logo}
                 alt="Sally Logo"
@@ -66,7 +66,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
               >
                 خروج
               </Button>
-              <Link to="/dashboard">
+              <Link to={userType ? getDashboardByRole(userType) : "/dashboard"}>
                 <Button variant="ghost">داشبورد</Button>
               </Link>
             </>

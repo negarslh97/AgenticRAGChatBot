@@ -25,7 +25,7 @@ interface Message {
   content: string;
   role: 'user' | 'assistant';
   timestamp: Date;
-  sender_type?: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'customer' | 'admin' | 'super_admin' | 'guest' | 'ai';
+  sender_type?: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'AI';
   is_failed?: boolean;
   failure_reason?: string;
   rating?: {
@@ -124,7 +124,7 @@ const Chat: React.FC = () => {
       const transformedMessages: Message[] = fetchedMessages.map(msg => ({
         id: msg.id,
         content: msg.content,
-        role: msg.sender_type === 'ai' ? 'assistant' : 'user',
+        role: msg.sender_type === 'AI' ? 'assistant' : 'user',
         timestamp: new Date(msg.created_at),
         sender_type: msg.sender_type,
         is_failed: msg.is_failed,
@@ -509,9 +509,12 @@ const Chat: React.FC = () => {
                     </div>
                     <div className={`text-xs text-gray-500 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                       {formatTime(message.timestamp)}
-                      {message.sender_type && message.sender_type !== 'ai' && message.sender_type !== 'Guest' && message.sender_type !== 'guest' && (
+                      {message.sender_type && message.sender_type !== 'AI' && message.sender_type !== 'Guest' && (
                         <span className="mr-2">({message.sender_type})</span>
                       )}
+                      <span className="mr-2">
+                        {message.role === 'user' ? 'کاربر' : 'AI'}
+                      </span>
                     </div>
                   </div>
                   {message.role === 'user' && (

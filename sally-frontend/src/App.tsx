@@ -33,6 +33,7 @@ const UserManagementPage = lazy(() => import("./pages/UserManagementPage"))
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"))
 const CustomerUsersPage = lazy(() => import("./pages/CustomerUsersPage"))
 const SuperAdminReindexPage = lazy(() => import("./pages/SuperAdminReindexPage"))
+const SuperAdminLogsPage = lazy(() => import("./pages/SuperAdminLogsPage"))
 const UnauthorizedPage = lazy(() => import("./pages/UnauthorizedPage"))
 
 // Loading component for Suspense
@@ -182,7 +183,7 @@ const App: React.FC = () => {
                   </AuthGuard>
                 }
               />
-              <Route path="logs" element={<div className="p-6"><h1 className="text-2xl font-bold">لاگ‌های فعالیت</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
+              <Route path="logs" element={<SuperAdminLogsPage />} />
               <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">تنظیمات سیستم</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
             </Route>
 

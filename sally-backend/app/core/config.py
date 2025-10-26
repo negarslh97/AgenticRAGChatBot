@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     metadata_model: Optional[str] = None
     rag_model: Optional[str] = None
     chat_model: Optional[str] = None
+    intent_model: Optional[str] = None
     
     # 🔑 OpenRouter / Custom Provider Configuration (پیش‌فرض)
     # برای مدل‌های OpenRouter, Anthropic, Google, etc.
@@ -95,6 +96,11 @@ class Settings(BaseSettings):
         return self.chat_model or os.getenv("CHAT_MODEL")
 
     @property
+    def intent_model_loaded(self) -> str:
+        import os
+        return self.intent_model or os.getenv("INTENT_MODEL")
+
+    @property
     def openai_api_key_loaded(self) -> Optional[str]:
         import os
         return self.openai_api_key or os.getenv("OPENAI_API_KEY")
@@ -148,6 +154,10 @@ class Settings(BaseSettings):
     # App settings
     app_name: str = "Sally Customer Support"
     debug: bool = True
+
+    # Versioning for A/B Testing
+    prompt_version: str = "v1.0.0"
+    analyzer_version: str = "v1.0.0"
 
     model_config = {
         "protected_namespaces": ("settings_",),

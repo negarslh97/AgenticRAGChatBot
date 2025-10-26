@@ -12,7 +12,8 @@ import {
   Settings,
   Crown,
   Database,
-  Zap
+  Zap,
+  MessageSquare
 } from 'lucide-react'
 
 interface DashboardStats {
@@ -31,6 +32,10 @@ interface DashboardStats {
   }
   activityLogs: {
     total: number
+  }
+  chat: {
+    conversations: number
+    messages: number
   }
   weaviateCollections?: {
     small: {
@@ -55,6 +60,7 @@ const SuperAdminDashboard: React.FC = () => {
     tickets: { open: 0, awaitingReply: 0, resolved: 0 },
     knowledgeBase: { published: 0, drafts: 0 },
     activityLogs: { total: 0 },
+    chat: { conversations: 0, messages: 0 },
     weaviateCollections: {
       small: { name: 'MarkdownNode_Small', count: 0, model: 'text-embedding-3-small' },
       large: { name: 'MarkdownNode_Large', count: 0, model: 'text-embedding-3-large' },
@@ -65,7 +71,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
 
   // Fetch dashboard stats function
-  const fetchStats = useCallback(async () => {
+  const fetchStats = useCallback(async (): Promise<void> => {
     try {
       setLoading(true)
       setError(null)
@@ -118,6 +124,7 @@ const SuperAdminDashboard: React.FC = () => {
         tickets: { open: 0, awaitingReply: 0, resolved: 0 },
         knowledgeBase: { published: 0, drafts: 0 },
         activityLogs: { total: 0 },
+        chat: { conversations: 0, messages: 0 },
         weaviateCollections: {
           small: { name: 'MarkdownNode_Small', count: 0, model: 'text-embedding-3-small' },
           large: { name: 'MarkdownNode_Large', count: 0, model: 'text-embedding-3-large' },
@@ -200,26 +207,27 @@ const SuperAdminDashboard: React.FC = () => {
       actions: [
         {
           label: 'مدیریت مقالات',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          onClick: () => navigate('/super-admin/knowledge-base')
         },
         {
           label: 'ایجاد مقاله جدید',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          onClick: () => navigate('/super-admin/knowledge-base/add')
         }
       ]
     },
     {
-      title: 'لاگ‌های فعالیت سیستم',
+      title: 'فعالیت چت',
       stats: [
-        { label: 'کل لاگ‌ها', value: stats.activityLogs.total }
+        { label: 'کل مکالمات', value: stats.chat.conversations },
+        { label: 'کل پیام‌ها', value: stats.chat.messages }
       ],
-      description: 'نظارت بر تمام اقدامات کاربران و سیستم',
-      icon: Activity,
-      iconColor: 'text-orange-600',
+      description: 'آمار گفتگوهای مشتریان و ادمین‌ها',
+      icon: MessageSquare,
+      iconColor: 'text-cyan-600',
       actions: [
         {
-          label: 'مشاهده لاگ‌های فعالیت',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          label: 'مشاهده لاگ‌ها',
+          onClick: () => navigate('/super-admin/logs')
         }
       ]
     },
