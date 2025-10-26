@@ -8,9 +8,7 @@ from enum import Enum
 from bson import ObjectId
 
 
-class AdminRole(str, Enum):
-    SuperAdmin = "SuperAdmin"
-    Admin = "Admin"
+# Removed AdminRole enum - using Role document instead
 
 
 class ArticleVisibility(str, Enum):
@@ -119,22 +117,22 @@ class GuestSession(Document):
 
 class Conversation(Document):
     """Conversation can belong to either a customer, admin, or a guest session."""
-    customer_id: Optional[str] = None
-    admin_id: Optional[str] = None  # For admin conversations
-    guest_session_id: Optional[str] = None
+    customer_id: Optional[str] = Indexed()  # Indexed for faster user queries
+    admin_id: Optional[str] = Indexed()  # For admin conversations
+    guest_session_id: Optional[str] = Indexed()  # Indexed for guest sessions
     title: Optional[str] = None  # AI-generated title for the conversation
     tags: List[str] = []  # AI-generated tags for categorizing the conversation
-    
+
     # 🆕 Conversation metadata (settings used for this conversation)
     rag_type: Optional[str] = "simple"  # "simple" or "agentic"
     model_name: Optional[str] = None  # LLM model used
     temperature: Optional[float] = 0.7  # Temperature setting
-    
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     class Settings:
         name = "conversations"
 
@@ -167,7 +165,7 @@ class Message(Document):
     - response_time: زمان پاسخگویی مدل (برای پیام‌های AI)
     - feedback_id: پیوند به بازخورد کاربر (برای پاسخ‌های AI)
     """
-    conversation_id: str
+    conversation_id: str = Indexed()  # Indexed for faster queries
     content: str
     sender_type: str = SenderType.GUEST.value  # نوع فرستنده (از SenderType enum)
     sender_id: Optional[str] = None  # شناسه فرستنده (برای کاربران واقعی)
@@ -193,7 +191,7 @@ class CategoryAncestor(BaseModel):
 
 class Category(Document):
     """Knowledge base category with hierarchical support."""
-    name: str
+    name: str = Indexed()  # Indexed for search
     slug: Indexed(str, unique=True)  # URL-friendly identifier
     description: Optional[str] = None
     parent: Optional[Link["Category"]] = None  # Reference to parent category
@@ -201,23 +199,23 @@ class Category(Document):
     is_public: bool = True  # Public categories visible to guests
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Settings:
         name = "categories"
-    
+
     async def update_ancestors(self) -> None:
         """Update the ancestors list based on parent hierarchy."""
         if not self.parent:
             self.ancestors = []
             return
-        
+
         # Fetch parent and its ancestors
         parent = await self.parent.fetch()
         if parent:
             # Start with parent's ancestors and add the parent itself
             self.ancestors = parent.ancestors.copy()
             self.ancestors.append(CategoryAncestor(id=str(parent.id), name=parent.name))
-    
+
     async def before_save(self) -> None:
         """Hook to update ancestors before saving."""
         await self.update_ancestors()
@@ -229,9 +227,14 @@ class Tag(Document):
     name: Indexed(str, unique=True)
     color: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Settings:
         name = "tags"
+
+    async def before_save(self) -> None:
+        """Ensure name is lowercase for consistency."""
+        if self.name:
+            self.name = self.name.lower()
 
 
 class ArticleCategory(BaseModel):
@@ -250,7 +253,7 @@ class ArticleTag(BaseModel):
 
 class KnowledgeBaseArticle(Document):
     """Knowledge base article with improved relationships."""
-    title: str
+    title: str = Indexed()  # Indexed for search
     content_markdown: str  # Raw markdown content
     content_html: str  # Rendered HTML content
     summary: Optional[str] = None
@@ -258,19 +261,19 @@ class KnowledgeBaseArticle(Document):
     tags: List[ArticleTag] = []  # Embedded tags
     status: ArticleStatus = ArticleStatus.DRAFT
     visibility: Optional[ArticleVisibility] = None  # Only set for published articles
-    author_id: str  # Author ID as string
+    author_id: str = Indexed()  # Author ID as string, indexed for filtering
     publisher_id: Optional[str] = None  # Publisher ID as string
     version: int = 1
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     published_at: Optional[datetime] = None
     last_synced_at: Optional[datetime] = None  # تاریخ آخرین همگام‌سازی با Weaviate
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     class Settings:
         name = "knowledge_base_articles"
-    
+
     async def before_save(self) -> None:
         """Hook to update timestamps before saving."""
         self.updated_at = datetime.utcnow()
@@ -278,24 +281,24 @@ class KnowledgeBaseArticle(Document):
 
 class UnansweredQuestion(Document):
     """Questions that couldn't be answered by the AI."""
-    question: str
-    customer_id: Optional[str] = None  # Store ObjectId as string
-    guest_session_id: Optional[str] = None  # Reference to GuestSession
+    question: str = Indexed()  # Indexed for search
+    customer_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed for filtering
+    guest_session_id: Optional[str] = Indexed()  # Reference to GuestSession, indexed
     context: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_resolved: bool = False
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     class Settings:
         name = "unanswered_questions"
 
 
 class Feedback(Document):
     """User feedback for conversations."""
-    conversation_id: Optional[str] = None  # Store ObjectId as string
-    customer_id: Optional[str] = None  # Store ObjectId as string
-    guest_session_id: Optional[str] = None  # Reference to GuestSession
+    conversation_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed for filtering
+    customer_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed
+    guest_session_id: Optional[str] = Indexed()  # Reference to GuestSession, indexed
     rating: int  # 1-5 scale
     comment: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -308,11 +311,11 @@ class Feedback(Document):
 
 class ActivityLog(Document):
     """System activity logs for auditing."""
-    admin_id: Optional[str] = None  # Store ObjectId as string
-    customer_id: Optional[str] = None  # Store ObjectId as string
-    action: str
-    resource_type: str  # "article", "customer", etc.
-    resource_id: Optional[str] = None
+    admin_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed for filtering
+    customer_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed
+    action: str = Indexed()  # Indexed for filtering by action type
+    resource_type: str = Indexed()  # "article", "customer", etc., indexed
+    resource_id: Optional[str] = Indexed()  # Indexed for specific resource queries
     details: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

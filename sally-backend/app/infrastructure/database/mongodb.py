@@ -81,8 +81,9 @@ async def verify_database_setup():
         collections = await db.list_collection_names()
         
         required_collections = [
-            "admins", "customers", "roles", "conversations",
-            "messages"
+            "admins", "customers", "roles", "guest_sessions", "conversations",
+            "messages", "categories", "tags", "knowledge_base_articles",
+            "unanswered_questions", "feedback", "activity_logs"
         ]
         
         missing_collections = []
@@ -116,13 +117,24 @@ async def verify_database_setup():
 
 async def get_database_stats():
     """Get statistics about the database."""
-    from app.domain.entities import Admin, Customer, Role, Conversation
+    from app.domain.entities import (
+        Admin, Customer, Role, GuestSession, Conversation, Message,
+        Category, Tag, KnowledgeBaseArticle, UnansweredQuestion, Feedback, ActivityLog
+    )
 
     stats = {
         "admins": await Admin.find_all().count(),
         "customers": await Customer.find_all().count(),
         "roles": await Role.find_all().count(),
-        "conversations": await Conversation.find_all().count()
+        "guest_sessions": await GuestSession.find_all().count(),
+        "conversations": await Conversation.find_all().count(),
+        "messages": await Message.find_all().count(),
+        "categories": await Category.find_all().count(),
+        "tags": await Tag.find_all().count(),
+        "knowledge_base_articles": await KnowledgeBaseArticle.find_all().count(),
+        "unanswered_questions": await UnansweredQuestion.find_all().count(),
+        "feedback": await Feedback.find_all().count(),
+        "activity_logs": await ActivityLog.find_all().count()
     }
 
     return stats
