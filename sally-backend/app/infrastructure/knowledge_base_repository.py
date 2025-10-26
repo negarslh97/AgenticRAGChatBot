@@ -632,11 +632,11 @@ class KnowledgeBaseRepository:
                     return
 
                 # ✅ استفاده از Batch Insert برای درج تمام گره‌ها در یک درخواست
-                with collection.batch.insert() as batch:
+                with collection.batch.dynamic() as batch:
                     for node in all_nodes:
                         properties = self._node_to_properties(node, article)
                         # فقط properties را ارسال می‌کنیم، Weaviate خودش بردار را تولید خواهد کرد
-                        batch.properties(properties)
+                        batch.add_object(properties=properties)
 
                 logger.info(f"✅ {len(all_nodes)} گره برای مقاله '{article.title}' با موفقیت در {collection_name} ذخیره شد.")
 
