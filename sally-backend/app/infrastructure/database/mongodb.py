@@ -2,7 +2,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
 from app.core.config import settings
 from app.domain.entities import (
-    Admin, Customer, Role, GuestSession, Conversation, Message, Ticket, TicketReply,
+    Admin, Customer, Role, GuestSession, Conversation, Message,
     Category, Tag, KnowledgeBaseArticle, UnansweredQuestion, Feedback, ActivityLog
 )
 from app.core.security import get_password_hash
@@ -34,7 +34,7 @@ async def init_db():
     await init_beanie(
         database=_client.get_default_database(),
         document_models=[
-            Admin, Customer, Role, GuestSession, Conversation, Message, Ticket, TicketReply,
+            Admin, Customer, Role, GuestSession, Conversation, Message,
             Category, Tag, KnowledgeBaseArticle, UnansweredQuestion, Feedback, ActivityLog
         ]
     )
@@ -81,8 +81,8 @@ async def verify_database_setup():
         collections = await db.list_collection_names()
         
         required_collections = [
-            "admins", "customers", "roles", "conversations", 
-            "messages", "tickets", "ticket_replies"
+            "admins", "customers", "roles", "conversations",
+            "messages"
         ]
         
         missing_collections = []
@@ -116,14 +116,13 @@ async def verify_database_setup():
 
 async def get_database_stats():
     """Get statistics about the database."""
-    from app.domain.entities import Admin, Customer, Role, Ticket, Conversation
-    
+    from app.domain.entities import Admin, Customer, Role, Conversation
+
     stats = {
         "admins": await Admin.find_all().count(),
         "customers": await Customer.find_all().count(),
         "roles": await Role.find_all().count(),
-        "tickets": await Ticket.find_all().count(),
         "conversations": await Conversation.find_all().count()
     }
-    
+
     return stats

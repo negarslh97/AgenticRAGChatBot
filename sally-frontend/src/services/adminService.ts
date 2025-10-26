@@ -205,43 +205,6 @@ export const adminService = {
   /**
    * دریافت لیست همه تیکت‌ها
    */
-  async getAllTickets(): Promise<Ticket[]> {
-    try {
-      const response = await api.get<Ticket[]>("/api/admin/tickets");
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching tickets:", error);
-      throw new Error("خطا در دریافت تیکت‌ها");
-    }
-  },
-
-  /**
-   * تخصیص تیکت به ادمین
-   */
-  async assignTicket(ticketId: string, assignedTo?: string): Promise<{ message: string }> {
-    try {
-      const response = await api.put<{ message: string }>(`/api/admin/tickets/${ticketId}/assign`, {
-        assigned_to: assignedTo,
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error assigning ticket:", error);
-      throw new Error("خطا در تخصیص تیکت");
-    }
-  },
-
-  /**
-   * بروزرسانی وضعیت تیکت
-   */
-  async updateTicketStatus(ticketId: string, statusData: TicketStatusUpdate): Promise<{ message: string }> {
-    try {
-      const response = await api.put<{ message: string }>(`/api/admin/tickets/${ticketId}/status`, statusData);
-      return response.data;
-    } catch (error) {
-      console.error("Error updating ticket status:", error);
-      throw new Error("خطا در بروزرسانی وضعیت تیکت");
-    }
-  },
 
   // ============================================================================
   // Utility Functions

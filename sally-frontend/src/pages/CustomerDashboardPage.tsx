@@ -10,7 +10,6 @@ import NavigationCards from '../components/dashboard/NavigationCards'
 import RecentActivities from '../components/dashboard/RecentActivities'
 import {
   MessageCircle,
-  Ticket,
   CheckCircle2,
   BookText,
   UserCog
@@ -18,7 +17,7 @@ import {
 
 interface Activity {
   id: string
-  type: 'ticket_update' | 'ticket_response' | 'article_published' | 'login' | 'profile_update'
+  type: 'article_published' | 'login' | 'profile_update'
   title: string
   description: string
   timestamp: string
@@ -96,9 +95,9 @@ const DashboardPage: React.FC = () => {
   // Mock data for dashboard statistics - now using the new StatCard format
   const [statsData] = useState([
     {
-      title: 'تیکت‌های باز',
-      value: 3,
-      icon: Ticket,
+      title: 'چت‌های فعال',
+      value: 5,
+      icon: MessageCircle,
       color: 'bg-blue-100',
       trend: {
         value: 12,
@@ -107,7 +106,7 @@ const DashboardPage: React.FC = () => {
       }
     },
     {
-      title: 'تیکت‌های حل شده',
+      title: 'مقالات خوانده شده',
       value: 12,
       icon: CheckCircle2,
       color: 'bg-green-100',
@@ -118,7 +117,7 @@ const DashboardPage: React.FC = () => {
       }
     },
     {
-      title: 'مقالات خوانده شده',
+      title: 'سوالات پاسخ داده شده',
       value: 8,
       icon: BookText,
       color: 'bg-purple-100',
@@ -133,24 +132,6 @@ const DashboardPage: React.FC = () => {
   // Mock data for recent activities - now using the new Activity format
   const [recentActivitiesData] = useState([
     {
-      id: '1',
-      type: 'ticket_update' as const,
-      title: 'تیکت #12345 به‌روزرسانی شد',
-      description: 'وضعیت: در حال بررسی',
-      timestamp: '۲ ساعت پیش',
-      status: 'در حال بررسی' as const,
-      priority: 'high' as const
-    },
-    {
-      id: '2',
-      type: 'ticket_response' as const,
-      title: 'پاسخ جدیدی برای تیکت #12342 دریافت کردید',
-      description: 'پشتیبان به تیکت شما پاسخ داده است',
-      timestamp: '۴ ساعت پیش',
-      status: 'پاسخ داده شده' as const,
-      priority: 'medium' as const
-    },
-    {
       id: '3',
       type: 'article_published' as const,
       title: 'مقاله جدیدی منتشر شد',
@@ -159,12 +140,10 @@ const DashboardPage: React.FC = () => {
     },
     {
       id: '4',
-      type: 'ticket_update' as const,
-      title: 'تیکت #12340 حل شد',
-      description: 'تیکت شما با موفقیت حل شده است',
-      timestamp: '۲ روز پیش',
-      status: 'حل شده' as const,
-      priority: 'low' as const
+      type: 'login' as const,
+      title: 'ورود به سیستم',
+      description: 'با موفقیت وارد سیستم شدید',
+      timestamp: '۲ روز پیش'
     }
   ])
 
@@ -177,13 +156,6 @@ const DashboardPage: React.FC = () => {
       link: '/chat',
       color: 'text-blue-600',
       badge: 'جدید'
-    },
-    {
-      title: 'تیکت‌های من',
-      description: 'تیکت‌های پشتیبانی خود را مشاهده و مدیریت کنید.',
-      icon: Ticket,
-      link: '/tickets',
-      color: 'text-green-600'
     },
     {
       title: 'پایگاه دانش',

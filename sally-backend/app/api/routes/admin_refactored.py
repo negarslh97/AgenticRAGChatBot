@@ -9,7 +9,7 @@ import json
 # --- وارد کردن مدل‌های دیتابیس ---
 from app.domain.entities import (
     Admin, Customer, Role, KnowledgeBaseArticle, ArticleStatus,
-    Ticket, ActivityLog, PermissionDetail, ArticleCategory, ArticleTag, Category, Tag,
+    ActivityLog, PermissionDetail, ArticleCategory, ArticleTag, Category, Tag,
     Conversation, Message
 )
 import markdown  # For markdown to HTML conversion
@@ -694,14 +694,8 @@ async def get_dashboard_stats(current_admin: Admin = Depends(get_current_admin_w
         # Count total customers
         total_customers = await Customer.find_all().count()
 
-        # Count tickets by status - simplified
-        try:
-            from app.domain.entities import Ticket, TicketStatus
-            open_tickets = await Ticket.find(Ticket.status == TicketStatus.OPEN).count()
-            in_progress_tickets = await Ticket.find(Ticket.status == TicketStatus.IN_PROGRESS).count()
-            resolved_tickets = await Ticket.find(Ticket.status == TicketStatus.RESOLVED).count()
-        except:
-            open_tickets = in_progress_tickets = resolved_tickets = 0
+        # Tickets removed from system
+        open_tickets = in_progress_tickets = resolved_tickets = 0
 
         # Count knowledge base articles by status
         try:

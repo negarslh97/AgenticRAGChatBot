@@ -92,12 +92,6 @@ const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
               چت
             </Link>
             <Link
-              to="/tickets"
-              className="text-gray-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              تیکت‌ها
-            </Link>
-            <Link
               to="/knowledge-base"
               className="text-gray-700 hover:text-blue-600 transition-colors font-medium"
             >
@@ -126,12 +120,6 @@ const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
               className="text-sm text-gray-700 hover:text-blue-600 transition-colors"
             >
               چت
-            </Link>
-            <Link
-              to="/tickets"
-              className="text-sm text-gray-700 hover:text-blue-600 transition-colors"
-            >
-              تیکت‌ها
             </Link>
             <Link
               to="/knowledge-base"

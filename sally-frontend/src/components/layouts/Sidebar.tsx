@@ -8,7 +8,6 @@ import { Avatar, AvatarFallback } from '../ui/avatar'
 import {
   LayoutDashboard,
   Users,
-  Ticket,
   BookOpen,
   Activity,
   Settings,
@@ -61,11 +60,6 @@ const Sidebar: React.FC = () => {
           href: '/super-admin/customer/users'
         }
       ]
-    },
-    {
-      name: 'مدیریت تیکت‌ها',
-      href: '/super-admin/tickets',
-      icon: Ticket
     },
     {
       name: 'پایگاه دانش',

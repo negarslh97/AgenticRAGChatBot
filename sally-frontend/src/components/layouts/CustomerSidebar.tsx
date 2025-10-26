@@ -8,7 +8,6 @@ import { Avatar, AvatarFallback } from '../ui/avatar'
 import {
   LayoutDashboard,
   MessageCircle,
-  Ticket,
   BookText,
   UserCog,
   Settings,
@@ -52,20 +51,6 @@ const CustomerSidebar: React.FC<CustomerSidebarProps> = ({ onClose }) => {
       name: 'چت با Sally',
       href: '/chat',
       icon: MessageCircle
-    },
-    {
-      name: 'تیکت‌های پشتیبانی',
-      icon: Ticket,
-      submenu: [
-        {
-          name: 'تیکت‌های من',
-          href: '/tickets'
-        },
-        {
-          name: 'تیکت جدید',
-          href: '/tickets/create'
-        }
-      ]
     },
     {
       name: 'پایگاه دانش',

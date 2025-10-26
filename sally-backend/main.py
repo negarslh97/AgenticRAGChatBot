@@ -105,7 +105,6 @@ async def lifespan(app: FastAPI):
 # Import API routers
 from app.api.routes.auth_refactored import router as auth_router
 from app.api.routes.chat_refactored import router as chat_router
-from app.api.routes.tickets_refactored import router as tickets_router
 from app.api.routes.admin_refactored import router as admin_router
 from app.api.routes.knowledge_base import router as kb_router
 from app.api.routes.super_admin_knowledge_base import router as admin_kb_router
@@ -149,16 +148,13 @@ app.include_router(auth_router, prefix="/api/auth", tags=["🔓 Authentication"]
 app.include_router(kb_router, prefix="/api/kb", tags=["🔓 Public Knowledge Base"])
 
 # --- CUSTOMER ROUTES (Customer role permissions) ---
-# Permissions: CREATE_TICKETS, REPLY_TICKETS, VIEW_PUBLIC_KB
+# Permissions: VIEW_PUBLIC_KB
 app.include_router(chat_router, prefix="/api", tags=["💬 Chat"])
-app.include_router(tickets_router, prefix="/api/customer/tickets", tags=["👤 Customer Tickets"])
-app.include_router(tickets_router, prefix="/api/admin/tickets", tags=["👨‍💼 Admin Tickets"])
 # Note: /api/kb/customer/articles requires customer authentication
 # This endpoint is part of kb_router but requires authentication
 
 # --- ADMIN ROUTES (Admin + SuperAdmin role permissions) ---
-# Permissions: VIEW_CUSTOMERS, VIEW_ALL_TICKETS, REPLY_TICKETS, ASSIGN_TICKETS,
-# MANAGE_TICKET_STATUSES, CREATE_KB_ARTICLES, UPDATE_KB_ARTICLES, VIEW_ACTIVITY_LOGS
+# Permissions: VIEW_CUSTOMERS, CREATE_KB_ARTICLES, UPDATE_KB_ARTICLES, VIEW_ACTIVITY_LOGS
 app.include_router(admin_router, prefix="/api/admin", tags=["👨‍💼 Admin Management"])
 
 # --- SUPER ADMIN ROUTES (SuperAdmin only - highest privilege) ---
@@ -226,7 +222,7 @@ async def serve_spa_with_auth(path: str, request: Request):
         raise HTTPException(status_code=404, detail="Not found")
 
     # Check if this is a protected route
-    protected_routes = ["/dashboard", "/chat", "/tickets", "/admin", "/super-admin"]
+    protected_routes = ["/dashboard", "/chat", "/admin", "/super-admin"]
     is_protected_route = any(path.startswith(route) for route in protected_routes)
 
     if is_protected_route:
@@ -270,13 +266,13 @@ async def root():
         "documentation": "/docs",
         "roles": {
             "SuperAdmin": "👑 Full system access",
-            "Admin": "👨‍💼 Customer & ticket management",
-            "Customer": "👤 Ticket creation & chat",
+            "Admin": "👨‍💼 Customer management",
+            "Customer": "👤 Chat access",
             "Guest": "🔓 Public knowledge base only"
         },
         "endpoints": {
             "public": ["/api/auth/*", "/api/kb/articles"],
-            "customer": ["/api/customer/*"],
+            "customer": ["/api/chat/*"],
             "admin": ["/api/admin/*"],
             "super_admin": ["/api/super-admin/*"]
         }

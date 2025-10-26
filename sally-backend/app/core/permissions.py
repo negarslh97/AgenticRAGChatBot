@@ -40,12 +40,6 @@ class Permission:
     VIEW_CUSTOMERS = "customers.view"
     MANAGE_CUSTOMERS = "customers.manage"
     
-    # Ticket management
-    VIEW_ALL_TICKETS = "tickets.view_all"
-    CREATE_TICKETS = "tickets.create"
-    REPLY_TICKETS = "tickets.reply"
-    ASSIGN_TICKETS = "tickets.assign"
-    MANAGE_TICKET_STATUSES = "tickets.manage_status"
     
     # Knowledge Base management
     MANAGE_KB_ARTICLES = "kb.articles.manage"
@@ -74,10 +68,6 @@ DEFAULT_ROLES = {
             {"permission_key": Permission.DELETE_adminS, "description": "Delete admin users", "resource": "admins", "action": "delete"},
             {"permission_key": Permission.MANAGE_CUSTOMERS, "description": "Manage customer users", "resource": "customers", "action": "manage"},
             {"permission_key": Permission.VIEW_CUSTOMERS, "description": "View customer users", "resource": "customers", "action": "view"},
-            {"permission_key": Permission.VIEW_ALL_TICKETS, "description": "View all tickets", "resource": "tickets", "action": "view_all"},
-            {"permission_key": Permission.REPLY_TICKETS, "description": "Reply to tickets", "resource": "tickets", "action": "reply"},
-            {"permission_key": Permission.ASSIGN_TICKETS, "description": "Assign tickets", "resource": "tickets", "action": "assign"},
-            {"permission_key": Permission.MANAGE_TICKET_STATUSES, "description": "Manage ticket statuses", "resource": "tickets", "action": "manage_status"},
             {"permission_key": Permission.MANAGE_KB_ARTICLES, "description": "Manage knowledge base articles", "resource": "kb_articles", "action": "manage"},
             {"permission_key": Permission.CREATE_KB_ARTICLES, "description": "Create knowledge base articles", "resource": "kb_articles", "action": "create"},
             {"permission_key": Permission.UPDATE_KB_ARTICLES, "description": "Update knowledge base articles", "resource": "kb_articles", "action": "update"},
@@ -93,10 +83,6 @@ DEFAULT_ROLES = {
         "description": "Administrator with limited access",
         "permissions": [
             {"permission_key": Permission.VIEW_CUSTOMERS, "description": "View customer users", "resource": "customers", "action": "view"},
-            {"permission_key": Permission.VIEW_ALL_TICKETS, "description": "View all tickets", "resource": "tickets", "action": "view_all"},
-            {"permission_key": Permission.REPLY_TICKETS, "description": "Reply to tickets", "resource": "tickets", "action": "reply"},
-            {"permission_key": Permission.ASSIGN_TICKETS, "description": "Assign tickets", "resource": "tickets", "action": "assign"},
-            {"permission_key": Permission.MANAGE_TICKET_STATUSES, "description": "Manage ticket statuses", "resource": "tickets", "action": "manage_status"},
             {"permission_key": Permission.CREATE_KB_ARTICLES, "description": "Create draft knowledge base articles", "resource": "kb_articles", "action": "create"},
             {"permission_key": Permission.UPDATE_KB_ARTICLES, "description": "Update knowledge base articles", "resource": "kb_articles", "action": "update"},
             {"permission_key": Permission.VIEW_ACTIVITY_LOGS, "description": "View activity logs", "resource": "activity_logs", "action": "view"}
@@ -107,8 +93,6 @@ DEFAULT_ROLES = {
         "name": "Customer",
         "description": "Customer with access to their own data",
         "permissions": [
-            {"permission_key": Permission.CREATE_TICKETS, "description": "Create new support tickets", "resource": "tickets", "action": "create"},
-            {"permission_key": Permission.REPLY_TICKETS, "description": "Reply to tickets", "resource": "tickets", "action": "reply"},
             {"permission_key": Permission.VIEW_PUBLIC_KB, "description": "View public knowledge base", "resource": "kb_articles", "action": "view_public"}
         ]
     },

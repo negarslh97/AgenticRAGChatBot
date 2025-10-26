@@ -19,7 +19,6 @@ const RegisterPage = lazy(() => import("./pages/RegisterPage"))
 const DashboardPage = lazy(() => import("./pages/CustomerDashboardPage"))
 const ChatPage = lazy(() => import("./pages/ChatPage"))
 const CustomerChatPage = lazy(() => import("./pages/CustomerChatPage"))
-const TicketsPage = lazy(() => import("./pages/TicketsPage"))
 const KnowledgeBasePage = lazy(() => import("./pages/KnowledgeBasePage"))
 const AdminPanel = lazy(() => import("./pages/AdminPanel"))
 const SuperAdminDashboard = lazy(() => import("./pages/SuperAdminDashboard"))
@@ -113,13 +112,6 @@ const App: React.FC = () => {
                 <KnowledgeBasePage />
               </MainLayout>
             } />
-            <Route path="/tickets/*" element={
-              <MainLayout>
-                <ProtectedRoute>
-                  <TicketsPage />
-                </ProtectedRoute>
-              </MainLayout>
-            } />
             <Route path="/admin" element={
               <MainLayout>
                 <ProtectedRoute requiredRole="Admin">
@@ -147,7 +139,6 @@ const App: React.FC = () => {
               <Route path="users" element={<UserManagementPage />} />
               <Route path="admin/users" element={<AdminUsersPage />} />
               <Route path="customer/users" element={<CustomerUsersPage />} />
-              <Route path="tickets" element={<div className="p-6"><h1 className="text-2xl font-bold">مدیریت تیکت‌ها</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="knowledge-base" element={<SuperAdminKnowledgeBasePage />} />
               <Route
                 path="knowledge-base/add"

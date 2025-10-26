@@ -325,7 +325,7 @@ class TestAgenticRAGService:
             relevant_docs=[]
         )
         
-        assert "create_ticket" in actions
+        # Ticket system removed - no longer test for create_ticket action
         
         # Test with relevant docs
         actions = service._suggest_actions(

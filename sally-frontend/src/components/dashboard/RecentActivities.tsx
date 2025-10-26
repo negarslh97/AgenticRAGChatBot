@@ -7,7 +7,7 @@ import { LucideIcon } from 'lucide-react'
 
 interface Activity {
   id: string
-  type: 'ticket_update' | 'ticket_response' | 'article_published' | 'login' | 'profile_update'
+  type: 'article_published' | 'login' | 'profile_update'
   title: string
   description: string
   timestamp: string
@@ -42,8 +42,6 @@ const RecentActivities: React.FC<RecentActivitiesProps> = ({
 }) => {
   const getActivityIcon = (type: Activity['type']) => {
     const iconMap = {
-      ticket_update: '🎫',
-      ticket_response: '💬',
       article_published: '📄',
       login: '🔐',
       profile_update: '👤'

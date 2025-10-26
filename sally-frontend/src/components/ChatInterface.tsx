@@ -279,10 +279,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
   const handleSuggestedAction = (action: string) => {
     switch (action) {
       case "create_ticket":
+        // Ticket system removed - redirect to chat instead
         if (user) {
-          window.location.href = "/tickets"
+          window.location.href = "/chat"
         } else {
-          toast.error("Please log in to create a support ticket")
+          toast.error("Please log in to start a chat")
         }
         break
       case "view_related_articles":
@@ -299,7 +300,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
 
   const formatActionText = (action: string): string => {
     const actionMap: Record<string, string> = {
-      create_ticket: "Create Ticket",
+      create_ticket: "Continue Chat",
       view_related_articles: "View Articles",
       contact_support: "Contact Support",
       view_account: "View Account",

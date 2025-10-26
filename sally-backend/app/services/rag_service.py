@@ -1484,7 +1484,7 @@ class AgenticRAGService(RAGService):
                     "response": "متأسفانه اطلاعات مربوط به سوال شما در پایگاه دانش موجود نیست.",
                     "sources": [],
                     "confidence": 0.0,
-                    "suggested_actions": ["create_ticket", "refine_question"]
+                    "suggested_actions": ["refine_question"]
                 }
             
             # ساخت context ساده با Small-to-Big strategy
@@ -1546,7 +1546,6 @@ class AgenticRAGService(RAGService):
         confidence = workflow_result.get("confidence", 0)
         if confidence < 0.5:
             actions.append("refine_question")
-            actions.append("create_ticket")
         
         # بر اساس errors
         if workflow_result.get("errors"):
@@ -1576,9 +1575,7 @@ class AgenticRAGService(RAGService):
         
         query_lower = query.lower()
         
-        # Suggest ticket creation for problem-related queries
-        if any(word in query_lower for word in ["problem", "issue", "error", "bug", "broken", "not working"]):
-            actions.append("create_ticket")
+        # Ticket system removed - no longer suggest ticket creation
         
         # Suggest viewing related articles
         if relevant_docs:

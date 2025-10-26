@@ -13,13 +13,6 @@ class AdminRole(str, Enum):
     Admin = "Admin"
 
 
-class TicketStatus(str, Enum):
-    OPEN = "open"
-    IN_PROGRESS = "in_progress"
-    RESOLVED = "resolved"
-    CLOSED = "closed"
-
-
 class ArticleVisibility(str, Enum):
     PUBLIC = "public"
     CUSTOMER = "customer"
@@ -192,38 +185,6 @@ class Message(Document):
         name = "messages"
 
 
-class Ticket(Document):
-    """Support ticket created by a customer."""
-    customer_id: str
-    title: str
-    description: str
-    status: TicketStatus = TicketStatus.OPEN
-    priority: str = "medium"
-    assigned_to: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    class Settings:
-        name = "tickets"
-
-
-class TicketReply(Document):
-    """Reply to a ticket can come from either a customer or an admin."""
-    ticket_id: str
-    customer_id: Optional[str] = None
-    admin_id: Optional[str] = None
-    content: str
-    is_internal: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    class Settings:
-        name = "ticket_replies"
-
-
 class CategoryAncestor(BaseModel):
     """Represents an ancestor in the category hierarchy."""
     id: str  # ObjectId as string
@@ -331,17 +292,16 @@ class UnansweredQuestion(Document):
 
 
 class Feedback(Document):
-    """User feedback for conversations or tickets."""
+    """User feedback for conversations."""
     conversation_id: Optional[str] = None  # Store ObjectId as string
-    ticket_id: Optional[str] = None  # Store ObjectId as string
     customer_id: Optional[str] = None  # Store ObjectId as string
     guest_session_id: Optional[str] = None  # Reference to GuestSession
     rating: int  # 1-5 scale
     comment: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     class Settings:
         name = "feedback"
 
@@ -351,13 +311,13 @@ class ActivityLog(Document):
     admin_id: Optional[str] = None  # Store ObjectId as string
     customer_id: Optional[str] = None  # Store ObjectId as string
     action: str
-    resource_type: str  # "article", "customer", "ticket", etc.
+    resource_type: str  # "article", "customer", etc.
     resource_id: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     class Settings:
         name = "activity_logs"
 

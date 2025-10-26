@@ -71,11 +71,11 @@ export interface DashboardStats {
     totalAdmins: number;
     totalCustomers: number;
   };
-  tickets: {
-    open: number;
-    awaitingReply: number;
-    resolved: number;
-  };
+  // tickets: {
+  //   open: number;
+  //   awaitingReply: number;
+  //   resolved: number;
+  // };
   knowledgeBase: {
     published: number;
     drafts: number;
@@ -349,8 +349,6 @@ export const superAdminService = {
       update_article: "بروزرسانی مقاله",
       publish_article: "انتشار مقاله",
       delete_article: "حذف مقاله",
-      assign_ticket: "تخصیص تیکت",
-      update_ticket_status: "بروزرسانی وضعیت تیکت",
       login: "ورود به سیستم",
       logout: "خروج از سیستم",
     };
@@ -367,7 +365,6 @@ export const superAdminService = {
       admin: "ادمین",
       customer: "مشتری",
       article: "مقاله",
-      ticket: "تیکت",
       role: "نقش",
     };
 

@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext'
 import StatCard from '../components/StatCard'
 import {
   Users,
-  Ticket,
   BookOpen,
   Activity,
   Settings,
@@ -21,11 +20,11 @@ interface DashboardStats {
     totalAdmins: number
     totalCustomers: number
   }
-  tickets: {
-    open: number
-    awaitingReply: number
-    resolved: number
-  }
+  // tickets: {
+  //   open: number
+  //   awaitingReply: number
+  //   resolved: number
+  // }
   knowledgeBase: {
     published: number
     drafts: number
@@ -57,7 +56,6 @@ const SuperAdminDashboard: React.FC = () => {
   const navigate = useNavigate()
   const [stats, setStats] = useState<DashboardStats>({
     users: { totalAdmins: 0, totalCustomers: 0 },
-    tickets: { open: 0, awaitingReply: 0, resolved: 0 },
     knowledgeBase: { published: 0, drafts: 0 },
     activityLogs: { total: 0 },
     chat: { conversations: 0, messages: 0 },
@@ -121,7 +119,6 @@ const SuperAdminDashboard: React.FC = () => {
       // Fallback mock data
       setStats({
         users: { totalAdmins: 0, totalCustomers: 0 },
-        tickets: { open: 0, awaitingReply: 0, resolved: 0 },
         knowledgeBase: { published: 0, drafts: 0 },
         activityLogs: { total: 0 },
         chat: { conversations: 0, messages: 0 },
@@ -173,26 +170,6 @@ const SuperAdminDashboard: React.FC = () => {
         {
           label: 'مدیریت مشتریان',
           onClick: () => navigate('/super-admin/customer/users')
-        }
-      ]
-    },
-    {
-      title: 'مدیریت تیکت‌ها',
-      stats: [
-        { label: 'تیکت‌های باز', value: stats.tickets.open },
-        { label: 'در انتظار پاسخ', value: stats.tickets.awaitingReply },
-        { label: 'حل شده', value: stats.tickets.resolved }
-      ],
-      icon: Ticket,
-      iconColor: 'text-green-600',
-      actions: [
-        {
-          label: 'مشاهده همه تیکت‌ها',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
-        },
-        {
-          label: 'تخصیص تیکت‌ها',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
         }
       ]
     },

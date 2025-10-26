@@ -4,7 +4,7 @@
 
 ## 📋 Overview
 
-Sally ChatBot is an advanced AI-powered customer support platform built with modern web technologies. It features real-time chat, RAG-based AI responses, comprehensive admin panel, ticket management system, and knowledge base management.
+Sally ChatBot is an advanced AI-powered customer support platform built with modern web technologies. It features real-time chat, RAG-based AI responses, comprehensive admin panel, and knowledge base management.
 
 ## ✨ Features
 
@@ -127,10 +127,6 @@ After first run, a default admin account is created:
 - `GET /api/conversations` - Get conversations
 - `WebSocket /api/ws` - Real-time chat
 
-### Tickets
-- `POST /api/tickets` - Create ticket
-- `GET /api/tickets` - Get user tickets
-- `GET /api/tickets/{id}` - Get ticket details
 
 ### Admin (Super Admin only)
 - `GET /api/admin/superadmin/stats` - Dashboard statistics
@@ -193,7 +189,6 @@ npm test
 - **/dashboard** - Customer dashboard
 - **/admin** - Admin panel
 - **/super-admin** - Super admin dashboard
-- **/tickets** - Ticket management
 - **/knowledge-base** - Knowledge base
 - **/chat** - Chat interface
 
