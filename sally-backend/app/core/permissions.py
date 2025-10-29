@@ -55,11 +55,19 @@ class Permission:
     MANAGE_SYSTEM_SETTINGS = "settings.system.manage"
 
 
-# --- 2. Default Role Configurations ---
+# --- 2. Role Name Constants ---
+# تعریف ثابت‌های نام نقش‌ها برای جلوگیری از خطاهای تایپی
+SUPER_ADMIN_ROLE_NAME = "SuperAdmin"
+ADMIN_ROLE_NAME = "Admin"
+CUSTOMER_ROLE_NAME = "Customer"
+GUEST_ROLE_NAME = "Guest"
+
+
+# --- 3. Default Role Configurations ---
 # تعریف نقش‌های پیش‌فرض با نام‌گذاری استاندارد (snake_case)
 DEFAULT_ROLES = {
-    "SuperAdmin": {
-        "name": "SuperAdmin",
+    SUPER_ADMIN_ROLE_NAME: {
+        "name": SUPER_ADMIN_ROLE_NAME,
         "description": "Super administrator with full system access",
         "permissions": [
             {"permission_key": Permission.MANAGE_adminS, "description": "Manage admin users", "resource": "admins", "action": "manage"},
@@ -78,8 +86,8 @@ DEFAULT_ROLES = {
         ]
     },
 
-    "Admin": {
-        "name": "Admin",
+    ADMIN_ROLE_NAME: {
+        "name": ADMIN_ROLE_NAME,
         "description": "Administrator with limited access",
         "permissions": [
             {"permission_key": Permission.VIEW_CUSTOMERS, "description": "View customer users", "resource": "customers", "action": "view"},
@@ -89,16 +97,16 @@ DEFAULT_ROLES = {
         ]
     },
 
-    "Customer": {
-        "name": "Customer",
+    CUSTOMER_ROLE_NAME: {
+        "name": CUSTOMER_ROLE_NAME,
         "description": "Customer with access to their own data",
         "permissions": [
             {"permission_key": Permission.VIEW_PUBLIC_KB, "description": "View public knowledge base", "resource": "kb_articles", "action": "view_public"}
         ]
     },
 
-    "Guest": {
-        "name": "Guest",
+    GUEST_ROLE_NAME: {
+        "name": GUEST_ROLE_NAME,
         "description": "Unauthenticated user with access to public resources",
         "permissions": [
             {"permission_key": Permission.VIEW_PUBLIC_KB, "description": "View public knowledge base", "resource": "kb_articles", "action": "view_public"}

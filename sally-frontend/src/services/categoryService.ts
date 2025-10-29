@@ -11,6 +11,7 @@ export interface Category {
   name: string;
   slug: string;
   description?: string | null;
+  color?: string | null;
   parent_id?: string | null;
   is_public: boolean;
   created_at: string;
@@ -23,6 +24,7 @@ export interface CategoryCreate {
   name: string;
   slug: string;
   description?: string;
+  color?: string;
   parent_id?: string | null;
   is_public: boolean;
 }
@@ -31,6 +33,7 @@ export interface CategoryUpdate {
   name?: string;
   slug?: string;
   description?: string;
+  color?: string;
   parent_id?: string | null;
   is_public?: boolean;
 }
@@ -40,6 +43,7 @@ export interface CategoryTreeNode {
   name: string;
   slug: string;
   description?: string | null;
+  color?: string | null;
   is_public: boolean;
   children: CategoryTreeNode[];
 }

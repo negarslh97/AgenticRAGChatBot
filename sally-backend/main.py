@@ -25,12 +25,13 @@ setup_logging(
 )
 logger = get_logger(__name__)
 
-# Import logging middleware
+# Import middleware
 from app.api.middleware.logging_middleware import (
     RequestLoggingMiddleware,
     PerformanceMonitoringMiddleware,
     ErrorLoggingMiddleware
 )
+from app.api.middleware.error_handler import ErrorHandlerMiddleware
 
 
 @asynccontextmanager
@@ -51,7 +52,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Existing roles in database: {[role.name for role in existing_roles]}")
 
     # Create default roles
-    from app.core.permissions import create_default_roles
+    from app.core.permissions import create_default_roles, SUPER_ADMIN_ROLE_NAME
     await create_default_roles()
 
     # Log roles after creation
@@ -65,17 +66,18 @@ async def lifespan(app: FastAPI):
     admin_count = await Admin.find_all().count()
     if admin_count == 0:
         logger.info("No admins found. Creating default super admin...")
-        SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
+        SuperAdmin_role = await Role.find_one(Role.name == SUPER_ADMIN_ROLE_NAME)
         
         if not SuperAdmin_role:
-            logger.error("SuperAdmin role not found! Cannot create default admin.")
+            logger.error(f"CRITICAL ERROR: {SUPER_ADMIN_ROLE_NAME} role not found! Cannot create default admin.")
+            raise RuntimeError(f"CRITICAL ERROR: {SUPER_ADMIN_ROLE_NAME} role not found! Cannot create default admin. This indicates a fundamental system setup failure.")
         else:
             default_admin = Admin(
                 email=settings.default_SuperAdmin_email,
                 hashed_password=get_password_hash(settings.default_SuperAdmin_password),
                 full_name="Default Super Admin",
                 role_id=str(SuperAdmin_role.id),
-                role_name=SuperAdmin_role.name
+                role_name=SUPER_ADMIN_ROLE_NAME
             )
             await default_admin.insert()
             logger.info(f"✅ Created default super admin: {settings.default_SuperAdmin_email}")
@@ -128,7 +130,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add logging and monitoring middleware
+# Add middleware stack (order matters - error handler first)
+app.add_middleware(ErrorHandlerMiddleware)
 app.add_middleware(ErrorLoggingMiddleware)
 app.add_middleware(PerformanceMonitoringMiddleware)
 app.add_middleware(RequestLoggingMiddleware)

@@ -7,7 +7,7 @@ import uuid
 import openai
 import json
 
-from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, Admin, ArticleVisibility, AdminRole, ArticleCategory, ArticleTag, Category, Tag
+from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, Admin, ArticleVisibility, ArticleCategory, ArticleTag, Category, Tag
 import markdown  # For markdown to HTML conversion
 from app.api.dependencies import get_current_admin
 from app.core.permissions import get_current_admin_with_permission, Permission
@@ -529,6 +529,9 @@ async def update_article(
         cat = await Category.get(article_data.category_id)
         if cat:
             category = ArticleCategory(id=str(cat.id), name=cat.name, slug=cat.slug)
+            logger.info(f"✅ دسته‌بندی '{cat.name}' برای مقاله تنظیم شد")
+        else:
+            logger.warning(f"⚠️ دسته‌بندی با ID '{article_data.category_id}' یافت نشد")
 
     # Handle tags
     tags = await get_or_create_tags(article_data.tag_names)
@@ -980,20 +983,22 @@ async def get_weaviate_node_details(
     """
     try:
         from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
+        from app.core.weaviate_utils import get_weaviate_collection_name
         import uuid as uuid_lib
-        
+
         # Create connector instance and connect
         weaviate_connector = WeaviateMongoDBConnector()
         weaviate_connector.connect_weaviate()
-        
+
         if not weaviate_connector.weaviate_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Cannot connect to Weaviate"
             )
-        
-        # Get collection
-        collection = weaviate_connector.weaviate_client.collections.get("MarkdownNode")
+
+        # Get collection using dynamic name
+        collection_name = get_weaviate_collection_name()
+        collection = weaviate_connector.weaviate_client.collections.get(collection_name)
         
         # Get specific object with UUID
         try:
@@ -1044,19 +1049,21 @@ async def get_weaviate_contents(
     """
     try:
         from app.infrastructure.database.weaviate_connector import WeaviateMongoDBConnector
-        
+        from app.core.weaviate_utils import get_weaviate_collection_name
+
         # Create connector instance and connect
         weaviate_connector = WeaviateMongoDBConnector()
         weaviate_connector.connect_weaviate()
-        
+
         if not weaviate_connector.weaviate_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Cannot connect to Weaviate"
             )
-        
-        # Get collection
-        collection = weaviate_connector.weaviate_client.collections.get("MarkdownNode")
+
+        # Get collection using dynamic name
+        collection_name = get_weaviate_collection_name()
+        collection = weaviate_connector.weaviate_client.collections.get(collection_name)
         
         # Query all objects with limit
         response = collection.query.fetch_objects(limit=limit)

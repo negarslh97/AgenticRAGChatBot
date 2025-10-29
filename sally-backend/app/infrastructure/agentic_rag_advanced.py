@@ -531,7 +531,9 @@ class AdvancedAgenticRAG:
             # استفاده از Connection Manager
             with weaviate_client() as client:
                 # جستجو در collection
-                collection = client.collections.get("MarkdownNode")
+                from app.core.weaviate_utils import get_weaviate_collection_name
+                collection_name = get_weaviate_collection_name()
+                collection = client.collections.get(collection_name)
                 
                 search_response = collection.query.near_vector(
                     near_vector=query_vector,
@@ -624,7 +626,9 @@ class AdvancedAgenticRAG:
                 return nodes_map
             
             with weaviate_client() as client:
-                collection = client.collections.get("MarkdownNode")
+                from app.core.weaviate_utils import get_weaviate_collection_name
+                collection_name = get_weaviate_collection_name()
+                collection = client.collections.get(collection_name)
                 
                 # 🔥 استفاده از contains_any برای batch query
                 response = collection.query.fetch_objects(

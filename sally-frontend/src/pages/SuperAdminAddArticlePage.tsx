@@ -40,7 +40,7 @@ const SuperAdminAddArticlePage: React.FC = () => {
 
   const loadCategories = async () => {
     try {
-      const cats = await knowledgeBaseService.getCategories()
+      const cats = await knowledgeBaseService.getAllCategoriesForAdmin()
       setCategories(Array.isArray(cats) ? cats : [])
     } catch (error) {
       console.error("Error loading categories:", error)
@@ -224,12 +224,28 @@ const SuperAdminAddArticlePage: React.FC = () => {
                   className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="">انتخاب دسته‌بندی...</option>
-                  {Array.isArray(categories) && categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
+                  {Array.isArray(categories) && categories
+                    .sort((a, b) => {
+                      // مرتب‌سازی: ابتدا ریشه‌ها، سپس زیردسته‌ها
+                      const aHasParent = categories.some(c => c.id === a.parent_id);
+                      const bHasParent = categories.some(c => c.id === b.parent_id);
+                      if (aHasParent && !bHasParent) return 1;
+                      if (!aHasParent && bHasParent) return -1;
+                      return a.name.localeCompare(b.name);
+                    })
+                    .map((category) => {
+                      const isChild = categories.some(c => c.id === category.parent_id);
+                      const indent = isChild ? '  └── ' : '';
+                      return (
+                        <option key={category.id} value={category.id}>
+                          {indent}{category.name} {category.is_public ? '' : '(خصوصی)'}
+                        </option>
+                      );
+                    })}
                 </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  دسته‌بندی‌های خصوصی با (خصوصی) مشخص شده‌اند • زیردسته‌ها با indentation نمایش داده می‌شوند
+                </p>
               </div>
 
               {/* برچسب‌ها */}

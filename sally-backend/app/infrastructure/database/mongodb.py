@@ -15,7 +15,7 @@ def get_mongo_client():
     """Get or create global MongoDB client."""
     global _client
     if _client is None:
-        _client = AsyncIOMotorClient(settings.database_url)
+        _client = AsyncIOMotorClient(settings.MONGODB_URL)
     return _client
 
 async def close_mongo_client():
@@ -29,7 +29,7 @@ async def init_db():
     """Initialize database connection and models for the refactored system."""
     global _client
     if _client is None:
-        _client = AsyncIOMotorClient(settings.database_url)
+        _client = AsyncIOMotorClient(settings.MONGODB_URL)
 
     await init_beanie(
         database=_client.get_default_database(),
@@ -43,29 +43,31 @@ async def init_db():
 async def create_default_SuperAdmin():
     """Create default Super Admin user if no admins exist."""
     from app.domain.entities import Admin, Role
+    from app.core.permissions import SUPER_ADMIN_ROLE_NAME
     
     admin_count = await Admin.find_all().count()
     if admin_count == 0:
         print("No admins found. Creating default super admin...")
         
         # Ensure SuperAdmin role exists
-        SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
+        SuperAdmin_role = await Role.find_one(Role.name == SUPER_ADMIN_ROLE_NAME)
         if not SuperAdmin_role:
             # Create default roles if they don't exist
             await create_default_roles()
-            SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
+            SuperAdmin_role = await Role.find_one(Role.name == SUPER_ADMIN_ROLE_NAME)
         
         if SuperAdmin_role:
             default_admin = Admin(
                 email=settings.default_SuperAdmin_email,
                 hashed_password=get_password_hash(settings.default_SuperAdmin_password),
                 full_name="Default Super Admin",
-                role_id=SuperAdmin_role.id
+                role_id=SuperAdmin_role.id,
+                role_name=SUPER_ADMIN_ROLE_NAME
             )
             await default_admin.insert()
             print(f"Created default super admin: {settings.default_SuperAdmin_email}")
         else:
-            print("ERROR: Super admin role not found! Cannot create default admin.")
+            raise RuntimeError(f"CRITICAL ERROR: {SUPER_ADMIN_ROLE_NAME} role not found! Cannot create default admin. This indicates a fundamental system setup failure.")
 
 
 async def verify_database_setup():

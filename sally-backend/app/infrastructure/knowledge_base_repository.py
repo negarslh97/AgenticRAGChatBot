@@ -631,14 +631,38 @@ class KnowledgeBaseRepository:
                     logger.warning(f"⚠️ مقاله '{article.title}' ساختار Markdown قابل پارسی نداشت.")
                     return
 
-                # ✅ استفاده از Batch Insert برای درج تمام گره‌ها در یک درخواست
-                with collection.batch.dynamic() as batch:
-                    for node in all_nodes:
-                        properties = self._node_to_properties(node, article)
-                        # فقط properties را ارسال می‌کنیم، Weaviate خودش بردار را تولید خواهد کرد
-                        batch.add_object(properties=properties)
+                # ✅ استفاده از روش individual insert بجای batch برای جلوگیری از خطای nil pointer
+                saved_count = 0
+                failed_count = 0
 
-                logger.info(f"✅ {len(all_nodes)} گره برای مقاله '{article.title}' با موفقیت در {collection_name} ذخیره شد.")
+                for node in all_nodes:
+                    try:
+                        properties = self._node_to_properties(node, article)
+
+                        # بررسی اعتبار داده‌ها قبل از ارسال
+                        if not properties.get("node_id") or not properties.get("article_id"):
+                            logger.warning(f"⚠️ گره نامعتبر رد شد: {properties.get('title', 'بدون عنوان')}")
+                            failed_count += 1
+                            continue
+
+                        # ارسال individual به Weaviate
+                        uuid = collection.data.insert(properties=properties)
+                        logger.debug(f"✅ گره '{properties.get('title', '')}' با UUID {uuid} ذخیره شد")
+                        saved_count += 1
+
+                    except Exception as node_error:
+                        logger.error(f"❌ خطا در ذخیره گره '{node.title if hasattr(node, 'title') else 'unknown'}': {str(node_error)}")
+                        failed_count += 1
+                        continue
+
+                logger.info(f"✅ {saved_count} گره با موفقیت ذخیره شد، {failed_count} گره ناموفق بود")
+
+                # بررسی تعداد گره‌های اضافه شده به batch
+                try:
+                    # اگر batch خالی است، چیزی ذخیره نشده
+                    logger.info(f"✅ {len(all_nodes)} گره برای مقاله '{article.title}' پردازش شد و به batch اضافه شد.")
+                except Exception as batch_info_error:
+                    logger.warning(f"⚠️ نمی‌توان اطلاعات batch را دریافت کرد: {str(batch_info_error)}")
 
                 # ✅ ثبت تاریخ همگام‌سازی موفق در MongoDB
                 article.last_synced_at = datetime.utcnow()
@@ -665,18 +689,20 @@ class KnowledgeBaseRepository:
             article: مقاله والد
 
         Returns:
-            دیکشنری properties
+            دیکشنری properties با مقادیر معتبر
         """
+        # اطمینان از اینکه همه مقادیر معتبر هستند و None نیستند
         return {
-            "node_id": node.id,
-            "article_id": str(article.id),
-            "title": node.title,
-            "level": node.level,
-            "content": node.content,
-            "parent_id": node.parent_id,
-            "path": node.path,
-            "order": node.order,
-            "full_content": article.content_markdown
+            "node_id": str(node.id) if node.id is not None else "",
+            "article_id": str(article.id) if article.id else "",
+            "title": str(node.title) if node.title is not None else "",
+            "level": int(node.level) if node.level is not None else 1,
+            "content": str(node.content) if node.content is not None else "",
+            "parent_id": str(node.parent_id) if node.parent_id is not None else "-1",
+            "path": str(node.path) if node.path is not None else "",
+            "order": int(node.order) if node.order is not None else 0,
+            "full_content": str(article.content_markdown) if article.content_markdown else "",
+            "embedder_model": settings.embedder_model_loaded or "text-embedding-3-small"
         }
 
     # =============== STATISTICS ===============

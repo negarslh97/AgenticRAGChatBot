@@ -497,6 +497,67 @@ class KnowledgeBaseService:
             logger.error(f"❌ خطا در دریافت آمار داشبورد: {str(e)}")
             return {}
 
+    async def get_category_stats(self) -> Dict[str, Any]:
+        """
+        آمار پیشرفته دسته‌بندی‌ها
+
+        Returns:
+            آمار تفصیلی دسته‌بندی‌ها
+        """
+        try:
+            # آمار دسته‌بندی‌ها
+            all_categories = await Category.find_all().to_list()
+            public_categories = [c for c in all_categories if c.is_public]
+            private_categories = [c for c in all_categories if not c.is_public]
+
+            # آمار مقالات در هر دسته‌بندی
+            category_stats = []
+            for category in all_categories:
+                article_count = await KnowledgeBaseArticle.find(
+                    {"category.id": str(category.id)}
+                ).count()
+
+                category_stats.append({
+                    "id": str(category.id),
+                    "name": category.name,
+                    "slug": category.slug,
+                    "is_public": category.is_public,
+                    "article_count": article_count,
+                    "has_children": await Category.find({"parent.$id": category.id}).count() > 0
+                })
+
+            # آمار تگ‌ها
+            total_tags = await Tag.find_all().count()
+            system_tags = await Tag.find(Tag.is_system == True).count()
+            popular_tags = await get_popular_tags(10)
+
+            return {
+                "categories": {
+                    "total": len(all_categories),
+                    "public": len(public_categories),
+                    "private": len(private_categories),
+                    "with_articles": len([c for c in category_stats if c["article_count"] > 0]),
+                    "details": category_stats
+                },
+                "tags": {
+                    "total": total_tags,
+                    "system": system_tags,
+                    "user_created": total_tags - system_tags,
+                    "popular": [
+                        {
+                            "name": tag.name,
+                            "usage_count": tag.usage_count,
+                            "color": tag.color
+                        } for tag in popular_tags
+                    ]
+                },
+                "generated_at": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"❌ خطا در دریافت آمار دسته‌بندی‌ها: {str(e)}")
+            return {}
+
     # =============== HELPER METHODS ===============
 
     async def _generate_summary(self, title: str, content: str, max_length: int = 200) -> str:
@@ -960,7 +1021,7 @@ class KnowledgeBaseService:
                 
                 # پیدا کردن فرزندان
                 for cat_id, cat in categories_map.items():
-                    if cat.parent and str(cat.parent.ref.id) == str(category.id):
+                    if cat.parent and str(cat.parent.id) == str(category.id):
                         node["children"].append(build_tree_node(cat))
                 
                 return node
@@ -983,28 +1044,147 @@ class KnowledgeBaseService:
 async def get_or_create_tags(tag_names: List[str]) -> List[Any]:
     """
     Get or create tags and return ArticleTag objects.
-    
+
     این تابع مشترک برای ایجاد یا دریافت تگ‌ها است و در چند ماژول مختلف استفاده می‌شود.
-    
+
     Args:
         tag_names: لیست نام تگ‌ها
-        
+
     Returns:
         لیست ArticleTag objects
     """
     from app.domain.entities import ArticleTag
-    
+
     article_tags = []
     for tag_name in tag_names:
+        # Normalize tag name
+        normalized_name = tag_name.lower().strip()
+
         # Check if tag exists
-        tag = await Tag.find_one(Tag.name == tag_name)
+        tag = await Tag.find_one(Tag.name == normalized_name)
         if not tag:
             # Create new tag
-            tag = Tag(name=tag_name)
+            tag = Tag(
+                name=normalized_name,
+                description=f"تگ: {tag_name}",
+                usage_count=0,
+                is_system=False
+            )
             await tag.insert()
             logger.info(f"✨ Created new tag: {tag_name}")
-        article_tags.append(ArticleTag(id=str(tag.id), name=tag.name, color=tag.color))
+        else:
+            # Increment usage count
+            await tag.increment_usage()
+
+        article_tags.append(ArticleTag(
+            id=str(tag.id),
+            name=tag.name,
+            color=tag.color,
+            description=tag.description,
+            is_system=tag.is_system
+        ))
     return article_tags
+
+# =============== TAG MANAGEMENT METHODS ===============
+
+async def create_tag(
+    name: str,
+    color: Optional[str] = None,
+    description: Optional[str] = None,
+    is_system: bool = False
+) -> Tag:
+    """
+    ایجاد تگ جدید
+
+    Args:
+        name: نام تگ
+        color: رنگ تگ (اختیاری)
+        description: توضیحات تگ
+        is_system: آیا تگ سیستمی است؟
+
+    Returns:
+        تگ ایجاد شده
+    """
+    try:
+        normalized_name = name.lower().strip()
+
+        # بررسی وجود تگ
+        existing = await Tag.find_one(Tag.name == normalized_name)
+        if existing:
+            raise ValueError(f"تگ '{name}' قبلاً وجود دارد")
+
+        tag = Tag(
+            name=normalized_name,
+            color=color,
+            description=description,
+            is_system=is_system,
+            usage_count=0
+        )
+
+        await tag.insert()
+        logger.info(f"✅ تگ '{name}' ایجاد شد")
+        return tag
+
+    except Exception as e:
+        logger.error(f"❌ خطا در ایجاد تگ: {str(e)}")
+        raise
+
+async def get_popular_tags(limit: int = 20) -> List[Tag]:
+    """
+    دریافت تگ‌های محبوب بر اساس تعداد استفاده
+
+    Args:
+        limit: حداکثر تعداد تگ‌ها
+
+    Returns:
+        لیست تگ‌های محبوب
+    """
+    try:
+        tags = await Tag.find(Tag.is_system == False).sort(-Tag.usage_count).limit(limit).to_list()
+        return tags
+    except Exception as e:
+        logger.error(f"❌ خطا در دریافت تگ‌های محبوب: {str(e)}")
+        return []
+
+async def update_tag_usage(tag_ids: List[str]) -> None:
+    """
+    بروزرسانی شمارنده استفاده تگ‌ها
+
+    Args:
+        tag_ids: لیست ID تگ‌ها
+    """
+    try:
+        for tag_id in tag_ids:
+            tag = await Tag.get(tag_id)
+            if tag:
+                await tag.increment_usage()
+    except Exception as e:
+        logger.error(f"❌ خطا در بروزرسانی استفاده تگ: {str(e)}")
+
+async def cleanup_unused_tags() -> int:
+    """
+    پاکسازی تگ‌های استفاده نشده (غیر سیستمی)
+
+    Returns:
+        تعداد تگ‌های حذف شده
+    """
+    try:
+        unused_tags = await Tag.find(
+            Tag.usage_count == 0,
+            Tag.is_system == False
+        ).to_list()
+
+        deleted_count = 0
+        for tag in unused_tags:
+            await tag.delete()
+            deleted_count += 1
+
+        logger.info(f"🧹 {deleted_count} تگ استفاده نشده حذف شدند")
+        return deleted_count
+
+    except Exception as e:
+        logger.error(f"❌ خطا در پاکسازی تگ‌ها: {str(e)}")
+        return 0
 
 
 # Singleton instance

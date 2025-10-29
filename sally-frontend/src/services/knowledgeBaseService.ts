@@ -34,7 +34,10 @@ export interface Category {
   name: string
   slug: string
   description?: string
+  parent_id?: string | null
   is_public: boolean
+  articles_count?: number
+  children_count?: number
 }
 
 export interface SearchResult {
@@ -112,6 +115,11 @@ export const knowledgeBaseService = {
 
   async getCategories(): Promise<Category[]> {
     const response = await api.get("/kb/categories")
+    return response.data
+  },
+
+  async getAllCategoriesForAdmin(): Promise<Category[]> {
+    const response = await api.get("/api/super-admin/categories/")
     return response.data
   },
 

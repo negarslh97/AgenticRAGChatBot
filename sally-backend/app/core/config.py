@@ -1,12 +1,13 @@
 # مسیر: sally-backend/app/core/config.py
 
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import Optional, List
 
 class Settings(BaseSettings):
 
     # Database
-    database_url: str = "mongodb://localhost:27017/SallyChatBot"
+    MONGODB_URL: str = Field(default="", env="MONGODB_URL")
     
     # JWT
     jwt_secret_key: str = "sally-chatbot-super-secure-secret-key-2025-change-in-production"

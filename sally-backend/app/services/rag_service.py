@@ -388,7 +388,9 @@ class RAGService(ABC):
                 logger.info(f"🎯 جستجوی معنایی با vector...")
 
                 # استفاده از v4 API برای جستجو
-                collection = client.collections.get("MarkdownNode")
+                from app.core.weaviate_utils import get_weaviate_collection_name
+                collection_name = get_weaviate_collection_name()
+                collection = client.collections.get(collection_name)
                 
                 logger.info(f"⚡ Executing Enhanced Weaviate Hybrid Search (limit: {limit})...")
                 

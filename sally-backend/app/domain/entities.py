@@ -73,6 +73,7 @@ class Admin(Document):
     role_id: str  # Store ObjectId as string for compatibility
     role_name: str # Denormalized role name for readability
     is_active: bool = True
+    last_login: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
@@ -80,6 +81,10 @@ class Admin(Document):
     
     class Settings:
         name = "admins"
+    
+    async def before_save(self) -> None:
+        """Hook to update timestamps before saving."""
+        self.updated_at = datetime.utcnow()
     
     async def get_role(self) -> Optional[Role]:
         """Get the admin's role document."""
@@ -94,6 +99,7 @@ class Customer(Document):
     hashed_password: str
     full_name: str
     is_active: bool = True
+    last_login: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
@@ -101,6 +107,10 @@ class Customer(Document):
     
     class Settings:
         name = "customers"
+    
+    async def before_save(self) -> None:
+        """Hook to update timestamps before saving."""
+        self.updated_at = datetime.utcnow()
 
 
 class GuestSession(Document):
@@ -128,6 +138,10 @@ class Conversation(Document):
     model_name: Optional[str] = None  # LLM model used
     temperature: Optional[float] = 0.7  # Temperature setting
 
+    # 🆕 Conversation status and tracking
+    status: str = "active"  # "active", "closed", "archived"
+    resolved_at: Optional[datetime] = None
+    closed_by: Optional[str] = None  # ID of admin who closed the conversation
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -135,6 +149,14 @@ class Conversation(Document):
 
     class Settings:
         name = "conversations"
+    
+    async def before_save(self) -> None:
+        """Hook to update timestamps before saving."""
+        self.updated_at = datetime.utcnow()
+        
+        # Set resolved_at when status changes to "closed"
+        if self.status == "closed" and self.resolved_at is None:
+            self.resolved_at = datetime.utcnow()
 
 
 class SenderType(str, Enum):
@@ -152,6 +174,7 @@ class MessageRating(BaseModel):
     comment: Optional[str] = None
     rated_by: Optional[str] = None  # User ID who rated
     rated_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class Message(Document):
@@ -194,6 +217,7 @@ class Category(Document):
     name: str = Indexed()  # Indexed for search
     slug: Indexed(str, unique=True)  # URL-friendly identifier
     description: Optional[str] = None
+    color: Optional[str] = None  # Color in hex format (e.g., #4CAF50)
     parent: Optional[Link["Category"]] = None  # Reference to parent category
     ancestors: List[CategoryAncestor] = []  # List of all ancestors for easy querying
     is_public: bool = True  # Public categories visible to guests
@@ -210,7 +234,7 @@ class Category(Document):
             return
 
         # Fetch parent and its ancestors
-        parent = await self.parent.fetch()
+        parent = await Category.get(str(self.parent.id))
         if parent:
             # Start with parent's ancestors and add the parent itself
             self.ancestors = parent.ancestors.copy()
@@ -223,10 +247,14 @@ class Category(Document):
 
 
 class Tag(Document):
-    """Knowledge base tag."""
+    """Knowledge base tag with enhanced features."""
     name: Indexed(str, unique=True)
     color: Optional[str] = None
+    description: Optional[str] = None
+    usage_count: int = 0  # تعداد استفاده از این تگ
+    is_system: bool = False  # تگ سیستمی (غیر قابل حذف توسط کاربر)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:
         name = "tags"
@@ -235,6 +263,18 @@ class Tag(Document):
         """Ensure name is lowercase for consistency."""
         if self.name:
             self.name = self.name.lower()
+        self.updated_at = datetime.utcnow()
+
+    async def increment_usage(self) -> None:
+        """Increment usage count."""
+        self.usage_count += 1
+        await self.save()
+
+    async def decrement_usage(self) -> None:
+        """Decrement usage count."""
+        if self.usage_count > 0:
+            self.usage_count -= 1
+            await self.save()
 
 
 class ArticleCategory(BaseModel):
@@ -242,13 +282,16 @@ class ArticleCategory(BaseModel):
     id: str  # ObjectId as string
     name: str
     slug: str
+    color: Optional[str] = None  # Denormalized color for better performance
 
 
 class ArticleTag(BaseModel):
-    """Embedded tag information for articles."""
+    """Embedded tag information for articles with enhanced features."""
     id: str  # ObjectId as string
     name: str
     color: Optional[str] = None
+    description: Optional[str] = None
+    is_system: bool = False
 
 
 class KnowledgeBaseArticle(Document):
@@ -277,6 +320,14 @@ class KnowledgeBaseArticle(Document):
     async def before_save(self) -> None:
         """Hook to update timestamps before saving."""
         self.updated_at = datetime.utcnow()
+        
+        # Set published_at when status changes to PUBLISHED
+        if self.status == ArticleStatus.PUBLISHED and self.published_at is None:
+            self.published_at = datetime.utcnow()
+        
+        # Update last_synced_at when article is modified
+        if self.last_synced_at is not None:
+            self.last_synced_at = None  # Mark as unsynced
 
 
 class UnansweredQuestion(Document):
@@ -302,11 +353,18 @@ class Feedback(Document):
     rating: int  # 1-5 scale
     comment: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[str] = None  # Admin ID who resolved the feedback
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     class Settings:
         name = "feedback"
+    
+    async def before_save(self) -> None:
+        """Hook to update timestamps before saving."""
+        self.updated_at = datetime.utcnow()
 
 
 class ActivityLog(Document):
@@ -317,12 +375,19 @@ class ActivityLog(Document):
     resource_type: str = Indexed()  # "article", "customer", etc., indexed
     resource_id: Optional[str] = Indexed()  # Indexed for specific resource queries
     details: Optional[Dict[str, Any]] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     class Settings:
         name = "activity_logs"
+    
+    async def before_save(self) -> None:
+        """Hook to update timestamps before saving."""
+        self.updated_at = datetime.utcnow()
 
 
 # ===========================================

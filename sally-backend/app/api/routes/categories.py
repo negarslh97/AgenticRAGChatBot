@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+from bson import ObjectId
 
 from app.domain.entities import Admin, Category
 from app.core.permissions import get_current_admin, get_current_admin_with_permission, Permission, get_optional_admin
@@ -113,7 +114,7 @@ async def create_category(
             name=category.name,
             slug=category.slug,
             description=category.description,
-            parent_id=str(category.parent.ref.id) if category.parent else None,
+            parent_id=str(category.parent.id) if category.parent else None,
             is_public=category.is_public,
             created_at=category.created_at,
             updated_at=category.updated_at,
@@ -136,52 +137,83 @@ async def create_category(
 async def get_categories(
     is_public_only: bool = Query(False, description="فقط دسته‌بندی‌های عمومی"),
     parent_id: Optional[str] = Query(None, description="فیلتر بر اساس والد"),
+    search: Optional[str] = Query(None, description="جستجو در نام دسته‌بندی‌ها"),
+    sort_by: str = Query("name", description="مرتب‌سازی بر اساس (name, created_at, articles_count)"),
+    sort_order: str = Query("asc", description="ترتیب مرتب‌سازی (asc, desc)"),
     current_admin: Optional[Admin] = Depends(get_optional_admin)
 ):
     """
-    دریافت لیست تمام دسته‌بندی‌ها
-    
+    دریافت لیست تمام دسته‌بندی‌ها با قابلیت جستجو و فیلترینگ پیشرفته
+
     **دسترسی:** عمومی (برای مهمان‌ها فقط public categories)
     """
     try:
         # اگر کاربر مهمان است، فقط عمومی‌ها را نمایش بده
         if not current_admin:
             is_public_only = True
-        
-        logger.info(f"📚 Fetching categories (public_only={is_public_only}, parent_id={parent_id})")
-        
+
+        logger.info(f"📚 Fetching categories (public_only={is_public_only}, parent_id={parent_id}, search={search})")
+
         categories = await knowledge_base_service.get_all_categories(
             is_public_only=is_public_only,
             parent_id=parent_id
         )
-        
+
         # ساخت response با اطلاعات اضافی
         response = []
         for category in categories:
             from app.domain.entities import KnowledgeBaseArticle
-            
+
             # شمارش مقالات
             articles_count = await KnowledgeBaseArticle.find({"category.id": str(category.id)}).count()
-            
+
             # شمارش زیردسته‌ها
             children = await Category.find({"parent.$id": category.id}).to_list()
-            
-            response.append(CategoryResponse(
+
+            response.append({
+                "category": category,
+                "articles_count": articles_count,
+                "children_count": len(children)
+            })
+
+        # اعمال فیلتر جستجو
+        if search:
+            search_lower = search.lower()
+            response = [
+                item for item in response
+                if search_lower in item["category"].name.lower() or
+                   (item["category"].description and search_lower in item["category"].description.lower())
+            ]
+
+        # مرتب‌سازی
+        reverse_order = sort_order.lower() == "desc"
+        if sort_by == "name":
+            response.sort(key=lambda x: x["category"].name, reverse=reverse_order)
+        elif sort_by == "created_at":
+            response.sort(key=lambda x: x["category"].created_at or datetime.min, reverse=reverse_order)
+        elif sort_by == "articles_count":
+            response.sort(key=lambda x: x["articles_count"], reverse=reverse_order)
+
+        # تبدیل به CategoryResponse
+        final_response = []
+        for item in response:
+            category = item["category"]
+            final_response.append(CategoryResponse(
                 id=str(category.id),
                 name=category.name,
                 slug=category.slug,
                 description=category.description,
-                parent_id=str(category.parent.ref.id) if category.parent else None,
+                parent_id=str(category.parent.id) if category.parent else None,
                 is_public=category.is_public,
                 created_at=category.created_at,
                 updated_at=category.updated_at,
-                articles_count=articles_count,
-                children_count=len(children)
+                articles_count=item["articles_count"],
+                children_count=item["children_count"]
             ))
-        
-        logger.info(f"✅ Found {len(response)} categories")
-        return response
-        
+
+        logger.info(f"✅ Found {len(final_response)} categories")
+        return final_response
+
     except Exception as e:
         logger.error(f"❌ Error fetching categories: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -197,26 +229,51 @@ async def get_category_tree(
 ):
     """
     دریافت درخت سلسله‌مراتبی دسته‌بندی‌ها
-    
+
     **دسترسی:** عمومی (برای مهمان‌ها فقط public categories)
     """
     try:
         # اگر کاربر مهمان است، فقط عمومی‌ها را نمایش بده
         if not current_admin:
             is_public_only = True
-        
+
         logger.info(f"🌳 Fetching category tree (public_only={is_public_only})")
-        
+
         tree = await knowledge_base_service.get_category_tree(is_public_only=is_public_only)
-        
+
         logger.info(f"✅ Built category tree with {len(tree)} root nodes")
         return tree
-        
+
     except Exception as e:
         logger.error(f"❌ Error fetching category tree: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"خطا در دریافت درخت دسته‌بندی: {str(e)}"
+        )
+
+
+@router.get("/stats", response_model=Dict[str, Any])
+async def get_category_stats(
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    دریافت آمار پیشرفته دسته‌بندی‌ها
+
+    **دسترسی:** فقط Super Admin
+    """
+    try:
+        logger.info("📊 Fetching category statistics")
+
+        stats = await knowledge_base_service.get_category_stats()
+
+        logger.info("✅ Category statistics retrieved")
+        return stats
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching category stats: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطا در دریافت آمار دسته‌بندی‌ها: {str(e)}"
         )
 
 
@@ -227,45 +284,45 @@ async def get_category(
 ):
     """
     دریافت یک دسته‌بندی با ID
-    
+
     **دسترسی:** عمومی (برای مهمان‌ها فقط public categories)
     """
     try:
         logger.info(f"🔍 Fetching category: {category_id}")
-        
+
         category = await knowledge_base_service.get_category_by_id(category_id)
-        
+
         if not category:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"دسته‌بندی با ID '{category_id}' یافت نشد"
             )
-        
+
         # بررسی دسترسی برای مهمان‌ها
         if not current_admin and not category.is_public:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="دسترسی به این دسته‌بندی محدود است"
             )
-        
+
         # شمارش مقالات و زیردسته‌ها
         from app.domain.entities import KnowledgeBaseArticle
         articles_count = await KnowledgeBaseArticle.find({"category.id": str(category.id)}).count()
         children = await Category.find({"parent.$id": category.id}).to_list()
-        
+
         return CategoryResponse(
             id=str(category.id),
             name=category.name,
             slug=category.slug,
             description=category.description,
-            parent_id=str(category.parent.ref.id) if category.parent else None,
+            parent_id=str(category.parent.id) if category.parent else None,
             is_public=category.is_public,
             created_at=category.created_at,
             updated_at=category.updated_at,
             articles_count=articles_count,
             children_count=len(children)
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -315,7 +372,7 @@ async def update_category(
             name=category.name,
             slug=category.slug,
             description=category.description,
-            parent_id=str(category.parent.ref.id) if category.parent else None,
+            parent_id=str(category.parent.id) if category.parent else None,
             is_public=category.is_public,
             created_at=category.created_at,
             updated_at=category.updated_at,

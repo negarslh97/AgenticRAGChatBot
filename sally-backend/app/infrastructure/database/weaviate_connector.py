@@ -601,7 +601,7 @@ class WeaviateMongoDBConnector:
 
     # تابع display_article_content حذف شده است
 
-    def display_weaviate_objects(self, class_name: str = "MarkdownNode", limit: int = 5, properties: Optional[List[str]] = None) -> bool:
+    def display_weaviate_objects(self, class_name: Optional[str] = None, limit: int = 5, properties: Optional[List[str]] = None) -> bool:
         """نمایش اشیاء ذخیره شده در Weaviate"""
         try:
             logger.info(f"🔍 نمایش اشیاء کلاس {class_name} در Weaviate...")
@@ -613,8 +613,13 @@ class WeaviateMongoDBConnector:
                 logger.info(f"⚠️ هیچ شیئی از کلاس {class_name} یافت نشد")
                 return True
 
+            # Use dynamic collection name if not specified
+            if class_name is None:
+                from app.core.weaviate_utils import get_weaviate_collection_name
+                class_name = get_weaviate_collection_name()
+
             print(f"\n🔍 اشیاء ذخیره شده در Weaviate (کلاس: {class_name}):")
-            if class_name == "MarkdownNode":
+            if class_name in ["MarkdownNode_Small", "MarkdownNode_Large"]:
                 logger.info("="*80)
                 logger.info("Node ID | Article ID | عنوان | مسیر | محتوا")
                 logger.info("-"*80)
@@ -1080,7 +1085,9 @@ class WeaviateMongoDBConnector:
             # حذف گره‌های قدیمی این مقاله
             try:
                 from weaviate.classes.query import Filter
-                collection = self.weaviate_client.collections.get("MarkdownNode")
+                from app.core.weaviate_utils import get_weaviate_collection_name
+                collection_name = get_weaviate_collection_name()
+                collection = self.weaviate_client.collections.get(collection_name)
                 collection.data.delete_many(
                     where=Filter.by_property("article_id").equal(str(article['_id']))
                 )
@@ -1106,7 +1113,9 @@ class WeaviateMongoDBConnector:
                     }
 
                     # ذخیره در Weaviate با Server-Side Vectorization
-                    collection = self.weaviate_client.collections.get("MarkdownNode")
+                    from app.core.weaviate_utils import get_weaviate_collection_name
+                    collection_name = get_weaviate_collection_name()
+                    collection = self.weaviate_client.collections.get(collection_name)
                     uuid = collection.data.insert(properties=node_data)
                     logger.info(f"✅ گره '{node.title}' با Server-Side Vectorization ذخیره شد - UUID: {uuid}")
 
@@ -1163,7 +1172,9 @@ class WeaviateMongoDBConnector:
             # حذف گره‌های قدیمی
             try:
                 from weaviate.classes.query import Filter
-                collection = self.weaviate_client.collections.get("MarkdownNode")
+                from app.core.weaviate_utils import get_weaviate_collection_name
+                collection_name = get_weaviate_collection_name()
+                collection = self.weaviate_client.collections.get(collection_name)
                 collection.data.delete_many(
                     where=Filter.by_property("article_id").equal(str(article['_id']))
                 )
@@ -1227,7 +1238,9 @@ class WeaviateMongoDBConnector:
                 }]
             
             # ذخیره در Weaviate
-            collection = self.weaviate_client.collections.get("MarkdownNode")
+            from app.core.weaviate_utils import get_weaviate_collection_name
+            collection_name = get_weaviate_collection_name()
+            collection = self.weaviate_client.collections.get(collection_name)
             saved_count = 0
 
             for node_data in nodes_data:
@@ -1291,7 +1304,7 @@ async def main():
     parser.add_argument("--migrate-article", metavar="ARTICLE_ID", help="ذخیره یک مقاله خاص با vectorization")
     parser.add_argument("--verify", action="store_true", help="بررسی وضعیت سیستم")
     parser.add_argument("--test-connection", action="store_true", help="تست اتصال به هر دو دیتابیس")
-    parser.add_argument("--display-weaviate", metavar="CLASS_NAME", nargs='?', const="MarkdownNode", help="نمایش اشیاء ذخیره شده در Weaviate")
+    parser.add_argument("--display-weaviate", metavar="CLASS_NAME", nargs='?', const=None, help="نمایش اشیاء ذخیره شده در Weaviate")
     parser.add_argument("--display-files", action="store_true", help="نمایش فایل‌های آپلود شده")
     parser.add_argument("--delete-all", action="store_true", help="حذف همه مقالات از هر دو دیتابیس")
     parser.add_argument("--delete-by-ids", nargs='+', help="حذف مقالات خاص بر اساس شناسه‌ها")
