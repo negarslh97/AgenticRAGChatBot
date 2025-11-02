@@ -5,7 +5,7 @@ API endpoints for Knowledge Base Re-indexing (Super Admin Only)
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from app.domain.entities import Admin
+from app.domain.entities import Admin, KnowledgeBaseArticle
 from app.api.dependencies import get_current_admin
 from app.core.permissions import Permission
 from app.api.dependencies import get_current_admin_with_permission
@@ -58,8 +58,8 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
         from app.infrastructure.markdown_parser import markdown_parser
         from weaviate.classes.config import Configure, Property, DataType
         
-        # اتصال به MongoDB
-        mongodb_client = AsyncIOMotorClient(settings.database_url)
+        # اتصال به MongoDB - استفاده از MONGODB_URL از config.py
+        mongodb_client = AsyncIOMotorClient(settings.MONGODB_URL)
         db = mongodb_client.get_database()
         
         # ❌ حذف اتصال به OpenAI - تولید embeddings توسط Weaviate انجام می‌شود
@@ -67,36 +67,39 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
         reindex_jobs[job_id]["message"] = "اتصال به پایگاه‌های داده برقرار شد"
         reindex_jobs[job_id]["progress"] = 10
         
-        # مرحله 1: پاکسازی (در صورت نیاز)
-        if request.clear_all_first:
-            reindex_jobs[job_id]["message"] = "پاکسازی Weaviate..."
-            logger.info(f"[Job {job_id}] پاکسازی Weaviate collection")
-            
-            try:
-                with weaviate_client() as client:
+        # مرحله 1: اطمینان از وجود collection یکپارچه (بدون پاکسازی)
+        reindex_jobs[job_id]["message"] = "بررسی Collection یکپارچه..."
+        logger.info(f"[Job {job_id}] بررسی Collection یکپارچه")
+
+        try:
+            with weaviate_client() as client:
+                from app.core.weaviate_utils import get_weaviate_collection_name
+
+                collection_name = get_weaviate_collection_name()
+
+                # پاکسازی collection موجود اگر clear_all_first=True
+                if request.clear_all_first:
                     try:
-                        client.collections.delete("MarkdownNode")
-                        logger.info(f"[Job {job_id}] Collection حذف شد")
+                        client.collections.delete(collection_name)
+                        logger.info(f"[Job {job_id}] Collection {collection_name} حذف شد")
                     except:
                         pass
-                    
-                    # ایجاد مجدد با Server-Side Vectorization
-                    from app.core.weaviate_utils import get_weaviate_collection_name, get_weaviate_vectorizer_config, get_weaviate_properties
 
-                    collection_name = get_weaviate_collection_name()
-                    vectorizer_config = get_weaviate_vectorizer_config()
+                # اگر collection وجود نداشت، آن را ایجاد کن
+                if not client.collections.exists(collection_name):
+                    from app.core.weaviate_utils import create_unified_collection
+                    success = create_unified_collection()
+                    if not success:
+                        raise Exception("فشل در ایجاد Collection یکپارچه")
+                    logger.info(f"[Job {job_id}] Collection {collection_name} ایجاد شد")
+                else:
+                    logger.info(f"[Job {job_id}] Collection {collection_name} از قبل موجود است")
 
-                    client.collections.create(
-                        name=collection_name,
-                        vectorizer_config=vectorizer_config,
-                        properties=get_weaviate_properties()
-                    )
-                    logger.info(f"[Job {job_id}] Collection جدید ایجاد شد")
-            except Exception as e:
-                logger.error(f"[Job {job_id}] خطا در پاکسازی: {e}")
-                reindex_jobs[job_id]["status"] = "failed"
-                reindex_jobs[job_id]["message"] = f"خطا در پاکسازی: {str(e)}"
-                return
+        except Exception as e:
+            logger.error(f"[Job {job_id}] خطا در بررسی Collection یکپارچه: {e}")
+            reindex_jobs[job_id]["status"] = "failed"
+            reindex_jobs[job_id]["message"] = f"خطا در بررسی Collection یکپارچه: {str(e)}"
+            return
         
         reindex_jobs[job_id]["progress"] = 20
         
@@ -144,94 +147,75 @@ async def run_reindex_job(job_id: str, request: ReindexRequest):
         reindex_jobs[job_id]["details"]["total_articles"] = total_articles
         reindex_jobs[job_id]["progress"] = 30
         
-        # مرحله 3: پردازش و ایندکس
+        # مرحله 3: استفاده از دکمه همگام‌سازی برای همه مقالات
         successful = 0
         failed = 0
         total_chunks = 0
-        
+
+        from app.infrastructure.knowledge_base_repository import KnowledgeBaseRepository
+        knowledge_base_repository = KnowledgeBaseRepository()
+
         for idx, article in enumerate(articles, 1):
             try:
                 article_id = str(article["_id"])
                 title = article.get("title", "بدون عنوان")
-                content = article.get("content_markdown", "")
-                
+
                 # بروزرسانی پیشرفت
                 progress = 30 + int((idx / total_articles) * 60)
                 reindex_jobs[job_id]["progress"] = progress
-                reindex_jobs[job_id]["message"] = f"پردازش {idx}/{total_articles}: {title[:50]}..."
-                
-                logger.info(f"[Job {job_id}] پردازش [{idx}/{total_articles}]: {title}")
-                
-                if not content or len(content.strip()) < 10:
-                    logger.warning(f"[Job {job_id}] محتوای خالی: {title}")
+                reindex_jobs[job_id]["message"] = f"همگام‌سازی {idx}/{total_articles}: {title[:50]}..."
+
+                logger.info(f"[Job {job_id}] همگام‌سازی [{idx}/{total_articles}]: {title}")
+
+                # ایجاد مقاله کلاس برای استفاده از متد دکمه همگام‌سازی
+                temp_article = KnowledgeBaseArticle(
+                    id=article_id,
+                    title=title,
+                    content_markdown=article.get("content_markdown", ""),
+                    content_html="",
+                    status="published",
+                    visibility=article.get("visibility", "public"),
+                    category=article.get("category"),
+                    tags=[],
+                    summary=article.get("summary"),
+                    author_id="reindex",
+                    version=1,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                    last_synced_at=None
+                )
+
+                # استفاده از متد دکمه همگام‌سازی (Server-Side پیش‌فرض)
+                try:
+                    await knowledge_base_repository._sync_to_weaviate(
+                        article=temp_article,
+                        operation="create"
+                    )
+                except Exception as sync_error:
+                    logger.error(f"[Job {job_id}] خطا در همگام‌سازی داخلی '{title}': {sync_error}")
+                    # برای جلوگیری از شکست کل عملیات، خطا را raise نکنید
+                    # اما خطا را log کنیم تا قابل پیگیری باشد
                     failed += 1
                     continue
-                
-                # حذف chunks قبلی با syntax جدید Weaviate v4
-                if request.remove_old:
-                    try:
-                        with weaviate_client() as client:
-                            from weaviate.classes.query import Filter
-                            collection = client.collections.get("MarkdownNode")
-                            collection.data.delete_many(
-                                where=Filter.by_property("article_id").equal(article_id)
-                            )
-                            logger.debug(f"[Job {job_id}] Chunks قبلی حذف شدند")
-                    except Exception as e:
-                        # اگر chunks قبلی وجود نداشت، مشکلی نیست
-                        logger.debug(f"[Job {job_id}] خطا در حذف chunks قبلی: {e}")
-                
-                # پارس و تقسیم
-                tree = markdown_parser.parse_to_tree(content, article_id, article_title=title)
-                nodes = tree.get_all_nodes()
 
-                logger.info(f"[Job {job_id}] {len(nodes)} chunk ایجاد شد")
+                # محاسبه chunks برای آمار
+                try:
+                    tree = markdown_parser.parse_to_tree(
+                        article.get("content_markdown", ""),
+                        article_id,
+                        article_title=title
+                    )
+                    nodes = tree.get_all_nodes()
+                    total_chunks += len(nodes)
+                    logger.info(f"[Job {job_id}] ✅ {len(nodes)} chunk همگام‌سازی شد")
+                except Exception as parse_error:
+                    logger.warning(f"[Job {job_id}] خطا در پارس کردن مقاله '{title}': {parse_error}")
+                    total_chunks += 1  # حداقل یک chunk
 
-                # ❌ حذف کامل بخش تولید embeddings توسط OpenAI
-                # تولید embeddings توسط Weaviate انجام می‌شود
-
-                # ذخیره در Weaviate با Server-Side Vectorization
-                with weaviate_client() as client:
-                    from app.core.weaviate_utils import get_weaviate_collection_name
-                    collection_name = get_weaviate_collection_name()
-                    collection = client.collections.get(collection_name)
-
-                    # Safe handling برای metadata (جلوگیری از NoneType errors)
-                    visibility = article.get("visibility", "public")
-
-                    # Safe category extraction
-                    category_obj = article.get("category")
-                    if category_obj and isinstance(category_obj, dict):
-                        category = category_obj.get("name", "عمومی")
-                    else:
-                        category = "عمومی"
-
-                    full_article_content = content
-
-                    with collection.batch.dynamic() as batch:
-                        for node in nodes:  # حلقه ساده روی nodes
-                            properties = {
-                                "node_id": node.id,
-                                "article_id": article_id,
-                                "title": node.title,
-                                "content": node.content,
-                                "full_content": full_article_content[:2000],
-                                "level": node.level,
-                                "path": node.path,
-                                "order": node.order,
-                                "parent_id": node.parent_id or "",
-                                "visibility": visibility,
-                                "category": category
-                            }
-                            # ✅ فقط properties ارسال می‌شود، Weaviate خودش vector تولید می‌کند
-                            batch.add_object(properties=properties)
-                
-                total_chunks += len(nodes)
                 successful += 1
-                logger.info(f"[Job {job_id}] ✅ {len(nodes)} chunk ذخیره شد")
-                
+
             except Exception as e:
-                logger.error(f"[Job {job_id}] خطا در پردازش '{title}': {e}")
+                logger.error(f"[Job {job_id}] خطا در همگام‌سازی '{title}': {e}")
                 failed += 1
                 continue
         
@@ -264,11 +248,11 @@ async def reindex_knowledge_base(
     current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
 ):
     """
-    🔄 Re-indexing پایگاه دانش
-    
-    - **all**: ایندکس مجدد همه مقالات
-    - **single**: ایندکس یک مقاله با ID یا عنوان
-    - **multiple**: ایندکس چند مقاله
+    🔄 همگام‌سازی پایگاه دانش با استفاده از دکمه همگام‌سازی
+
+    - **all**: همگام‌سازی همه مقالات منتشر شده
+    - **single**: همگام‌سازی یک مقاله با ID یا عنوان
+    - **multiple**: همگام‌سازی چند مقاله
     """
     try:
         # اعتبارسنجی
@@ -355,8 +339,8 @@ async def debug_reindex_status(
         from app.core.config import settings
         from app.infrastructure.connection_manager import weaviate_client
         
-        # اتصال به MongoDB
-        mongodb_client = AsyncIOMotorClient(settings.database_url)
+        # اتصال به MongoDB - استفاده از MONGODB_URL از config.py
+        mongodb_client = AsyncIOMotorClient(settings.MONGODB_URL)
         db = mongodb_client.get_database()
         
         # شمارش مقالات در MongoDB
@@ -523,4 +507,273 @@ async def debug_article_chunks(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Debug error: {str(e)}"
         )
+@router.post("/create-server-side-collection", tags=["Super Admin - Collections"])
+async def create_server_side_collection(
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    🔧 ایجاد Server-Side Collection برای vectorization توسط Weaviate
+    
+    این collection برای روش Server-Side Vectorization استفاده می‌شود.
+    """
+    try:
+        from app.core.weaviate_utils import create_unified_collection
+        
+        success = create_unified_collection()
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Collection یکپارچه با موفقیت ایجاد شد",
+                "collection_name": "MarkdownNode"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="خطا در ایجاد Collection یکپارچه"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"خطا در ایجاد Server-Side Collection: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطا در ایجاد collection: {str(e)}"
+        )
+
+
+@router.post("/sync-all-articles", response_model=ReindexResponse, tags=["Super Admin - Sync"])
+async def sync_all_articles_to_weaviate(
+    request: ReindexRequest,
+    background_tasks: BackgroundTasks,
+    current_admin: Admin = Depends(get_current_admin_with_permission(Permission.MANAGE_KB_ARTICLES))
+):
+    """
+    🔄 همگام‌سازی همه مقالات منتشر شده با استفاده از دکمه همگام‌سازی
+
+    این endpoint همه مقالات منتشر شده را با استفاده از مکانیسم دکمه همگام‌سازی همگام می‌کند.
+    """
+    try:
+        # اعتبارسنجی
+        if request.mode == "single":
+            if not request.article_id and not request.article_title:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="برای mode=single باید article_id یا article_title مشخص شود"
+                )
+        elif request.mode == "multiple":
+            if not request.article_ids and not request.article_titles:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="برای mode=multiple باید article_ids یا article_titles مشخص شود"
+                )
+        
+        # ایجاد job ID
+        import uuid
+        job_id = str(uuid.uuid4())
+        
+        # اضافه کردن به background tasks با sync logic
+        background_tasks.add_task(run_sync_job, job_id, request)
+
+        logger.info(f"Sync job {job_id} شروع شد توسط {current_admin.email}")
+
+        return ReindexResponse(
+            success=True,
+            message="عملیات همگام‌سازی در پس‌زمینه شروع شد",
+            task_id=job_id,
+            details={"mode": request.mode, "method": "sync_button"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"خطا در شروع server-side re-indexing: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطا در شروع عملیات: {str(e)}"
+        )
+
+
+async def run_sync_job(job_id: str, request: ReindexRequest):
+    """اجرای job همگام‌سازی با استفاده از دکمه همگام‌سازی در background"""
+    try:
+        reindex_jobs[job_id] = {
+            "status": "running",
+            "progress": 0,
+            "message": "در حال راه‌اندازی همگام‌سازی...",
+            "started_at": datetime.now().isoformat(),
+            "details": {"method": "sync_button"}
+        }
+        
+        # Import here to avoid circular dependency
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from app.core.config import settings
+        from app.infrastructure.connection_manager import weaviate_client
+        from app.infrastructure.markdown_parser import markdown_parser
+        
+        # اتصال به MongoDB
+        mongodb_client = AsyncIOMotorClient(settings.MONGODB_URL)
+        db = mongodb_client.get_database()
+        
+        reindex_jobs[job_id]["message"] = "اتصال به پایگاه‌های داده برقرار شد"
+        reindex_jobs[job_id]["progress"] = 10
+        
+        # مرحله 1: اطمینان از وجود Collection یکپارچه
+        reindex_jobs[job_id]["message"] = "آماده‌سازی Collection یکپارچه..."
+        logger.info(f"[Job {job_id}] آماده‌سازی Collection یکپارچه")
+
+        try:
+            from app.core.weaviate_utils import get_weaviate_collection_name
+
+            with weaviate_client() as client:
+                collection_name = get_weaviate_collection_name()
+
+                # اگر collection وجود نداشت، آن را ایجاد کن
+                if not client.collections.exists(collection_name):
+                    from app.core.weaviate_utils import create_unified_collection
+                    success = create_unified_collection()
+                    if not success:
+                        raise Exception("فشل در ایجاد Collection یکپارچه")
+
+                logger.info(f"[Job {job_id}] Collection یکپارچه آماده: {collection_name}")
+
+        except Exception as e:
+            logger.error(f"[Job {job_id}] خطا در آماده‌سازی Collection یکپارچه: {e}")
+            reindex_jobs[job_id]["status"] = "failed"
+            reindex_jobs[job_id]["message"] = f"خطا در آماده‌سازی Collection یکپارچه: {str(e)}"
+            return
+        
+        reindex_jobs[job_id]["progress"] = 20
+        
+        # مرحله 2: بازیابی مقالات (مانند قبل)
+        reindex_jobs[job_id]["message"] = "بازیابی مقالات از MongoDB..."
+        
+        query = {}
+        if request.mode == "single":
+            if request.article_id:
+                from bson import ObjectId
+                try:
+                    query["_id"] = ObjectId(request.article_id)
+                except:
+                    query["_id"] = request.article_id
+            elif request.article_title:
+                query["title"] = {"$regex": request.article_title, "$options": "i"}
+        elif request.mode == "multiple":
+            query["$or"] = []
+            if request.article_ids:
+                from bson import ObjectId
+                for aid in request.article_ids:
+                    try:
+                        query["$or"].append({"_id": ObjectId(aid)})
+                    except:
+                        query["$or"].append({"_id": aid})
+            if request.article_titles:
+                for title in request.article_titles:
+                    query["$or"].append({"title": {"$regex": title, "$options": "i"}})
+        
+        query["status"] = "published"
+        
+        articles_cursor = db.knowledge_base_articles.find(query)
+        articles = await articles_cursor.to_list(length=None)
+        
+        total_articles = len(articles)
+        logger.info(f"[Job {job_id}] {total_articles} مقاله پیدا شد")
+        
+        if total_articles == 0:
+            reindex_jobs[job_id]["status"] = "completed"
+            reindex_jobs[job_id]["message"] = "هیچ مقاله‌ای برای پردازش پیدا نشد"
+            reindex_jobs[job_id]["progress"] = 100
+            return
+        
+        reindex_jobs[job_id]["details"]["total_articles"] = total_articles
+        reindex_jobs[job_id]["progress"] = 30
+        
+        # مرحله 3: استفاده از دکمه همگام‌سازی برای همه مقالات (Server-Side)
+        successful = 0
+        failed = 0
+        total_chunks = 0
+
+        from app.infrastructure.knowledge_base_repository import KnowledgeBaseRepository
+        knowledge_base_repository = KnowledgeBaseRepository()
+
+        for idx, article in enumerate(articles, 1):
+            try:
+                article_id = str(article["_id"])
+                title = article.get("title", "بدون عنوان")
+
+                # بروزرسانی پیشرفت
+                progress = 30 + int((idx / total_articles) * 60)
+                reindex_jobs[job_id]["progress"] = progress
+                reindex_jobs[job_id]["message"] = f"همگام‌سازی {idx}/{total_articles}: {title[:50]}..."
+
+                logger.info(f"[Job {job_id}] همگام‌سازی [{idx}/{total_articles}]: {title}")
+
+                # ایجاد مقاله کلاس برای استفاده از متد دکمه همگام‌سازی
+                temp_article = KnowledgeBaseArticle(
+                    id=article_id,
+                    title=title,
+                    content_markdown=article.get("content_markdown", ""),
+                    content_html="",
+                    status="published",
+                    visibility=article.get("visibility", "public"),
+                    category=article.get("category"),
+                    tags=[],
+                    summary=article.get("summary"),
+                    author_id="reindex",
+                    version=1,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                    last_synced_at=None
+                )
+
+                # استفاده از متد دکمه همگام‌سازی (Server-Side پیش‌فرض)
+                try:
+                    await knowledge_base_repository._sync_to_weaviate(
+                        article=temp_article,
+                        operation="create"
+                    )
+                except Exception as sync_error:
+                    logger.error(f"[Job {job_id}] خطا در همگام‌سازی داخلی '{title}': {sync_error}")
+                    raise sync_error
+
+                # محاسبه chunks برای آمار
+                tree = markdown_parser.parse_to_tree(
+                    article.get("content_markdown", ""),
+                    article_id,
+                    article_title=title
+                )
+                nodes = tree.get_all_nodes()
+
+                total_chunks += len(nodes)
+                successful += 1
+                logger.info(f"[Job {job_id}] ✅ {len(nodes)} chunk همگام‌سازی شد")
+
+            except Exception as e:
+                logger.error(f"[Job {job_id}] خطا در همگام‌سازی '{title}': {e}")
+                failed += 1
+                continue
+        
+        # تکمیل
+        reindex_jobs[job_id]["status"] = "completed"
+        reindex_jobs[job_id]["progress"] = 100
+        reindex_jobs[job_id]["message"] = f"همگام‌سازی تکمیل شد! {successful} موفق، {failed} ناموفق"
+        reindex_jobs[job_id]["completed_at"] = datetime.now().isoformat()
+        reindex_jobs[job_id]["details"].update({
+            "successful": successful,
+            "failed": failed,
+            "total_chunks": total_chunks,
+            "method": "sync_button"
+        })
+
+        logger.info(f"[Job {job_id}] ✅ عملیات همگام‌سازی تکمیل شد")
+        
+        mongodb_client.close()
+        
+    except Exception as e:
+        logger.error(f"[Job {job_id}] ❌ خطای غیرمنتظره: {e}", exc_info=True)
+        reindex_jobs[job_id]["status"] = "failed"
+        reindex_jobs[job_id]["message"] = f"خطا: {str(e)}"
+        reindex_jobs[job_id]["progress"] = 0
+
 

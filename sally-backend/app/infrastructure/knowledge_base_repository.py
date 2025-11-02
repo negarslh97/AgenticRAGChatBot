@@ -101,11 +101,13 @@ class KnowledgeBaseRepository:
             logger.info(f"✅ مقاله '{title}' در MongoDB ذخیره شد - ID: {new_article.id}")
 
             # همگام‌سازی با Weaviate فقط برای مقالات منتشر شده
-            if status == ArticleStatus.PUBLISHED:
+            if status == ArticleStatus.PUBLISHED and settings.enable_weaviate_sync:
                 await self._sync_to_weaviate(new_article, "create")
-                logger.info(f"🔄 مقاله '{title}' به Weaviate منتقل شد (PUBLISHED)")
+                logger.info(f"🔄 مقاله '{title}' با دکمه همگام‌سازی به Weaviate منتقل شد (PUBLISHED)")
             else:
                 logger.info(f"ℹ️ مقاله '{title}' در وضعیت {status} است - به Weaviate منتقل نشد")
+                if not settings.enable_weaviate_sync:
+                    logger.info(f"⚠️ Weaviate sync is disabled in configuration")
 
             return new_article
 
@@ -202,13 +204,16 @@ class KnowledgeBaseRepository:
             logger.info(f"✅ مقاله '{article.title}' بروزرسانی شد - نسخه: {article.version}")
 
             # همگام‌سازی با Weaviate فقط برای مقالات منتشر شده
-            if article.status == ArticleStatus.PUBLISHED:
+            if article.status == ArticleStatus.PUBLISHED and settings.enable_weaviate_sync:
                 await self._sync_to_weaviate(article, "update")
-                logger.info(f"🔄 مقاله '{article.title}' در Weaviate بروزرسانی شد")
+                logger.info(f"🔄 مقاله '{article.title}' با دکمه همگام‌سازی در Weaviate بروزرسانی شد")
             else:
                 # اگر مقاله از PUBLISHED به غیر PUBLISHED تغییر کرد، از Weaviate حذف شود
-                await self._sync_to_weaviate(article, "delete")
-                logger.info(f"🗑️ مقاله '{article.title}' از Weaviate حذف شد (وضعیت: {article.status})")
+                if settings.enable_weaviate_sync:
+                    await self._sync_to_weaviate(article, "delete")
+                    logger.info(f"🗑️ مقاله '{article.title}' با دکمه همگام‌سازی از Weaviate حذف شد (وضعیت: {article.status})")
+                else:
+                    logger.info(f"⚠️ Weaviate sync is disabled - skipping delete operation for '{article.title}'")
 
             return article
 
@@ -268,7 +273,11 @@ class KnowledgeBaseRepository:
                 return False
 
             # ✅ حذف از Weaviate (قبلاً کد تکراری بود، حالا فقط یکبار فراخوانی می‌شود)
-            await self._sync_to_weaviate(article, "delete")
+            if settings.enable_weaviate_sync:
+                await self._sync_to_weaviate(article, "delete")
+                logger.info(f"🗑️ مقاله '{article.title}' با دکمه همگام‌سازی از Weaviate حذف شد")
+            else:
+                logger.info(f"⚠️ Weaviate sync is disabled - skipping delete operation for '{article.title}'")
 
             # حذف از MongoDB
             await article.delete()
@@ -302,10 +311,11 @@ class KnowledgeBaseRepository:
             لیست نتایج جستجو با امتیاز
         """
         try:
-            # ابتدا جستجو در Weaviate اگر فعال باشد
-            weaviate_results = await self._search_weaviate(query, visibility_filter, category_id, limit)
-            if weaviate_results:
-                return weaviate_results
+            # اگر Weaviate sync فعال است، ابتدا جستجو در Weaviate انجام شود
+            if settings.enable_weaviate_sync:
+                weaviate_results = await self._search_weaviate(query, visibility_filter, category_id, limit)
+                if weaviate_results:
+                    return weaviate_results
 
             # fallback به جستجوی ساده MongoDB
             return await self._search_mongodb(query, visibility_filter, category_id, limit)
@@ -321,22 +331,22 @@ class KnowledgeBaseRepository:
         category_id: Optional[str] = None,
         limit: int = 20
     ) -> List[Dict[str, Any]]:
-        """جستجو در Weaviate با استفاده از Server-Side Vectorization (near_text)"""
+        """جستجو در Weaviate با استفاده از دکمه همگام‌سازی (Server-Side Vectorization)"""
         try:
             from app.infrastructure.connection_manager import weaviate_client
             from app.core.weaviate_utils import get_weaviate_collection_name
 
-            # تعیین collection بر اساس مدل embedder
+            # استفاده از collection یکپارچه
             collection_name = get_weaviate_collection_name()
 
-            logger.info(f"🔍 جستجو در collection: {collection_name} با استفاده از near_text")
+            logger.info(f"🔍 جستجو در collection: {collection_name} با استفاده از دکمه همگام‌سازی")
 
             with weaviate_client() as client:
                 collection = client.collections.get(collection_name)
 
-                # ✅ استفاده از near_text - Weaviate خودش query را به بردار تبدیل می‌کند
+                # استفاده از Server-Side Vectorization (دکمه همگام‌سازی)
                 search_response = collection.query.near_text(
-                    query=query,  # فقط متن خام را ارسال کنید
+                    query=query,
                     limit=limit,
                     return_metadata=['distance', 'certainty']
                 )
@@ -359,14 +369,13 @@ class KnowledgeBaseRepository:
                         "title": obj.properties.get("title", ""),
                         "summary": obj.properties.get("content", "")[:200],
                         "score": certainty,
-                        "source": "weaviate"
+                        "source": "weaviate_sync_button"
                     })
 
                 return processed_results
-            # ✅ client به صورت خودکار بسته می‌شود
 
         except Exception as e:
-            logger.error(f"❌ خطا در جستجوی Weaviate با near_text: {str(e)}")
+            logger.error(f"❌ خطا در جستجوی Weaviate با دکمه همگام‌سازی: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             raise WeaviateError(f"خطا در جستجوی Weaviate: {e}", {"query": query}) from e
@@ -543,6 +552,11 @@ class KnowledgeBaseRepository:
             logger.info(f"🔍 بررسی چندین مقاله در collection: {collection_name}")
 
             with weaviate_client() as client:
+                # Check if collection exists first
+                if not client.collections.exists(collection_name):
+                    logger.warning(f"⚠️ Collection '{collection_name}' does not exist - all articles marked as not synced")
+                    return result
+
                 collection = client.collections.get(collection_name)
 
                 # 🔍 دیباگ: بررسی وضعیت collection قبل از query
@@ -579,25 +593,38 @@ class KnowledgeBaseRepository:
         operation: str
     ) -> None:
         """
-        همگام‌سازی مقاله با Weaviate با استراتژی ساده "حذف و ایجاد مجدد".
-        این متد از Server-Side Vectorization استفاده می‌کند.
+        همگام‌سازی مقاله با Weaviate با استفاده از دکمه همگام‌سازی (Server-Side Vectorization)
+
+        این متد embedding ها را به Weaviate واگذار می‌کند و فقط properties ارسال می‌کند.
 
         Args:
             article: مقاله برای همگام‌سازی
             operation: نوع عملیات (create/update/delete)
         """
+        # Check if Weaviate sync is enabled
+        if not settings.enable_weaviate_sync:
+            logger.info(f"⚠️ Weaviate sync is disabled - skipping sync operation for '{article.title}'")
+            return
+
         try:
             from app.infrastructure.connection_manager import weaviate_client
-            from app.core.config import settings
             from app.infrastructure.markdown_parser import markdown_parser
             from weaviate.classes.query import Filter
-
-            # تعیین collection بر اساس مدل embedder
             from app.core.weaviate_utils import get_weaviate_collection_name
+
+            # استفاده از collection یکپارچه
             collection_name = get_weaviate_collection_name()
-            logger.info(f"🔄 همگام‌سازی مقاله '{article.title}' با collection: {collection_name}")
+            logger.info(f"🔄 همگام‌سازی مقاله '{article.title}' با دکمه همگام‌سازی - Collection: {collection_name}")
 
             with weaviate_client() as client:
+                # اطمینان از وجود collection یکپارچه
+                if not client.collections.exists(collection_name):
+                    from app.core.weaviate_utils import create_unified_collection
+                    logger.info(f"📦 ایجاد Collection یکپارچه: {collection_name}")
+                    success = create_unified_collection()
+                    if not success:
+                        raise Exception("فشل در ایجاد Collection یکپارچه")
+
                 collection = client.collections.get(collection_name)
 
                 # 1. همیشه گره‌های قدیمی این مقاله را حذف کن (برای create و update)
@@ -615,7 +642,6 @@ class KnowledgeBaseRepository:
                     logger.info(f"🗑️ گره‌های مقاله '{article.title}' از {collection_name} حذف شدند.")
 
                     # برای عملیات delete، last_synced_at را ریست نکنید
-                    # چون مقاله ممکن است دوباره منتشر شود
                     return
 
                 # 3. اگر مقاله منتشر شده است، گره‌های جدید را اضافه کن
@@ -624,14 +650,18 @@ class KnowledgeBaseRepository:
                     return
 
                 # پارس کردن محتوای جدید
-                tree = markdown_parser.parse_to_tree(article.content_markdown, str(article.id))
+                tree = markdown_parser.parse_to_tree(
+                    article.content_markdown,
+                    str(article.id),
+                    article_title=article.title
+                )
                 all_nodes = tree.get_all_nodes()
 
                 if not all_nodes:
                     logger.warning(f"⚠️ مقاله '{article.title}' ساختار Markdown قابل پارسی نداشت.")
                     return
 
-                # ✅ استفاده از روش individual insert بجای batch برای جلوگیری از خطای nil pointer
+                # استفاده از دکمه همگام‌سازی (Server-Side Vectorization)
                 saved_count = 0
                 failed_count = 0
 
@@ -645,9 +675,10 @@ class KnowledgeBaseRepository:
                             failed_count += 1
                             continue
 
-                        # ارسال individual به Weaviate
+                        # Server-Side Vectorization: فقط properties ارسال می‌شود
                         uuid = collection.data.insert(properties=properties)
-                        logger.debug(f"✅ گره '{properties.get('title', '')}' با UUID {uuid} ذخیره شد")
+                        logger.debug(f"✅ گره '{properties.get('title', '')}' با دکمه همگام‌سازی ذخیره شد")
+
                         saved_count += 1
 
                     except Exception as node_error:
@@ -655,14 +686,7 @@ class KnowledgeBaseRepository:
                         failed_count += 1
                         continue
 
-                logger.info(f"✅ {saved_count} گره با موفقیت ذخیره شد، {failed_count} گره ناموفق بود")
-
-                # بررسی تعداد گره‌های اضافه شده به batch
-                try:
-                    # اگر batch خالی است، چیزی ذخیره نشده
-                    logger.info(f"✅ {len(all_nodes)} گره برای مقاله '{article.title}' پردازش شد و به batch اضافه شد.")
-                except Exception as batch_info_error:
-                    logger.warning(f"⚠️ نمی‌توان اطلاعات batch را دریافت کرد: {str(batch_info_error)}")
+                logger.info(f"✅ {saved_count} گره با دکمه همگام‌سازی ذخیره شد، {failed_count} گره ناموفق بود")
 
                 # ✅ ثبت تاریخ همگام‌سازی موفق در MongoDB
                 article.last_synced_at = datetime.utcnow()
@@ -671,8 +695,8 @@ class KnowledgeBaseRepository:
 
         except Exception as e:
             logger.error(f"❌ خطا در همگام‌سازی با Weaviate: {str(e)}")
-            # برای جلوگیری از شکست کل عملیات، خطا را raise نکنید
-            # اما خطا را log کنیم تا قابل پیگیری باشد
+            # خطا را دوباره پرتاب کن تا عملیات بالادستی متوجه شکست شود
+            raise e
 
 
 
@@ -692,6 +716,8 @@ class KnowledgeBaseRepository:
             دیکشنری properties با مقادیر معتبر
         """
         # اطمینان از اینکه همه مقادیر معتبر هستند و None نیستند
+        embedder_model = settings.embedder_model_loaded
+
         return {
             "node_id": str(node.id) if node.id is not None else "",
             "article_id": str(article.id) if article.id else "",
@@ -702,7 +728,7 @@ class KnowledgeBaseRepository:
             "path": str(node.path) if node.path is not None else "",
             "order": int(node.order) if node.order is not None else 0,
             "full_content": str(article.content_markdown) if article.content_markdown else "",
-            "embedder_model": settings.embedder_model_loaded or "text-embedding-3-small"
+            "embedder_model": embedder_model
         }
 
     # =============== STATISTICS ===============

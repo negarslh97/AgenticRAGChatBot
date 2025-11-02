@@ -437,7 +437,11 @@ async def get_article(
     markdown_tree = None
     try:
         from app.infrastructure.markdown_parser import markdown_parser
-        tree = markdown_parser.parse_to_tree(article.content_markdown, str(article.id))
+        tree = markdown_parser.parse_to_tree(
+            article.content_markdown,
+            str(article.id),
+            article_title=article.title
+        )
 
         if tree.get_all_nodes():
             # تبدیل به response format
@@ -1063,8 +1067,20 @@ async def get_weaviate_contents(
 
         # Get collection using dynamic name
         collection_name = get_weaviate_collection_name()
+
+        # Check if collection exists
+        if not weaviate_connector.weaviate_client.collections.exists(collection_name):
+            return {
+                "total_nodes": 0,
+                "returned_nodes": 0,
+                "articles_count": 0,
+                "articles": [],
+                "nodes": [],
+                "error": f"Collection '{collection_name}' does not exist. Please create it first."
+            }
+
         collection = weaviate_connector.weaviate_client.collections.get(collection_name)
-        
+
         # Query all objects with limit
         response = collection.query.fetch_objects(limit=limit)
         

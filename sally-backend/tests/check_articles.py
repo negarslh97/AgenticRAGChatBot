@@ -20,7 +20,7 @@ async def check_articles():
     print("=" * 80)
     
     # اتصال
-    client = AsyncIOMotorClient(settings.database_url)
+    client = AsyncIOMotorClient(settings.MONGODB_URL)
     db = client.get_database()
     
     # شمارش کل مقالات (بدون فیلتر)

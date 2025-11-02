@@ -19,10 +19,10 @@ async def check_structure():
     print("[INFO] Checking MongoDB Structure")
     print("=" * 80)
     
-    print(f"\n[CONFIG] Connection URL: {settings.database_url}")
-    
+    print(f"\n[CONFIG] Connection URL: {settings.MONGODB_URL}")
+
     # اتصال
-    client = AsyncIOMotorClient(settings.database_url)
+    client = AsyncIOMotorClient(settings.MONGODB_URL)
     
     # لیست تمام databases
     print("\n[DATABASES] Available databases:")

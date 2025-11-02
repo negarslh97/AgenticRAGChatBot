@@ -40,8 +40,8 @@ async def test_mongodb_connection():
     logger.info("=" * 80)
     
     try:
-        logger.info(f"🔗 Connecting to: {settings.database_url}")
-        client = AsyncIOMotorClient(settings.database_url)
+        logger.info(f"🔗 Connecting to: {settings.MONGODB_URL}")
+        client = AsyncIOMotorClient(settings.MONGODB_URL)
         db = client.get_database()
         
         # شمارش مقالات

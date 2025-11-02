@@ -184,7 +184,7 @@ class MongoDBConnectionManager:
             
             # استفاده از connection pooling settings
             self._client = AsyncIOMotorClient(
-                settings.database_url,
+                settings.MONGODB_URL,
                 maxPoolSize=50,  # تعداد حداکثر اتصالات همزمان
                 minPoolSize=10,  # تعداد حداقل اتصالات
                 maxIdleTimeMS=45000,  # زمان بیکاری قبل از بستن

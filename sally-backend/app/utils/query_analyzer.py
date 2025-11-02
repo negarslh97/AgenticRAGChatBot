@@ -6,8 +6,9 @@ Query Analyzer - تحلیلگر هوشمند سوالات
 import re
 import logging
 import time
+import json
 from enum import Enum
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from async_lru import alru_cache
 from pydantic import BaseModel, Field
 from app.infrastructure.langchain_utils import langchain_service
@@ -135,7 +136,7 @@ class QueryAnalyzer:
         return re.sub(r'\s+', ' ', query.strip().lower())
 
     @alru_cache(maxsize=1000)
-    async def analyze(self, query: str, conversation_history: Optional[list] = None) -> QueryAnalysisResult:
+    async def analyze(self, query: str, conversation_history: Optional[Tuple] = None) -> QueryAnalysisResult:
         """
         تحلیل جامع سوال کاربر با استفاده از LLM تک‌مرحله‌ای
 
@@ -172,34 +173,39 @@ class QueryAnalyzer:
 
             self.stats["llm_calls"] += 1
 
-            # پاکسازی پاسخ JSON - بهبود استخراج JSON از پاسخ
-            import json
-            import re
-
-            # ابتدا تلاش برای استخراج JSON کامل
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                try:
-                    result_dict = json.loads(json_str)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON decode error: {e}, trying to fix...")
-                    # اگر JSON نامعتبر بود، تلاش برای پاکسازی
-                    json_str = re.sub(r'[^\x00-\x7F]+', '', json_str)  # حذف کاراکترهای غیر ASCII
-                    json_str = re.sub(r',\s*}', '}', json_str)  # حذف کاماهای اضافی
-                    json_str = re.sub(r',\s*]', ']', json_str)
-                    # پاکسازی نقل قول‌های اضافی
-                    json_str = re.sub(r'""(\w+)""', r'"\1"', json_str)
-                    json_str = re.sub(r'"(\w+)":', r'"\1":', json_str)
-                    try:
-                        result_dict = json.loads(json_str)
-                    except json.JSONDecodeError:
-                        logger.error(f"Failed to parse JSON even after cleanup: {json_str}")
-                        raise ValueError(f"Invalid JSON response: {json_str}")
+            # =======================================================
+            # ✅✅✅ اصلاح اصلی: منطق استخراج JSON بسیار قوی‌تر
+            # =======================================================
+            json_str = ""
+            # ابتدا تلاش برای استخراج JSON از داخل بلوک‌های کد (```json ... ```)
+            match = re.search(r'```json\s*(\{.*?\})\s*```', response, re.DOTALL)
+            if match:
+                json_str = match.group(1)
             else:
-                # اگر JSON پیدا نشد، از fallback استفاده کن
-                logger.error(f"No JSON found in response: {response}")
-                raise ValueError("No JSON found in response")
+                # اگر بلوک کد نبود، به دنبال اولین '{' و آخرین '}' بگرد
+                start = response.find('{')
+                end = response.rfind('}')
+                if start != -1 and end != -1:
+                    json_str = response[start:end+1]
+
+            if not json_str:
+                logger.error(f"No JSON object found in LLM response: {response}")
+                raise ValueError("No JSON object could be extracted from the response.")
+
+            try:
+                # تلاش برای پارس کردن JSON استخراج شده
+                result_dict = json.loads(json_str)
+            except json.JSONDecodeError:
+                logger.warning(f"Initial JSON parse failed. Attempting to repair: {json_str}")
+                # اگر JSON ناقص بود، سعی کن آن را کامل کنی
+                try:
+                    from json_repair import repair_json
+                    result_dict = repair_json(json_str, return_objects=True)
+                    logger.info("✅ JSON successfully repaired.")
+                except Exception as repair_exc:
+                    logger.error(f"Failed to parse or repair JSON: {repair_exc}")
+                    raise ValueError(f"Invalid and unrepairable JSON response: {json_str}")
+            # =======================================================
 
             # اطمینان از مقادیر معتبر
             if result_dict.get('intent') not in [e.value for e in QueryIntent]:
@@ -221,6 +227,16 @@ class QueryAnalyzer:
             result_dict.setdefault('keywords', [])
             result_dict.setdefault('confidence', 0.8)
             result_dict.setdefault('reason', 'تحلیل تک‌مرحله‌ای LLM')
+
+            # ⭐️⭐️⭐️ اصلاح اصلی: فیلد analysis را با نتایج تحلیل regex پر کن ⭐️⭐️⭐️
+            normalized_query = self._normalize_query(query)
+            complexity_analysis = self._analyze_complexity(normalized_query)
+            type_analysis = self._analyze_type(normalized_query)
+
+            result_dict['analysis'] = {
+                "complexity": complexity_analysis,
+                "type": type_analysis
+            }
 
             result = QueryAnalysisResult(**result_dict)
 

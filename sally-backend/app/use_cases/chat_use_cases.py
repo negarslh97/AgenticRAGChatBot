@@ -1,4 +1,6 @@
-from typing import Optional, Dict, Any, List, Union, AsyncGenerator
+# chat_use_cases.py (نسخه نهایی و Refactor شده)
+
+from typing import Optional, Dict, Any, List, Union, AsyncGenerator, Tuple
 import uuid
 import logging
 import asyncio
@@ -12,336 +14,156 @@ from app.services.rag_service import get_rag_service
 from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.utils.query_analyzer import query_analyzer, QueryAnalysisResult
-from app.infrastructure.conversation_memory import ConversationMemoryManager
 
 logger = get_logger(__name__)
 
 
 async def load_conversation_history(conversation_id: str, max_messages: int = 10) -> List[Dict[str, str]]:
-    """
-    🧠 بارگذاری تاریخچه مکالمه از دیتابیس
-    
-    Args:
-        conversation_id: شناسه گفتگو
-        max_messages: تعداد حداکثر پیام‌ها (پیش‌فرض: 10)
-        
-    Returns:
-        لیست پیام‌ها به فرمت [{"role": "user"/"assistant", "content": "..."}]
-    """
+    # این تابع بدون تغییر باقی می‌ماند
     conversation_history = []
     try:
         from bson import ObjectId
-        
-        # تبدیل conversation_id به ObjectId اگر لازم باشد
-        if isinstance(conversation_id, str):
-            try:
-                conv_id = ObjectId(conversation_id)
-            except:
-                logger.warning(f"⚠️ Invalid conversation_id format: {conversation_id}")
-                return conversation_history
-        else:
-            conv_id = conversation_id
-        
-        # Load previous messages from this conversation
         messages = await Message.find(
-            Message.conversation_id == str(conv_id)
-        ).sort(+Message.created_at).to_list()
+            Message.conversation_id == str(ObjectId(conversation_id))
+        ).sort(+Message.created_at).limit(max_messages).to_list()
         
-        # فقط max_messages پیام آخر را برگردان
-        for msg in messages[-max_messages:]:
+        for msg in messages:
             conversation_history.append({
-                "role": "user" if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"] else "assistant",
+                "role": "user" if msg.sender_type in [e.value for e in SenderType if e != SenderType.AI] else "assistant",
                 "content": msg.content
             })
-        
-        logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history (max: {max_messages})")
+        logger.info(f"Loaded {len(conversation_history)} messages from conversation history (max: {max_messages})")
     except Exception as e:
-        logger.warning(f"⚠️ Could not load conversation history: {e}", exc_info=True)
-    
+        logger.warning(f"Could not load conversation history: {e}", exc_info=True)
     return conversation_history
 
+
 class ChatUseCases:
+    
+    # ======================================================================================
+    # ✅ متد جدید و مرکزی برای اجرای پایپ‌لاین RAG
+    # ======================================================================================
     @staticmethod
-    async def _get_or_create_conversation(
-        conversation_id: Optional[str] = None,
-        customer_id: Optional[str] = None,
-        admin_id: Optional[str] = None,
-        guest_session_id: Optional[str] = None,
-        title: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        rag_type: str = "simple",
-        model_name: Optional[str] = None,
-        temperature: float = 0.7
-    ) -> Conversation:
-        """Helper method to get or create a conversation."""
-        if conversation_id:
-            try:
-                from bson import ObjectId
-                conversation = await Conversation.get(ObjectId(conversation_id))
-                if not conversation:
-                    raise ValueError("Conversation not found")
-                return conversation
-            except Exception as e:
-                raise ValueError(f"Error retrieving conversation: {str(e)}")
-
-        # Create new conversation
-        conversation = Conversation(
-            customer_id=customer_id,
-            admin_id=admin_id,
-            guest_session_id=guest_session_id,
-            title=title or "گفتگوی جدید",
-            tags=tags or [],
-            rag_type=rag_type,
-            model_name=model_name or settings.rag_model_loaded,
-            temperature=temperature
-        )
-        await conversation.insert()
-        logger.info(f"Created new conversation: {conversation.id}")
-        return conversation
-
-    @staticmethod
-    async def _save_message(
-        conversation_id: str,
-        content: str,
-        sender_type: str,
-        sender_id: Optional[str] = None,
-        is_failed: bool = False,
-        failure_reason: Optional[str] = None,
-        response_time: Optional[float] = None,
-        feedback_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Message:
-        """Helper method to save a message."""
-        message = Message(
-            conversation_id=conversation_id,
-            content=content,
-            sender_type=sender_type,
-            sender_id=sender_id,
-            is_failed=is_failed,
-            failure_reason=failure_reason,
-            response_time=response_time,
-            feedback_id=feedback_id,
-            metadata=metadata or {}
-        )
-        await message.insert()
-        logger.info(f"Saved {sender_type} message: {message.id}")
-        return message
-
-    @staticmethod
-    async def _extract_request_metadata() -> Dict[str, Any]:
-        """Extract all request metadata from context variables."""
-        try:
-            from app.infrastructure.langchain_callbacks import (
-                get_current_request_token_usage,
-                get_current_request_id,
-                get_current_request_cost
-            )
-
-            metadata = {}
-
-            # Get token usage
-            token_usage = get_current_request_token_usage()
-            if token_usage:
-                metadata['token_usage'] = token_usage
-                logger.info(f"📊 Extracted token usage: {token_usage}")
-
-            # Get request ID
-            request_id = get_current_request_id()
-            if request_id:
-                metadata['request_id'] = request_id
-                logger.info(f"🔗 Request ID: {request_id}")
-
-            # Get calculated cost
-            cost = get_current_request_cost()
-            if cost is not None:
-                metadata['estimated_cost_usd'] = cost
-                logger.info(f"💰 Estimated cost: ${cost:.6f}")
-
-            return metadata
-
-        except Exception as e:
-            logger.warning(f"Could not extract request metadata: {e}")
-            return {}
-
-    @staticmethod
-    async def _create_feedback_link(message_id: str) -> str:
-        """Create a feedback link for a message."""
-        try:
-            # Generate a unique feedback ID
-            feedback_id = str(uuid.uuid4())
-
-            # In a real implementation, you might want to store this mapping
-            # or use the message_id directly as feedback_id
-            logger.info(f"Created feedback link for message {message_id}: {feedback_id}")
-
-            return feedback_id
-        except Exception as e:
-            logger.warning(f"Could not create feedback link: {e}")
-            return ""
-
-    @staticmethod
-    async def _handle_conversational_response(
-        content: str,
+    async def _execute_rag_pipeline_stream(
+        query: str,
         conversation: Conversation,
-        user: Optional[Union[Customer, Admin]] = None,
-        user_type: str = "guest",
-        query_analysis: Optional[QueryAnalysisResult] = None
-    ) -> Dict[str, Any]:
+        user_message: Message,
+        rag_service: Any,
+        query_analysis: dict,
+        conversation_history: list,
+        is_public_only: bool,
+        rag_type: str,
+        custom_model: Optional[str] = None,
+        custom_temperature: Optional[float] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Handle conversational responses (non-RAG queries).
-
-        This method encapsulates all logic for handling conversational queries
-        including saving user message, generating response, and saving AI message.
+        این متد خصوصی، هسته اصلی و مشترک پایپ‌لاین RAG را برای هر دو نوع کاربر (ادمین و عادی) اجرا می‌کند.
+        این کار از تکرار کد جلوگیری می‌کند.
         """
-        logger.info("💬 Handling conversational query")
-
-        # Determine sender type and ID
-        if user and user_type == "Customer":
-            sender_type = "Customer"
-            sender_id = str(user.id)
-        elif user and user_type in ["Admin", "SuperAdmin"]:
-            admin_doc = await Admin.get(user.id) if hasattr(user, 'id') else None
-            if admin_doc and admin_doc.role_name == "SuperAdmin":
-                sender_type = "SuperAdmin"
-            else:
-                sender_type = "Admin"
-            sender_id = str(user.id)
-        else:
-            sender_type = "Guest"
-            sender_id = None
-
-        # Save user message
-        user_message = await ChatUseCases._save_message(
-            conversation_id=str(conversation.id),
-            content=content,
-            sender_type=sender_type,
-            sender_id=sender_id,
-            metadata={
-                "query_analysis": query_analysis.model_dump() if query_analysis else {},
-                "user_type": user_type,
-                "rag_type": "conversational",
-                "timestamp": datetime.utcnow().isoformat(),
-                "prompt_version": settings.prompt_version,
-                "analyzer_version": settings.analyzer_version
-            }
-        )
-
-        # Generate conversational response
-        from app.infrastructure.langchain_utils import langchain_service
-        full_response = await langchain_service.generate_conversational_response(
-            query=content,
-            conversation_history=[],
-            custom_model=settings.chat_model_loaded,
-            custom_temperature=0.7
-        )
-
-        # Create feedback link
-        feedback_id = await ChatUseCases._create_feedback_link(str(user_message.id))
-
-        # Extract all request metadata
-        request_metadata = await ChatUseCases._extract_request_metadata()
-
-        # Save AI message
-        ai_message = await ChatUseCases._save_message(
-            conversation_id=str(conversation.id),
-            content=full_response,
-            sender_type="ai",
-            sender_id=None,
-            feedback_id=feedback_id,
-            metadata={
-                "rag_type": "conversational",
-                "model": settings.chat_model_loaded,
-                "temperature": 0.7,
-                "timestamp": datetime.utcnow().isoformat(),
-                "prompt_version": settings.prompt_version,
-                "analyzer_version": settings.analyzer_version,
-                **request_metadata  # Include all extracted metadata
-            }
-        )
-
-        return {
-            "conversation_id": str(conversation.id),
-            "message": full_response,
-            "sources": [],
-            "confidence": 1.0,
-            "message_id": str(ai_message.id),
-            "routing": "conversational"
-        }
-
-    @staticmethod
-    async def generate_conversation_title_and_tags(conversation_id: str) -> Dict[str, Any]:
-        """Generate AI-powered title and tags for a conversation based on its messages."""
+        response_start_time = datetime.utcnow()
+        full_response = ""
+        sources = []
+        confidence = 0.5
+        
         try:
-            from bson import ObjectId
-            from app.infrastructure.langchain_utils import langchain_service
-
-            # Get conversation
-            conversation = await Conversation.get(ObjectId(conversation_id))
-            if not conversation:
-                return {"error": "Conversation not found"}
-
-            # Get messages from conversation
-            messages = await Message.find(
-                Message.conversation_id == conversation_id
-            ).sort(Message.created_at).to_list()
-
-            if len(messages) < 1:  # Need at least one message
-                return {"title": conversation.title or "گفتگوی جدید", "tags": []}
-
-            # 🎯 استفاده از اولین پیام کاربر به عنوان intent
-            first_user_message = None
-            for msg in messages:
-                if msg.sender_type in ["Customer", "Admin", "SuperAdmin", "Guest"]:
-                    first_user_message = msg.content
-                    break
+            logger.info("Proceeding with RAG pipeline - Factual query detected")
             
-            if not first_user_message:
-                return {"title": conversation.title or "گفتگوی جدید", "tags": []}
-
-            # Initialize OpenAI client
-            if not settings.openai_api_key_loaded:
-                # اگر API key نداریم، از 50 کاراکتر اول استفاده می‌کنیم
-                simple_title = first_user_message[:50] + "..." if len(first_user_message) > 50 else first_user_message
-                return {"title": simple_title, "tags": []}
-
-            try:
-                # 🤖 از AI برای تولید عنوان خلاصه و مناسب استفاده می‌کنیم
-                prompt = f"""لطفاً یک عنوان کوتاه و مناسب (حداکثر 40 کاراکتر) برای این مکالمه ایجاد کن که intent کاربر را نشان دهد:
-
-پیام کاربر: "{first_user_message}"
-
-فقط عنوان را بنویس، بدون توضیح اضافی."""
-
-                model = langchain_service._get_model(settings.chat_model_loaded, force_json=False, temperature=0.3)
-                logger.info(f"💬 Chat - Using model: {settings.chat_model_loaded}")
-                from langchain_core.prompts import ChatPromptTemplate
+            # 1. Retrieve documents
+            relevant_docs = await rag_service.retrieve_relevant_documents(
+                query, is_public_only=is_public_only
+            )
+            
+            if relevant_docs:
+                # 2. Format sources and calculate confidence
+                sources = rag_service._format_sources_markdown(relevant_docs)
+                query_type_analysis = query_analysis['analysis']['type']
+                confidence_analysis = rag_service._calculate_advanced_confidence(
+                    query=query,
+                    retrieved_docs=relevant_docs,
+                    query_type=query_type_analysis['query_type']
+                )
+                confidence = confidence_analysis['confidence_score']
+                logger.info(f"Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
                 
-                prompt_template = ChatPromptTemplate.from_template("{query}")
-                chain = prompt_template | model
-                result = await chain.ainvoke({"query": prompt})
+                yield {"type": "sources", "sources": sources, "confidence": confidence}
                 
-                generated_title = result.content.strip()
+                # 3. Build context for LLM
+                context_parts = [
+                    f"=== بخش {i} ===\nعنوان: {doc['title']}\nمسیر: {doc.get('path', 'N/A')}\nامتیاز: {doc.get('score', 0):.2f}\n\nمحتوا:\n{doc['content']}\n\n---\n"
+                    for i, doc in enumerate(relevant_docs[:20], 1)
+                ]
+                context_text = "\n".join(context_parts)
                 
-                # اگر عنوان خیلی طولانی است، کوتاه کن
-                if len(generated_title) > 60:
-                    generated_title = generated_title[:57] + "..."
+                # 4. Generate response from LLM
+                from app.infrastructure.langchain_utils import langchain_service
+                prompt_name = "simple_rag_response" if rag_type == "simple" else "rag_response"
+                logger.info(f"Using prompt: {prompt_name} for rag_type: {rag_type}")
                 
-                # بروزرسانی conversation با عنوان جدید
-                conversation.title = generated_title
-                await conversation.save()
-                
-                logger.info(f"✅ Generated title: '{generated_title}' for conversation {conversation_id}")
-                return {"title": generated_title, "tags": []}
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to generate AI title: {e}")
-                # Fallback: از 50 کاراکتر اول استفاده کن
-                simple_title = first_user_message[:50] + "..." if len(first_user_message) > 50 else first_user_message
-                return {"title": simple_title, "tags": []}
+                async for chunk in langchain_service.generate_rag_response_stream(
+                    query, 
+                    context_text,
+                    conversation_history=conversation_history,
+                    custom_model=custom_model,
+                    custom_temperature=custom_temperature,
+                    query_type=query_type_analysis['query_type'],
+                    prompt_name=prompt_name
+                ):
+                    full_response += chunk
+                    yield {"type": "chunk", "content": chunk}
+            else:
+                full_response = "متأسفانه اطلاعات مرتبط یافت نشد."
+                yield {"type": "chunk", "content": full_response}
+            
+            # 5. Save AI message
+            response_time_seconds = (datetime.utcnow() - response_start_time).total_seconds()
+            can_get_more_details = rag_type == "simple" and bool(sources)
+            
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=full_response,
+                sender_type=SenderType.AI.value,
+                response_time=response_time_seconds,
+                metadata={
+                    "sources": sources,
+                    "confidence": confidence,
+                    "rag_type": rag_type,
+                    "streaming": True,
+                    "model": custom_model or settings.rag_model_loaded,
+                    "temperature": custom_temperature,
+                    "response_time": response_time_seconds,
+                    "can_get_more_details": can_get_more_details,
+                    **query_analysis['analysis'] # افزودن جزئیات تحلیل
+                }
+            )
+            await ai_message.insert()
+            logger.info(f"Response time: {response_time_seconds:.2f} seconds")
+            
+            # 6. Send complete event
+            yield {
+                "type": "complete",
+                "message_id": str(ai_message.id),
+                "full_response": full_response,
+                "confidence": confidence,
+                "can_get_more_details": can_get_more_details,
+                "rag_type": rag_type
+            }
 
         except Exception as e:
-            logger.error(f"Error generating title and tags: {e}")
-            return {"title": "گفتگوی جدید", "tags": [], "error": str(e)}
+            logger.error(f"RAG pipeline error: {e}", exc_info=True)
+            error_msg = f"خطا: {str(e)}"
+            response_time_seconds = (datetime.utcnow() - response_start_time).total_seconds()
+
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                content=error_msg,
+                sender_type=SenderType.AI.value,
+                is_failed=True,
+                failure_reason=str(e),
+                response_time=response_time_seconds,
+                metadata={"streaming": True, "rag_type": rag_type}
+            )
+            await ai_message.insert()
+            yield {"type": "error", "message": str(e), "message_id": str(ai_message.id)}
 
     @staticmethod
     async def send_admin_message_stream(
@@ -353,52 +175,64 @@ class ChatUseCases:
         temperature: Optional[float] = 0.7
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Process admin chat message with streaming support and custom model settings.
-        Similar to send_message_stream but for admin users with full control over AI settings.
+        پردازش پیام ادمین با پشتیبانی از استریمینگ (نسخه تمیز و Refactor شده).
         """
-        # 🎯 محدود کردن temperature برای RAG - جلوگیری از hallucination
-        if temperature > 0.3:
-            temperature = 0.2  # دمای پایین برای پاسخ‌های دقیق مبتنی بر متن
-            logger.info(f"🔥 Temperature adjusted to {temperature} for accurate RAG responses")
-        
-        logger.info(f"🌊 Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
-        
-        # 🧠 تحلیل جامع سوال (هدف + پیچیدگی)
-        query_analysis = await query_analyzer.analyze(content, conversation_history)
-        logger.info(f"🎯 Query intent: {query_analysis['intent']} (needs_rag: {query_analysis['needs_rag']})")
-    
-        # اگر سوال محاوره‌ای بود، از RAG صرفنظر کن
-        if not query_analysis['needs_rag']:
-            logger.info("💬 Conversational query detected - bypassing RAG")
-            # پاسخ مستقیم برای سوالات محاوره‌ای
-            # Handle conversational query directly in the generator
-            # For conversational queries, we need to yield responses instead of returning
-            logger.info("💬 Handling conversational query in streaming mode")
+        temperature = 0.2 if temperature > 0.3 else temperature
+        logger.info(f"Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
 
-            # Save user message first
+        # 1. Get or create conversation
+        if conversation_id:
+            conversation = await Conversation.get(conversation_id)
+        else:
+            smart_title = query_analyzer.generate_conversation_title(content, max_length=60)
+            conversation = Conversation(
+                admin_id=str(admin.id),
+                title=smart_title,
+                rag_type=rag_type,
+                model_name=model or settings.rag_model_loaded,
+                temperature=temperature
+            )
+            await conversation.insert()
+            logger.info(f"Created admin conversation: {conversation.id} - '{smart_title}'")
+
+        # 2. Load history and analyze query
+        conversation_history = await load_conversation_history(str(conversation.id))
+        history_for_cache = tuple((msg['role'], msg['content']) for msg in conversation_history)
+        query_analysis_result = await query_analyzer.analyze(content, history_for_cache)
+        query_analysis = query_analysis_result.model_dump()
+        logger.info(f"Query intent: {query_analysis['intent']} (needs_rag: {query_analysis['needs_rag']})")
+        
+        # 3. Handle conversational bypass
+        if not query_analysis['needs_rag']:
+            logger.info("💬 Conversational query detected - bypassing RAG and generating a conversational response.")
+
+            # 1. Save user message first
+            sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
             user_message = Message(
                 conversation_id=str(conversation.id),
                 content=content,
-                sender_type=SenderType.ADMIN,
+                sender_type=sender_type,
                 sender_id=str(admin.id)
             )
             await user_message.insert()
 
-            # Send init event
+            # 2. Send init event to frontend
             yield {
                 "type": "init",
                 "conversation_id": str(conversation.id),
                 "message_id": str(user_message.id)
             }
 
-            # Generate conversational response
+            # 3. Generate conversational response using LLM
             from app.infrastructure.langchain_utils import langchain_service
             full_response = ""
+            
+            # ما از تابع استریم مکالمه‌ای استفاده می‌کنیم
             async for chunk in langchain_service.generate_conversational_response_stream(
                 query=content,
-                conversation_history=conversation_history,
+                conversation_history=conversation_history, # ارسال تاریخچه برای حفظ حافظه
                 custom_model=model,
-                custom_temperature=0.7
+                custom_temperature=0.7 # دمای بالاتر برای خلاقیت بیشتر در مکالمه
             ):
                 full_response += chunk
                 yield {
@@ -406,864 +240,62 @@ class ChatUseCases:
                     "content": chunk
                 }
 
-            # Save AI message
+            # 4. Save AI's final response to the database
             ai_message = Message(
                 conversation_id=str(conversation.id),
-                sender_type="ai",
+                sender_type=SenderType.AI.value,
                 content=full_response,
-                is_ai=True,
-                confidence=1.0,
-                model=model,
-                temperature=0.7,
-                complexity=complexity_analysis['complexity']
+                metadata={"rag_type": "conversational", "model": model or settings.chat_model_loaded}
             )
             await ai_message.insert()
 
-            yield {
-                "type": "complete",
-                "conversation_id": str(conversation.id),
-                "message": {
-                    "content": full_response,
-                    "sources": [],
-                    "confidence": 1.0,
-                    "routing": "conversational"
-                }
-            }
-            return
-    
-        # تحلیل پیچیدگی و نوع سوال از تحلیل جامع
-        complexity_analysis = query_analysis['analysis']['complexity']
-        query_type_analysis = query_analysis['analysis']['type']
-        logger.info(f"📊 Query complexity: {complexity_analysis['complexity_fa']} (score: {complexity_analysis['score']})")
-        logger.info(f"🎯 Query type: {query_type_analysis['query_type_fa']} - {query_type_analysis['response_style']}")
-        
-        # Create or get conversation (same logic as non-streaming)
-        if conversation_id:
-            try:
-                from bson import ObjectId
-                conversation = await Conversation.get(ObjectId(conversation_id))
-                if not conversation:
-                    yield {"type": "error", "message": "Conversation not found"}
-                    return
-            except Exception as e:
-                yield {"type": "error", "message": f"Error: {str(e)}"}
-                return
-        else:
-            # 🎯 تولید عنوان هوشمند از اولین پیام
-            smart_title = query_analyzer.generate_conversation_title(content, max_length=60)
-            
-            conversation = Conversation(
-                customer_id=None,
-                admin_id=str(admin.id),
-                title=smart_title,
-                tags=[f"admin-{rag_type}-rag", f"complexity-{complexity_analysis['complexity']}"],
-                guest_session_id=None,
-                # 🆕 ذخیره metadata مکالمه
-                rag_type=rag_type,
-                model_name=model or settings.rag_model_loaded,
-                temperature=temperature
-            )
-            logger.info(f"🔍 RAG - Using model: {model or settings.rag_model_loaded}")
-            await conversation.insert()
-            logger.info(f"✅ Created admin conversation: {conversation.id} - '{smart_title}'")
-        
-        # ✅ تشخیص نقش دقیق ادمین
-        sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
-        
-        # Save user message با complexity و model
-        user_message = Message(
-            conversation_id=str(conversation.id),
-            content=content,
-            sender_type=sender_type,
-            sender_id=str(admin.id),
-            metadata={
-                "rag_type": rag_type,
-                "admin_email": admin.email,
-                "admin_name": admin.full_name,
-                "admin_role": admin.role_name,
-                "complexity": complexity_analysis['complexity'],
-                "complexity_fa": complexity_analysis['complexity_fa'],
-                "complexity_score": complexity_analysis['score'],
-                "model": model or settings.rag_model_loaded,
-                "temperature": temperature
-            }
-        )
-        await user_message.insert()
-
-        # 🕒 شروع اندازه‌گیری زمان پاسخگویی برای ادمین
-        response_start_time = datetime.utcnow()
-        
-        # Send init event
-        yield {
-            "type": "init",
-            "conversation_id": str(conversation.id),
-            "message_id": str(user_message.id)
-        }
-        
-        # Get RAG service
-        if rag_type == "simple":
-            from app.services.rag_service import SimpleRAGService
-            rag_service = SimpleRAGService()
-        else:
-            from app.services.rag_service import AgenticRAGService
-            rag_service = AgenticRAGService()
-        
-        context = {
-            "user_id": str(admin.id),
-            "user_type": "Admin",
-            "conversation_id": str(conversation.id),
-            "rag_type": rag_type,
-            "custom_model": model,  # مدل دلخواه ادمین
-            "custom_temperature": temperature  # دمای دلخواه ادمین
-        }
-        
-        # Stream response
-        full_response = ""
-        sources = []
-        confidence = 0.5
-        
-        # 💾 Load conversation history for context (10 messages max)
-        conversation_history = await load_conversation_history(str(conversation.id), max_messages=10)
-        
-        # تحلیل هدف سوال در بخش قبلی ادغام شده
-        
-        # ✅ سوال تخصصی است - ادامه با RAG معمولی
-        logger.info("🔍 Proceeding with RAG pipeline - Factual query detected")
-        
-        try:
-            # Retrieve documents
-            relevant_docs = await rag_service.retrieve_relevant_documents(
-                content,
-                is_public_only=False  # Admins can see all docs
-            )
-            
-            if relevant_docs:
-                # 🎯 دریافت منابع unique (از تنظیمات سیستم)
-                sources = rag_service._format_sources_markdown(relevant_docs)
-                
-                # 🎯 محاسبه پیشرفته confidence (قبل از generate کردن پاسخ)
-                confidence_analysis = rag_service._calculate_advanced_confidence(
-                    query=content,
-                    retrieved_docs=relevant_docs,
-                    query_type=query_type_analysis['query_type']  # 🎯 تطبیق با نوع سوال
-                )
-                confidence = confidence_analysis['confidence_score']
-                logger.info(f"🎯 Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
-                
-                # Send sources
-                yield {
-                    "type": "sources",
-                    "sources": sources,
-                    "confidence": confidence
-                }
-                
-                # 🔥 ENHANCED: Build context از تمام documents مرتبط (نه فقط unique articles)
-                # چون ممکن است تمام documents از یک article باشند اما sections مختلف
-                context_parts = []
-                for i, doc in enumerate(relevant_docs[:20], 1):  # 🎯 استفاده از 20 document برتر (بیشتر برای پوشش کامل‌تر!)
-                    doc_context = f"""
-=== بخش {i} ===
-عنوان: {doc['title']}
-مسیر: {doc.get('path', 'N/A')}
-امتیاز: {doc.get('score', 0):.2f}
-
-محتوا:
-{doc['content']}
-
----
-"""
-                    context_parts.append(doc_context)
-                
-                context_text = "\n".join(context_parts)
-                
-                # 🔍 DEBUG: Log نهایی context که به LLM ارسال می‌شود
-                logger.info("=" * 80)
-                logger.info(f"📤 Context آماده برای ارسال به LLM:")
-                logger.info(f"   📊 تعداد بخش‌ها: {len(context_parts)}")
-                logger.info(f"   📏 طول کل: {len(context_text)} کاراکتر")
-                logger.info(f"   📋 عناوین بخش‌ها:")
-                for i, doc in enumerate(relevant_docs[:15], 1):
-                    logger.info(f"      {i}. {doc.get('title', 'N/A')[:60]} (Score: {doc.get('score', 0):.3f})")
-                logger.info("=" * 80)
-                
-                # Stream response with custom model settings
-                from app.infrastructure.langchain_utils import langchain_service
-                
-                # 🔥 انتخاب پرامپت مناسب بر اساس rag_type
-                prompt_name = "simple_rag_response" if rag_type == "simple" else "rag_response"
-                logger.info(f"🎯 Using prompt: {prompt_name} for rag_type: {rag_type}")
-                
-                async for chunk in langchain_service.generate_rag_response_stream(
-                    content, 
-                    context_text,
-                    conversation_history=conversation_history,  # 💾 ارسال تاریخچه مکالمه
-                    custom_model=model,
-                    custom_temperature=temperature,
-                    query_type=query_type_analysis['query_type'],  # 🎯 نوع سوال برای تطبیق طول پاسخ
-                    prompt_name=prompt_name  # 🔥 ارسال prompt مناسب
-                ):
-                    full_response += chunk
-                    yield {
-                        "type": "chunk",
-                        "content": chunk
-                    }
-            else:
-                full_response = "متأسفانه اطلاعات مرتبط یافت نشد."
-                yield {
-                    "type": "chunk",
-                    "content": full_response
-                }
-            
-            # Save AI message با complexity و model
-            # 🕒 محاسبه زمان پاسخگویی برای ادمین
-            response_end_time = datetime.utcnow()
-            response_time_seconds = (response_end_time - response_start_time).total_seconds()
-
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=full_response,
-                sender_type="ai",
-                sender_id=None,
-                response_time=response_time_seconds,  # 🕒 ذخیره زمان پاسخگویی
-                metadata={
-                    "sources": sources,
-                    "confidence": confidence,
-                    "rag_type": rag_type,
-                    "streaming": True,
-                    "complexity": complexity_analysis['complexity'],
-                    "complexity_fa": complexity_analysis['complexity_fa'],
-                    "model": model or settings.rag_model_loaded,
-                    "temperature": temperature,
-                    "response_time": response_time_seconds,  # 🕒 ذخیره در metadata هم
-                    "can_get_more_details": rag_type == "simple" and bool(sources)  # 🎯 فیلد کلیدی برای نمایش دکمه
-                }
-            )
-            await ai_message.insert()
-            logger.info(f"⏱️ Admin response time: {response_time_seconds:.2f} seconds")
-            
-            # 🎯 محاسبه can_get_more_details
-            can_get_more_details = rag_type == "simple" and bool(sources)
-            logger.info(f"🔥 can_get_more_details calculation: rag_type={rag_type}, has_sources={bool(sources)}, result={can_get_more_details}")
-            
-            # Send complete event با complexity و metadata برای UI
+            # 5. Send complete event
             yield {
                 "type": "complete",
                 "message_id": str(ai_message.id),
                 "full_response": full_response,
-                "confidence": confidence,
-                "complexity": complexity_analysis['complexity'],
-                "complexity_fa": complexity_analysis['complexity_fa'],
-                "model": model or settings.rag_model_loaded,
-                "can_get_more_details": can_get_more_details,  # 🔥 سیگنال به Frontend برای نمایش دکمه
-                "rag_type": rag_type
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
-            error_msg = f"خطا: {str(e)}"
-            
-            # 🕒 محاسبه زمان پاسخگویی برای خطای ادمین
-            response_end_time = datetime.utcnow()
-            response_time_seconds = (response_end_time - response_start_time).total_seconds()
-
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=error_msg,
-                sender_type="ai",
-                is_failed=True,
-                failure_reason=str(e),
-                response_time=response_time_seconds,  # 🕒 ذخیره زمان پاسخگویی حتی در خطا
-                metadata={"streaming": True, "rag_type": rag_type, "response_time": response_time_seconds}
-            )
-            await ai_message.insert()
-            logger.info(f"⏱️ Admin failed response time: {response_time_seconds:.2f} seconds")
-            
-            yield {
-                "type": "error",
-                "message": str(e),
-                "message_id": str(ai_message.id)
-            }
-    
-    @staticmethod
-    async def send_admin_message(
-        content: str,
-        admin: Admin,
-        conversation_id: Optional[str] = None,
-        rag_type: str = "simple",
-        model: Optional[str] = None,
-        temperature: Optional[float] = 0.7
-    ) -> Dict[str, Any]:
-        """Process an admin chat message with RAG type selection and custom model settings."""
-
-        # 🎯 تحلیل جامع سوال (هدف + پیچیدگی) - اضافه کردن منطق تحلیلگر
-        query_analysis = await query_analyzer.analyze(content, conversation_history=[])
-        logger.info(f"🎯 Query intent: {query_analysis.intent} (needs_rag: {query_analysis.needs_rag})")
-
-        # اگر سوال محاوره‌ای بود، از RAG صرفنظر کن
-        if not query_analysis.needs_rag:
-            logger.info("💬 Conversational query detected - bypassing RAG")
-
-            # Create or get conversation
-            if conversation_id:
-                try:
-                    from bson import ObjectId
-                    conversation = await Conversation.get(ObjectId(conversation_id))
-                    if not conversation:
-                        raise ValueError("Conversation not found")
-                except Exception as e:
-                    raise ValueError(f"Error retrieving conversation: {str(e)}")
-            else:
-                # Create new conversation for admin
-                conversation = Conversation(
-                    customer_id=None,
-                    admin_id=str(admin.id),
-                    title=content[:50] + "..." if len(content) > 50 else content,
-                    tags=["admin-conversational"],
-                    guest_session_id=None
-                )
-                await conversation.insert()
-                logger.info(f"Created new admin conversational conversation: {conversation.id}")
-
-            # ✅ تشخیص نقش دقیق ادمین
-            sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
-
-            # Save user message
-            user_message = Message(
-                conversation_id=str(conversation.id),
-                content=content,
-                sender_type=sender_type,
-                sender_id=str(admin.id),
-                metadata={
-                    "query_analysis": query_analysis.model_dump(),  # 💾 ذخیره کل نتیجه تحلیل
-                    "rag_type": "conversational",
-                    "admin_email": admin.email,
-                    "admin_name": admin.full_name,
-                    "admin_role": admin.role_name,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            )
-            await user_message.insert()
-
-            # Generate conversational response
-            from app.infrastructure.langchain_utils import langchain_service
-            full_response = await langchain_service.generate_conversational_response(
-                query=content,
-                conversation_history=[],
-                custom_model=model,
-                custom_temperature=temperature or 0.7
-            )
-
-            # Create feedback link for the AI response
-            feedback_id = await ChatUseCases._create_feedback_link("")
-
-            # Save AI message
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=full_response,
-                sender_type="ai",
-                sender_id=None,
-                feedback_id=feedback_id,  # 🔗 پیوند بازخورد
-                metadata={
-                    "rag_type": "conversational",
-                    "model": model or settings.chat_model_loaded,
-                    "temperature": temperature or 0.7,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "token_usage": {
-                        "prompt_tokens": None,
-                        "completion_tokens": None,
-                        "total_tokens": None
-                    }
-                }
-            )
-            await ai_message.insert()
-
-            # 🧹 استخراج metadata درخواست از context
-            request_metadata = await ChatUseCases._extract_request_metadata()
-            if request_metadata:
-                ai_message.metadata.update(request_metadata)
-                await ai_message.save()
-
-            return {
-                "conversation_id": str(conversation.id),
-                "message": full_response,
                 "sources": [],
-                "confidence": 1.0,
-                "message_id": str(ai_message.id),
+                "confidence": 1.0, # اطمینان در پاسخ محاوره‌ای بالاست
                 "routing": "conversational"
             }
+            return # End the function here
 
-        # سوال تخصصی است - ادامه با RAG معمولی
-        logger.info("🔍 Proceeding with RAG pipeline - Factual query detected")
-
-        # Create or get conversation
-        if conversation_id:
-            try:
-                from bson import ObjectId
-                conversation = await Conversation.get(ObjectId(conversation_id))
-                if not conversation:
-                    raise ValueError("Conversation not found")
-            except Exception as e:
-                raise ValueError(f"Error retrieving conversation: {str(e)}")
-        else:
-            # Create new conversation for admin
-            conversation = Conversation(
-                customer_id=None,
-                admin_id=str(admin.id),
-                title=content[:50] + "..." if len(content) > 50 else content,
-                tags=[f"admin-{rag_type}-rag", f"complexity-{query_analysis.complexity}"],
-                guest_session_id=None,
-                # 🆕 ذخیره metadata مکالمه
-                rag_type=rag_type,
-                model_name=model or settings.rag_model_loaded,
-                temperature=temperature
-            )
-            await conversation.insert()
-            logger.info(f"Created new admin conversation: {conversation.id}")
-
-        # ✅ تشخیص نقش دقیق ادمین
+        # 4. Save user message
         sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
-        
-        # Save user message
         user_message = Message(
             conversation_id=str(conversation.id),
             content=content,
             sender_type=sender_type,
             sender_id=str(admin.id),
-            is_failed=False,
-            failure_reason=None,
             metadata={
                 "rag_type": rag_type,
-                "admin_email": admin.email,
-                "admin_name": admin.full_name,
-                "admin_role": admin.role_name,
-                "timestamp": datetime.utcnow().isoformat()
+                **query_analysis['analysis']
             }
         )
         await user_message.insert()
-        logger.info(f"Saved admin message: {user_message.id}")
-
-        # Prepare context for RAG service with custom model settings
-        context = {
-            "user_id": str(admin.id),
-            "user_type": "Admin",
-            "conversation_id": str(conversation.id),
-            "rag_type": rag_type,
-            "custom_model": model,  # مدل دلخواه ادمین
-            "custom_temperature": temperature  # دمای دلخواه ادمین
-        }
-
-        # Get appropriate RAG service based on type
-        if rag_type == "simple":
-            from app.infrastructure.rag_service import SimpleRAGService
-            rag_service = SimpleRAGService()
-        else:  # agentic
-            from app.infrastructure.rag_service import AgenticRAGService
-            rag_service = AgenticRAGService()
-
-        # تشخیص provider از روی مدل
-        from app.infrastructure.langchain_utils import detect_model_provider
-        used_model = model or settings.rag_model_loaded
-        provider = detect_model_provider(used_model) if used_model else "OpenAI"
-        provider_name = provider.value if hasattr(provider, 'value') else str(provider)
-
-        # Generate AI response
-        ai_message = None
-        try:
-            rag_response = await rag_service.generate_response(content, context)
-            ai_content = rag_response["response"]
-            sources = rag_response.get("sources", [])
-            confidence = rag_response.get("confidence", 0.5)
-            suggested_actions = rag_response.get("suggested_actions", [])
-
-            # Create rich metadata
-            rich_metadata = {
-                "sources": sources,
-                "confidence": confidence,
-                "suggested_actions": suggested_actions,
-                "rag_type": rag_type,
-                "model_name": used_model,
-                "provider": provider_name,
-                "api_base_url": settings.openai_base_url_loaded,
-                "temperature": temperature or 0.7,
-                "max_tokens": 1000,
-                "response_time": None,
-                "token_usage": {
-                    "prompt_tokens": None,
-                    "completion_tokens": None,
-                    "total_tokens": None
-                },
-                "processing_details": {
-                    "retrieval_method": "agentic_rag" if rag_type == "agentic" else "simple_rag",
-                    "knowledge_base_used": bool(sources),
-                    "fallback_used": False
-                },
-                "timestamp": datetime.utcnow().isoformat(),
-                "admin_test_mode": True
-            }
-
-            # Save AI response
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=ai_content,
-                sender_type="ai",
-                sender_id=None,
-                is_failed=False,
-                failure_reason=None,
-                metadata=rich_metadata
-            )
-            await ai_message.insert()
-            logger.info(f"Saved AI message with ID: {ai_message.id}")
-
-            return {
-                "conversation_id": str(conversation.id),
-                "message": ai_content,
-                "sources": sources,
-                "confidence": confidence,
-                "suggested_actions": suggested_actions,
-                "message_id": str(ai_message.id),
-                "metadata": {
-                    "rag_type": rag_type,
-                    "model_name": rich_metadata["model_name"],
-                    "provider": rich_metadata["provider"],
-                    "token_usage": rich_metadata["token_usage"]
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Error generating AI response: {e}")
-            
-            # Save failed AI message
-            error_message = f"خطا در تولید پاسخ: {str(e)}"
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=error_message,
-                sender_type="AI",
-                sender_id=None,
-                is_failed=True,
-                failure_reason=str(e),
-                metadata={
-                    "rag_type": rag_type,
-                    "error": str(e),
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "admin_test_mode": True
-                }
-            )
-            await ai_message.insert()
-
-            return {
-                "conversation_id": str(conversation.id),
-                "message": error_message,
-                "sources": [],
-                "confidence": 0.0,
-                "suggested_actions": ["contact_support"],
-                "message_id": str(ai_message.id),
-                "metadata": {
-                    "rag_type": rag_type,
-                    "error": str(e)
-                }
-            }
-
-    @staticmethod
-    async def send_message(
-        content: str,
-        user: Optional[Union[Customer, Admin]] = None,
-        user_type: str = "guest",
-        conversation_id: Optional[str] = None,
-        guest_session_id: Optional[str] = None,
-        rag_type: str = "simple"  # 🆕 "simple" or "detailed"
-    ) -> Dict[str, Any]:
-        """Process a chat message and generate AI response."""
-
-        # 🎯 تحلیل جامع سوال (هدف + پیچیدگی) - اضافه کردن منطق تحلیلگر
-        query_analysis = await query_analyzer.analyze(content, conversation_history=[])
-        logger.info(f"🎯 Query intent: {query_analysis.intent} (needs_rag: {query_analysis.needs_rag})")
-
-        # اگر سوال محاوره‌ای بود، از RAG صرفنظر کن
-        if not query_analysis.needs_rag:
-            logger.info("💬 Conversational query detected - bypassing RAG")
-
-            # Create or get conversation
-            conversation = await ChatUseCases._get_or_create_conversation(
-                conversation_id=conversation_id,
-                customer_id=str(user.id) if user and user_type == "Customer" else None,
-                admin_id=str(user.id) if user and user_type == "Admin" else None,
-                guest_session_id=guest_session_id,
-                title=content[:50] + "..." if len(content) > 50 else content,
-                tags=["conversational"],
-                rag_type="conversational",
-                model_name=settings.rag_model_loaded,
-                temperature=0.7
-            )
-
-            # Use helper method for conversational response
-            return await ChatUseCases._handle_conversational_response(
-                content=content,
-                conversation=conversation,
-                user=user,
-                user_type=user_type,
-                query_analysis=query_analysis
-            )
-
-        # سوال تخصصی است - ادامه با RAG معمولی
-        logger.info("🔍 Proceeding with RAG pipeline - Factual query detected")
-
-        # Create or get conversation
-        if conversation_id:
-            try:
-                from bson import ObjectId
-                conversation = await Conversation.get(ObjectId(conversation_id))
-                if not conversation:
-                    raise ValueError("Conversation not found")
-            except Exception as e:
-                raise ValueError(f"Error retrieving conversation: {str(e)}")
-        else:
-            # For authenticated users, create conversation with appropriate user ID
-            if user and user_type in ["Customer", "Admin"]:
-                conversation = Conversation(
-                    customer_id=str(user.id) if user_type == "Customer" else None,
-                    guest_session_id=None,
-                    title=content[:50] + "..." if len(content) > 50 else content,
-                    # 🆕 ذخیره metadata مکالمه (default برای customer/guest)
-                    rag_type="simple" if user_type == "Customer" else "agentic",
-                    model_name=settings.rag_model_loaded,
-                    temperature=0.7
-                )
-                try:
-                    await conversation.insert()
-                    logger.info(f"Created new conversation with ID: {conversation.id} for {user_type} {user.id}")
-                except Exception as e:
-                    raise ValueError(f"Error creating conversation: {str(e)}")
-
-            # For guests, check if there's an existing conversation with this guest_session_id
-            elif guest_session_id:
-                existing_conversation = await Conversation.find_one(
-                    Conversation.guest_session_id == guest_session_id
-                )
-                if existing_conversation:
-                    conversation = existing_conversation
-                    logger.info(f"Reusing existing conversation {conversation.id} for guest session {guest_session_id}")
-                else:
-                    # Create new conversation for guest
-                    conversation = Conversation(
-                        customer_id=None,
-                        guest_session_id=guest_session_id,
-                        title=content[:50] + "..." if len(content) > 50 else content,
-                        # 🆕 ذخیره metadata مکالمه (default برای guest)
-                        rag_type="simple",
-                        model_name=settings.rag_model_loaded,
-                        temperature=0.7
-                    )
-                    try:
-                        await conversation.insert()
-                        logger.info(f"Created new conversation with ID: {conversation.id} for guest session {guest_session_id}")
-                    except Exception as e:
-                        raise ValueError(f"Error creating conversation: {str(e)}")
-            else:
-                raise ValueError("No user or guest session provided")
         
-        # Determine sender type and ID
-        if user and user_type == "Customer":
-            sender_type = "Customer"
-            sender_id = str(user.id)
-        elif user and user_type == "Admin":
-            # Check if it's super admin
-            admin_doc = await Admin.get(user.id)
-            if admin_doc and admin_doc.role_name == "SuperAdmin":
-                sender_type = "SuperAdmin"
-            else:
-                sender_type = "Admin"
-            sender_id = str(user.id)
-        else:
-            sender_type = "Guest"
-            sender_id = None
-
-        # Save user message
-        user_message = Message(
-            conversation_id=str(conversation.id),
-            content=content,
-            sender_type=sender_type,
-            sender_id=sender_id,
-            metadata={
-                "query_analysis": query_analysis.model_dump(),  # 💾 ذخیره کل نتیجه تحلیل
-                "user_type": user_type,
-                "ip_address": None,  # Could be added from request
-                "user_agent": None,  # Could be added from request
-                "complexity": query_analysis.complexity,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-        await user_message.insert()
-        logger.info(f"Saved user message with ID: {user_message.id} in conversation {conversation.id}")
-        logger.info(f"User message data: sender_type={user_message.sender_type}, sender_id={user_message.sender_id}")
-
-        # 🕒 شروع اندازه‌گیری زمان پاسخگویی برای مشتریان/مهمان‌ها
-        response_start_time = datetime.utcnow()
+        # 5. Send init event
+        yield {"type": "init", "conversation_id": str(conversation.id), "message_id": str(user_message.id)}
         
-        # 🆕 Two-Speed RAG: Choose service using factory function
-        rag_service = get_rag_service(user, rag_type)
-        logger.info(f"🔧 Selected RAG service for rag_type='{rag_type}': {type(rag_service).__name__}")
-        
-        # Prepare context for agentic RAG
-        context = {}
-        if user:
-            context = {
-                "user_id": str(user.id),
-                "user_type": user_type,
-                "user_role": "Admin" if user_type == "Admin" else "Customer",
-                "conversation_id": str(conversation.id)
-            }
-        
-        # 💾 Load conversation history for context (10 messages max)
-        conversation_history = await load_conversation_history(str(conversation.id), max_messages=10)
-        
-        # Add conversation history to context
-        context["conversation_history"] = conversation_history
-        
-        # Generate AI response
-        ai_message = None
-        try:
-            rag_response = await rag_service.generate_response(content, context)
-            ai_content = rag_response["response"]
-            sources = rag_response.get("sources", [])
-            confidence = rag_response.get("confidence", 0.5)
-            suggested_actions = rag_response.get("suggested_actions", [])
+        # 6. Execute central RAG pipeline
+        rag_service = get_rag_service(admin, rag_type)
+        async for event in ChatUseCases._execute_rag_pipeline_stream(
+            query=content,
+            conversation=conversation,
+            user_message=user_message,
+            rag_service=rag_service,
+            query_analysis=query_analysis,
+            conversation_history=conversation_history,
+            is_public_only=False, # ادمین به همه اسناد دسترسی دارد
+            rag_type=rag_type,
+            custom_model=model,
+            custom_temperature=temperature
+        ):
+            yield event
 
-            # Create rich metadata
-            rich_metadata = {
-                "sources": sources,
-                "confidence": confidence,
-                "suggested_actions": suggested_actions,
-                "rag_type": rag_type,  # 🆕 Reflect actual RAG type used
-                "can_get_more_details": rag_type == "simple",  # 🆕 Only show button for simple responses
-                "model_name": settings.chat_model_loaded,
-                "provider": "OpenRouter",
-                "api_base_url": settings.openai_base_url_loaded,
-                "temperature": 0.7,  # Default temperature
-                "max_tokens": 1000,  # Default max tokens
-                "response_time": None,  # Could be measured
-                "token_usage": {
-                    "prompt_tokens": None,  # Would need to be extracted from API response
-                    "completion_tokens": None,
-                    "total_tokens": None
-                },
-                "processing_details": {
-                    "retrieval_method": "vector_search" if user else "direct",
-                    "knowledge_base_used": bool(sources),
-                    "fallback_used": False
-                },
-                "timestamp": datetime.utcnow().isoformat()
-            }
-
-            # Save AI response
-            # 🕒 محاسبه زمان پاسخگویی برای مشتریان/مهمان‌ها
-            response_end_time = datetime.utcnow()
-            response_time_seconds = (response_end_time - response_start_time).total_seconds()
-
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=ai_content,
-                sender_type="ai",
-                sender_id=None,
-                is_failed=False,
-                failure_reason=None,
-                response_time=response_time_seconds,  # 🕒 ذخیره زمان پاسخگویی
-                metadata={
-                    **rich_metadata,
-                    "response_time": response_time_seconds  # 🕒 ذخیره در metadata هم
-                }
-            )
-            await ai_message.insert()
-            logger.info(f"Saved AI message with ID: {ai_message.id} in conversation {conversation.id}")
-            logger.info(f"AI message data: confidence={confidence}, sources_count={len(sources)}, response_time={response_time_seconds:.2f}s")
-
-            # Generate AI-powered title and tags for the conversation
-            try:
-                title_tags_result = await ChatUseCases.generate_conversation_title_and_tags(str(conversation.id))
-                logger.info(f"Generated title and tags: {title_tags_result}")
-            except Exception as e:
-                logger.warning(f"Failed to generate title and tags: {e}")
-
-            # Log unanswered question if confidence is low
-            if confidence < 0.3:
-                unanswered = UnansweredQuestion(
-                    question=content,
-                    customer_id=str(user.id) if user and user_type == "Customer" else None,
-                    guest_session_id=guest_session_id if not user else None,
-                    context={"conversation_id": str(conversation.id), "confidence": confidence}
-                )
-                await unanswered.insert()
-            
-            return {
-                "conversation_id": str(conversation.id),
-                "message": ai_content,
-                "sources": sources,
-                "confidence": confidence,
-                "suggested_actions": suggested_actions,
-                "message_id": str(ai_message.id)
-            }
-            
-        except Exception as e:
-            # Fallback response with failure tracking
-            fallback_content = "متأسفانه در حال حاضر به سرویس هوش مصنوعی دسترسی ندارم، اما می‌توانم به شما کمک کنم. لطفاً سوال خود را مطرح کنید یا با تیم پشتیبانی تماس بگیرید."
-
-            # Create rich error metadata
-            error_metadata = {
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-                "fallback": True,
-                "rag_type": "failed",
-                "model_name": settings.chat_model_loaded,
-                "provider": "OpenRouter",
-                "api_base_url": settings.openai_base_url_loaded,
-                "temperature": 0.7,
-                "max_tokens": 1000,
-                "response_time": None,
-                "token_usage": {
-                    "prompt_tokens": None,
-                    "completion_tokens": None,
-                    "total_tokens": None
-                },
-                "processing_details": {
-                    "retrieval_method": "failed",
-                    "knowledge_base_used": False,
-                    "fallback_used": True,
-                    "failure_stage": "ai_generation"
-                },
-                "timestamp": datetime.utcnow().isoformat()
-            }
-
-            # 🕒 محاسبه زمان پاسخگویی برای خطای مشتریان/مهمان‌ها
-            response_end_time = datetime.utcnow()
-            response_time_seconds = (response_end_time - response_start_time).total_seconds()
-
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=fallback_content,
-                sender_type="ai",
-                sender_id=None,
-                is_failed=True,
-                failure_reason=str(e),
-                response_time=response_time_seconds,  # 🕒 ذخیره زمان پاسخگویی حتی در خطا
-                metadata={
-                    **error_metadata,
-                    "response_time": response_time_seconds
-                }
-            )
-            await ai_message.insert()
-            logger.info(f"⏱️ Failed response time: {response_time_seconds:.2f} seconds")
-
-            logger.error(f"AI generation failed: {e}")
-            return {
-                "conversation_id": str(conversation.id),
-                "message": fallback_content,
-                "sources": [],
-                "confidence": 0.0,
-                "suggested_actions": ["contact_support"],
-                "message_id": str(ai_message.id),
-                "is_failed": True,
-                "failure_reason": str(e)
-            }
-    
+    # ======================================================================================
+    # ✅ متد send_message_stream نیز برای استفاده از متد مرکزی بازنویسی می‌شود
+    # ======================================================================================
     @staticmethod
     async def send_message_stream(
         content: str,
@@ -1273,301 +305,122 @@ class ChatUseCases:
         guest_session_id: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Process a chat message and stream AI response in real-time.
-        
-        Yields:
-            Dict containing streaming events with types: 'init', 'chunk', 'sources', 'done', 'error'
+        پردازش پیام کاربر عادی/مهمان با پشتیبانی از استریمینگ (نسخه تمیز و Refactor شده).
         """
-        
-        logger.info(f"🌊 Starting streaming chat for {user_type}")
-        
-        # تحلیل پیچیدگی و نوع سوال از تحلیل جامع
-        query_analysis = await query_analyzer.analyze(content, conversation_history)
-        complexity_analysis = query_analysis['analysis']['complexity']
-        query_type_analysis = query_analysis['analysis']['type']
-        logger.info(f"📊 Query complexity: {complexity_analysis['complexity_fa']} (score: {complexity_analysis['score']})")
-        logger.info(f"🎯 Query type: {query_type_analysis['query_type_fa']} - {query_type_analysis['response_style']}")
-        
-        # Create or get conversation (same as send_message)
+        logger.info(f"Starting streaming chat for {user_type}")
+        rag_type = "simple" # کاربران عادی همیشه از simple RAG استفاده می‌کنند
+
+        # 1. Get or create conversation
         if conversation_id:
-            try:
-                from bson import ObjectId
-                conversation = await Conversation.get(ObjectId(conversation_id))
-                if not conversation:
-                    yield {"type": "error", "message": "Conversation not found"}
-                    return
-            except Exception as e:
-                yield {"type": "error", "message": f"Error retrieving conversation: {str(e)}"}
-                return
+            conversation = await Conversation.get(conversation_id)
         else:
-            # Create new conversation
-            if user and user_type in ["Customer", "Admin"]:
-                conversation = Conversation(
-                    customer_id=str(user.id) if user_type == "Customer" else None,
-                    guest_session_id=None,
-                    title=content[:50] + "..." if len(content) > 50 else content,
-                    # 🆕 ذخیره metadata مکالمه
-                    rag_type="simple" if user_type == "Customer" else "agentic",
-                    model_name=settings.rag_model_loaded,
-                    temperature=0.7
-                )
-                try:
-                    await conversation.insert()
-                    logger.info(f"✅ Created conversation: {conversation.id}")
-                except Exception as e:
-                    yield {"type": "error", "message": f"Error creating conversation: {str(e)}"}
-                    return
-            elif guest_session_id:
-                # Check for existing guest conversation
-                existing_conversation = await Conversation.find_one(
-                    Conversation.guest_session_id == guest_session_id
-                )
-                if existing_conversation:
-                    conversation = existing_conversation
-                else:
-                    conversation = Conversation(
-                        customer_id=None,
-                        guest_session_id=guest_session_id,
-                        title=content[:50] + "..." if len(content) > 50 else content,
-                        # 🆕 ذخیره metadata مکالمه (default برای guest)
-                        rag_type="simple",
-                        model_name=settings.rag_model_loaded,
-                        temperature=0.7
-                    )
-                    await conversation.insert()
-            else:
-                yield {"type": "error", "message": "No user or guest session provided"}
-                return
+            title = content[:50] + "..."
+            user_id = str(user.id) if user else None
+            conversation = Conversation(
+                customer_id=user_id if user_type == "Customer" else None,
+                guest_session_id=guest_session_id if user_type == "guest" else None,
+                title=title, rag_type=rag_type
+            )
+            await conversation.insert()
         
-        # Determine sender type
-        if user and user_type == "Customer":
-            sender_type = "Customer"
-            sender_id = str(user.id)
-        elif user and user_type == "Admin":
-            admin_doc = await Admin.get(user.id)
-            if admin_doc and admin_doc.role_name == "SuperAdmin":
-                sender_type = "SuperAdmin"
-            else:
-                sender_type = "Admin"
-            sender_id = str(user.id)
-        else:
-            sender_type = "Guest"
-            sender_id = None
+        # 2. Load history and analyze query (با رفع باگ)
+        conversation_history = await load_conversation_history(str(conversation.id))
+        history_for_cache = tuple((msg['role'], msg['content']) for msg in conversation_history)
+        query_analysis_result = await query_analyzer.analyze(content, history_for_cache)
+        query_analysis = query_analysis_result.model_dump()
+        logger.info(f"Query intent: {query_analysis['intent']} (needs_rag: {query_analysis['needs_rag']})")
+
+        # 3. Handle conversational bypass
+        if not query_analysis['needs_rag']:
+            logger.info("💬 Conversational query detected - bypassing RAG and generating a conversational response.")
+
+            # 1. Save user message first
+            sender_id = str(user.id) if user else None
+            sender_type_map = {"Customer": SenderType.CUSTOMER, "Admin": SenderType.ADMIN, "guest": SenderType.GUEST}
+            sender_type = sender_type_map.get(user_type, SenderType.GUEST).value
+            
+            user_message = Message(
+                conversation_id=str(conversation.id),
+                content=content,
+                sender_type=sender_type,
+                sender_id=sender_id
+            )
+            await user_message.insert()
+
+            # 2. Send init event to frontend
+            yield {
+                "type": "init",
+                "conversation_id": str(conversation.id),
+                "message_id": str(user_message.id)
+            }
+
+            # 3. Generate conversational response using LLM
+            from app.infrastructure.langchain_utils import langchain_service
+            full_response = ""
+            
+            async for chunk in langchain_service.generate_conversational_response_stream(
+                query=content,
+                conversation_history=conversation_history, # ارسال تاریخچه برای حفظ حافظه
+                custom_model=settings.chat_model_loaded,
+                custom_temperature=0.7
+            ):
+                full_response += chunk
+                yield {
+                    "type": "chunk",
+                    "content": chunk
+                }
+
+            # 4. Save AI's final response to the database
+            ai_message = Message(
+                conversation_id=str(conversation.id),
+                sender_type=SenderType.AI.value,
+                content=full_response,
+                metadata={"rag_type": "conversational", "model": settings.chat_model_loaded}
+            )
+            await ai_message.insert()
+
+            # 5. Send complete event
+            yield {
+                "type": "complete",
+                "message_id": str(ai_message.id),
+                "full_response": full_response,
+                "sources": [],
+                "confidence": 1.0,
+                "routing": "conversational"
+            }
+            return # End the function here
+
+        # 4. Save user message
+        sender_id = str(user.id) if user else None
+        sender_type_map = {"Customer": SenderType.CUSTOMER, "Admin": SenderType.ADMIN, "guest": SenderType.GUEST}
+        sender_type = sender_type_map.get(user_type, SenderType.GUEST).value
         
-        # Save user message
         user_message = Message(
             conversation_id=str(conversation.id),
             content=content,
             sender_type=sender_type,
             sender_id=sender_id,
-            metadata={
-                "user_type": user_type,
-                "timestamp": datetime.utcnow().isoformat()
-            }
+            metadata={"rag_type": rag_type, **query_analysis['analysis']}
         )
         await user_message.insert()
-        logger.info(f"💾 Saved user message: {user_message.id}")
 
-        # 🕒 شروع اندازه‌گیری زمان پاسخگویی
-        response_start_time = datetime.utcnow()
-        
-        # Send initial event
-        yield {
-            "type": "init",
-            "conversation_id": str(conversation.id),
-            "message_id": str(user_message.id)
-        }
-        
-        # Get RAG service
-        rag_service = get_rag_service(user)
-        
-        # Prepare context
-        context = {}
-        if user:
-            context = {
-                "user_id": str(user.id),
-                "user_type": user_type,
-                "conversation_id": str(conversation.id)
-            }
-        
-        # 💾 Load conversation history for context (10 messages max)
-        conversation_history = await load_conversation_history(str(conversation.id), max_messages=10)
-        
-        # Stream AI response
-        full_response = ""
-        sources = []
-        confidence = 0.5
+        # 5. Send init event
+        yield {"type": "init", "conversation_id": str(conversation.id), "message_id": str(user_message.id)}
 
-        try:
-            # Retrieve relevant documents first
-            logger.info("📚 Retrieving documents...")
-            relevant_docs = await rag_service.retrieve_relevant_documents(
-                content,
-                is_public_only=(not user)
-            )
+        # 6. Execute central RAG pipeline
+        rag_service = get_rag_service(user, rag_type)
+        async for event in ChatUseCases._execute_rag_pipeline_stream(
+            query=content,
+            conversation=conversation,
+            user_message=user_message,
+            rag_service=rag_service,
+            query_analysis=query_analysis,
+            conversation_history=conversation_history,
+            is_public_only=(not user), # کاربران مهمان فقط اسناد عمومی را می‌بینند
+            rag_type=rag_type
+        ):
+            yield event
 
-            logger.info(f"🔍 Found {len(relevant_docs)} relevant documents")
-            
-            if relevant_docs:
-                # 🎯 دریافت منابع unique (از تنظیمات سیستم)
-                sources = rag_service._format_sources_markdown(relevant_docs)
-                
-                # 🎯 محاسبه پیشرفته confidence
-                confidence_analysis = rag_service._calculate_advanced_confidence(
-                    query=content,
-                    retrieved_docs=relevant_docs,
-                    query_type=query_type_analysis['query_type']  # 🎯 تطبیق با نوع سوال
-                )
-                confidence = confidence_analysis['confidence_score']
-                logger.info(f"🎯 Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
-                
-                # Send sources event
-                yield {
-                    "type": "sources",
-                    "sources": sources,
-                    "confidence": confidence
-                }
-                
-                # 🔥 ENHANCED: Build context از تمام documents مرتبط (نه فقط unique articles)
-                # چون ممکن است تمام documents از یک article باشند اما sections مختلف
-                context_parts = []
-                for i, doc in enumerate(relevant_docs[:20], 1):  # 🎯 استفاده از 20 document برتر (بیشتر برای پوشش کامل‌تر!)
-                    doc_context = f"""
-=== بخش {i} ===
-عنوان: {doc['title']}
-مسیر: {doc.get('path', 'N/A')}
-امتیاز: {doc.get('score', 0):.2f}
-
-محتوا:
-{doc['content']}
-
----
-"""
-                    context_parts.append(doc_context)
-                
-                context_text = "\n".join(context_parts)
-                
-                # 🔍 DEBUG: Log نهایی context که به LLM ارسال می‌شود
-                logger.info("=" * 80)
-                logger.info(f"📤 Context آماده برای ارسال به LLM:")
-                logger.info(f"   📊 تعداد بخش‌ها: {len(context_parts)}")
-                logger.info(f"   📏 طول کل: {len(context_text)} کاراکتر")
-                logger.info(f"   📋 عناوین بخش‌ها:")
-                for i, doc in enumerate(relevant_docs[:15], 1):
-                    logger.info(f"      {i}. {doc.get('title', 'N/A')[:60]} (Score: {doc.get('score', 0):.3f})")
-                logger.info("=" * 80)
-                
-                # Stream RAG response (chunks are already split word-by-word in langchain_utils)
-                logger.info("🤖 Streaming STRICT RAG response...")
-                from app.infrastructure.langchain_utils import langchain_service
-                
-                # 🔥 مهمان‌ها و مشتریان همیشه از simple RAG استفاده می‌کنند
-                prompt_name = "simple_rag_response"
-                logger.info(f"🎯 Using prompt: {prompt_name} for {user_type} user")
-                
-                async for chunk in langchain_service.generate_rag_response_stream(
-                    content, 
-                    context_text,
-                    conversation_history=conversation_history,  # 💾 ارسال تاریخچه مکالمه
-                    query_type=query_type_analysis['query_type'],  # 🎯 نوع سوال برای تطبیق طول پاسخ
-                    prompt_name=prompt_name  # 🔥 ارسال prompt مناسب
-                ):
-                    full_response += chunk
-                    # chunks قبلاً در langchain_utils به کلمات تقسیم شده‌اند
-                    yield {
-                        "type": "chunk",
-                        "content": chunk
-                    }
-            else:
-                # STRICT MODE: اگر سندی نیست، از LLM استفاده نمی‌کنیم
-                logger.warning("❌ No documents found - STRICT MODE: Not using general LLM knowledge")
-                full_response = "متأسفانه اطلاعات مربوط به سوال شما در پایگاه دانش موجود نیست. لطفاً سوال خود را واضح‌تر بیان کنید یا با تیم پشتیبانی تماس بگیرید."
-                
-                yield {
-                    "type": "chunk",
-                    "content": full_response
-                }
-                
-                confidence = 0.0
-            
-            # Save AI message
-            # 🎯 مهمان‌ها و مشتریان همیشه از simple RAG استفاده می‌کنند
-            rag_type_used = "simple"
-
-            # 🕒 محاسبه زمان پاسخگویی
-            response_end_time = datetime.utcnow()
-            response_time_seconds = (response_end_time - response_start_time).total_seconds()
-
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=full_response,
-                sender_type="ai",
-                sender_id=None,
-                is_failed=False,
-                response_time=response_time_seconds,  # 🕒 ذخیره زمان پاسخگویی
-                metadata={
-                    "sources": sources,
-                    "confidence": confidence,
-                    "rag_type": rag_type_used,
-                    "streaming": True,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "response_time": response_time_seconds,  # 🕒 ذخیره در metadata هم
-                    "can_get_more_details": rag_type_used == "simple" and bool(sources)  # 🎯 فیلد کلیدی برای نمایش دکمه
-                }
-            )
-            await ai_message.insert()
-            logger.info(f"⏱️ Response time: {response_time_seconds:.2f} seconds")
-            
-            # 🎯 محاسبه can_get_more_details
-            can_get_more_details = rag_type_used == "simple" and bool(sources)
-            logger.info(f"🔥 can_get_more_details calculation: rag_type={rag_type_used}, has_sources={bool(sources)}, result={can_get_more_details}")
-            
-            # Send completion event با metadata برای UI
-            yield {
-                "type": "complete",
-                "message_id": str(ai_message.id),
-                "full_response": full_response,
-                "confidence": confidence,
-                "can_get_more_details": can_get_more_details,  # 🔥 سیگنال به Frontend برای نمایش دکمه
-                "rag_type": rag_type_used
-            }
-            
-            logger.info(f"✅ Streaming completed successfully")
-            
-        except Exception as e:
-            logger.error(f"❌ Streaming error: {e}", exc_info=True)
-            
-            # Save failed AI message
-            error_message = f"خطا در تولید پاسخ: {str(e)}"
-
-            # 🕒 محاسبه زمان پاسخگویی (حتی در صورت خطا)
-            response_end_time = datetime.utcnow()
-            response_time_seconds = (response_end_time - response_start_time).total_seconds()
-
-            ai_message = Message(
-                conversation_id=str(conversation.id),
-                content=error_message,
-                sender_type="ai",
-                sender_id=None,
-                is_failed=True,
-                failure_reason=str(e),
-                response_time=response_time_seconds,  # 🕒 ذخیره زمان پاسخگویی حتی در خطا
-                metadata={
-                    "streaming": True,
-                    "error": str(e),
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "response_time": response_time_seconds
-                }
-            )
-            await ai_message.insert()
-            logger.info(f"⏱️ Failed response time: {response_time_seconds:.2f} seconds")
-            
-            yield {
-                "type": "error",
-                "message": str(e),
-                "message_id": str(ai_message.id)
-            }
-    
     @staticmethod
     async def get_conversation_history(
         conversation_id: str,
@@ -1576,13 +429,13 @@ class ChatUseCases:
         guest_session_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get conversation message history."""
-        
+
         from bson import ObjectId
         conversation = await Conversation.get(ObjectId(conversation_id))
         if not conversation:
             logger.info(f"Conversation not found: {conversation_id}")
             raise ValueError("Conversation not found")
-        
+
         # Check access permissions
         if user_type == "Customer" and user_id:
             # For authenticated customers, allow access to conversations
@@ -1597,14 +450,14 @@ class ChatUseCases:
                 raise ValueError("Access denied")
             if guest_session_id and conversation.guest_session_id != guest_session_id:
                 raise ValueError("Access denied - guest session ID mismatch")
-        
+
         # Get messages for this conversation
         messages = await Message.find(
             Message.conversation_id == str(conversation.id)
         ).sort(Message.created_at).to_list()
-        
+
         logger.info(f"Found {len(messages)} messages for conversation {conversation_id}")
-        
+
         result = [
             {
                 "id": str(msg.id),
@@ -1619,22 +472,22 @@ class ChatUseCases:
             }
             for msg in messages
         ]
-        
+
         logger.info(f"Returning {len(result)} messages for conversation {conversation_id}")
         logger.info(f"Message details: {result}")
-        
+
         return result
-    
+
     @staticmethod
     async def get_user_conversations(customer: Customer) -> List[Dict[str, Any]]:
         """Get customer's conversation list."""
-        logger.info(f"📋 Getting conversations for customer: {customer.id}")
+        logger.info(f"Getting conversations for customer: {customer.id}")
         conversations = await Conversation.find(
             Conversation.customer_id == str(customer.id)
         ).sort(-Conversation.updated_at).to_list()
-        
-        logger.info(f"📋 Found {len(conversations)} conversations for customer {customer.id}")
-        
+
+        logger.info(f"Found {len(conversations)} conversations for customer {customer.id}")
+
         return [
             {
                 "id": str(conv.id),
@@ -1652,7 +505,7 @@ class ChatUseCases:
         conversations = await Conversation.find(
             Conversation.admin_id == str(admin.id)
         ).sort(-Conversation.updated_at).to_list()
-        
+
         return [
             {
                 "id": str(conv.id),

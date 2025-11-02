@@ -171,7 +171,7 @@ class WeaviateMongoDBConnector:
                 mongodb_url = os.getenv("TEST_DATABASE_URL", "mongodb://localhost:27017/SallyChatBot_Test")
                 logger.info(f"🧪 تست مد - استفاده از دیتابیس تست: {mongodb_url}")
             else:
-                mongodb_url = settings.database_url
+                mongodb_url = settings.MONGODB_URL
                 logger.info(f"📍 MongoDB URL: {mongodb_url}")
 
             self.mongodb_client = AsyncIOMotorClient(mongodb_url)
@@ -269,9 +269,7 @@ class WeaviateMongoDBConnector:
 
             # استفاده از text2vec-openai vectorizer - Weaviate خودش vectorها را تولید می‌کند
             vectorizer_config = Configure.Vectorizer.text2vec_openai(
-                model=embedder_model,
-                api_key=embedder_api_key,
-                base_url=embedder_openai_base_url
+                model=embedder_model
             )
 
             # تنظیمات vector index بر اساس مدل

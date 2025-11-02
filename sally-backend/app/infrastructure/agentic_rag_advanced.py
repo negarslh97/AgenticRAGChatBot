@@ -415,7 +415,7 @@ class AdvancedAgenticRAG:
         """
         with PerformanceLogger(logger, "tree_search"):
             logger.info(f"🌳 Performing tree-aware search for: {state['query'][:100]}")
-            logger.info(f"🔍 Search limit: {limit} nodes")
+            logger.info(f"🔍 Search limit: 5 nodes")
             
             try:
                 # جستجوی vector در Weaviate
@@ -423,7 +423,8 @@ class AdvancedAgenticRAG:
                 
                 if results:
                     logger.info(f"✅ Found {len(results)} relevant nodes")
-                    logger.info(f"📊 Top scores: {[f'{r.get('score', 0):.3f}' for r in results[:3]]}")
+                    scores = [f"{r.get('score', 0):.3f}" for r in results[:3]]
+                    logger.info(f"📊 Top scores: {scores}")
 
                     # غنی‌سازی با context درختی
                     enriched_results = await self._enrich_with_tree_context(results)

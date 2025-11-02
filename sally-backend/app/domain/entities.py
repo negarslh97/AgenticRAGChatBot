@@ -127,21 +127,26 @@ class GuestSession(Document):
 
 class Conversation(Document):
     """Conversation can belong to either a customer, admin, or a guest session."""
-    customer_id: Optional[str] = Indexed()  # Indexed for faster user queries
-    admin_id: Optional[str] = Indexed()  # For admin conversations
-    guest_session_id: Optional[str] = Indexed()  # Indexed for guest sessions
-    title: Optional[str] = None  # AI-generated title for the conversation
-    tags: List[str] = []  # AI-generated tags for categorizing the conversation
 
-    # 🆕 Conversation metadata (settings used for this conversation)
-    rag_type: Optional[str] = "simple"  # "simple" or "agentic"
-    model_name: Optional[str] = None  # LLM model used
-    temperature: Optional[float] = 0.7  # Temperature setting
+    # ====================================================================
+    # ✅✅✅ اصلاح اصلی: تغییر نحوه تعریف فیلدهای اختیاری و ایندکس‌شده
+    # این الگو به Beanie کمک می‌کند تا مقادیر None را به درستی مدیریت کند.
+    # ====================================================================
+    customer_id: Optional[str] = Field(default=None, index=True)
+    admin_id: Optional[str] = Field(default=None, index=True)
+    guest_session_id: Optional[str] = Field(default=None, index=True)
+    # ====================================================================
 
-    # 🆕 Conversation status and tracking
-    status: str = "active"  # "active", "closed", "archived"
+    title: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+
+    rag_type: str = Field(default="simple")
+    model_name: Optional[str] = None
+    temperature: float = Field(default=0.7)
+
+    status: str = Field(default="active")
     resolved_at: Optional[datetime] = None
-    closed_by: Optional[str] = None  # ID of admin who closed the conversation
+    closed_by: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -149,12 +154,16 @@ class Conversation(Document):
 
     class Settings:
         name = "conversations"
-    
+        # تعریف ایندکس‌ها در سطح کلاس برای کنترل بهتر
+        indexes = [
+            "customer_id",
+            "admin_id",
+            "guest_session_id",
+        ]
+
     async def before_save(self) -> None:
         """Hook to update timestamps before saving."""
         self.updated_at = datetime.utcnow()
-        
-        # Set resolved_at when status changes to "closed"
         if self.status == "closed" and self.resolved_at is None:
             self.resolved_at = datetime.utcnow()
 
@@ -333,8 +342,8 @@ class KnowledgeBaseArticle(Document):
 class UnansweredQuestion(Document):
     """Questions that couldn't be answered by the AI."""
     question: str = Indexed()  # Indexed for search
-    customer_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed for filtering
-    guest_session_id: Optional[str] = Indexed()  # Reference to GuestSession, indexed
+    customer_id: Optional[Indexed(str)] = Field(default=None)  # Store ObjectId as string, indexed for filtering
+    guest_session_id: Optional[Indexed(str)] = Field(default=None)  # Reference to GuestSession, indexed
     context: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_resolved: bool = False
@@ -347,9 +356,9 @@ class UnansweredQuestion(Document):
 
 class Feedback(Document):
     """User feedback for conversations."""
-    conversation_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed for filtering
-    customer_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed
-    guest_session_id: Optional[str] = Indexed()  # Reference to GuestSession, indexed
+    conversation_id: Optional[Indexed(str)] = Field(default=None)  # Store ObjectId as string, indexed for filtering
+    customer_id: Optional[Indexed(str)] = Field(default=None)  # Store ObjectId as string, indexed
+    guest_session_id: Optional[Indexed(str)] = Field(default=None)  # Reference to GuestSession, indexed
     rating: int  # 1-5 scale
     comment: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -369,8 +378,8 @@ class Feedback(Document):
 
 class ActivityLog(Document):
     """System activity logs for auditing."""
-    admin_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed for filtering
-    customer_id: Optional[str] = Indexed()  # Store ObjectId as string, indexed
+    admin_id: Optional[Indexed(str)] = Field(default=None)  # Store ObjectId as string, indexed for filtering
+    customer_id: Optional[Indexed(str)] = Field(default=None)  # Store ObjectId as string, indexed
     action: str = Indexed()  # Indexed for filtering by action type
     resource_type: str = Indexed()  # "article", "customer", etc., indexed
     resource_id: Optional[str] = Indexed()  # Indexed for specific resource queries

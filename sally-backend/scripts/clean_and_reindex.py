@@ -133,9 +133,9 @@ async def step3_fetch_articles():
     logger.info("=" * 80)
     
     try:
-        # اتصال به MongoDB
-        logger.info(f"Connecting to: {settings.database_url}")
-        mongodb_client = AsyncIOMotorClient(settings.database_url)
+        # اتصال به MongoDB - استفاده از MONGODB_URL از config.py
+        logger.info(f"Connecting to: {settings.MONGODB_URL}")
+        mongodb_client = AsyncIOMotorClient(settings.MONGODB_URL)
         db = mongodb_client.get_database()
         
         # بازیابی مقالات published

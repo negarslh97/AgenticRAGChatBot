@@ -554,8 +554,18 @@ class LangChainService:
             if conversation_history and len(conversation_history) > 0:
                 history_text = "\n**تاریخچه مکالمه:**\n"
                 for msg in conversation_history:
-                    role_fa = "کاربر" if msg["role"] == "user" else "سالی"
-                    history_text += f"{role_fa}: {msg['content']}\n"
+                    # Handle both tuple format (('user', 'content'),) and dict format ({'role': 'user', 'content': 'content'})
+                    if isinstance(msg, tuple) and len(msg) >= 2:
+                        role = msg[0]
+                        content = msg[1]
+                    elif isinstance(msg, dict):
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                    else:
+                        continue  # Skip invalid format
+                    
+                    role_fa = "کاربر" if role == "user" else "سالی"
+                    history_text += f"{role_fa}: {content}\n"
                 history_text += "\n"
 
             # 🎯 تطبیق سبک پاسخ با نوع سوال - تاکید بر پاسخ‌های کوتاه‌تر

@@ -161,7 +161,11 @@ async def get_article(
     markdown_tree = None
     try:
         from app.infrastructure.markdown_parser import markdown_parser
-        tree = markdown_parser.parse_to_tree(article.content_markdown, str(article.id))
+        tree = markdown_parser.parse_to_tree(
+            article.content_markdown,
+            str(article.id),
+            article_title=article.title
+        )
 
         if tree.get_all_nodes():
             # تبدیل به response format

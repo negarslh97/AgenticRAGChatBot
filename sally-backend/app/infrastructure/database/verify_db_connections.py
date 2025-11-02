@@ -28,7 +28,7 @@ async def check_mongodb():
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
         
-        mongodb_url = settings.database_url
+        mongodb_url = settings.MONGODB_URL
         print(f"🔗 MongoDB URL: {mongodb_url}")
         
         # اتصال به MongoDB

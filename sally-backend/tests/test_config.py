@@ -53,7 +53,7 @@ def main():
     # 2. Database Settings
     # =================================================================
     print_section("2️⃣  Database Settings")
-    check_value("MongoDB URI", settings.database_url, is_secret=True)
+    check_value("MongoDB URI", settings.MONGODB_URL, is_secret=True)
     check_value("Weaviate URL", settings.weaviate_url)
     check_value("Weaviate API Key", settings.weaviate_api_key_loaded, is_secret=True)
     
@@ -123,7 +123,7 @@ def main():
     missing_items = []
     
     items_to_check = [
-        ("MongoDB", settings.database_url),
+        ("MongoDB", settings.MONGODB_URL),
         ("Weaviate", settings.weaviate_url),
         ("OpenAI API Key", settings.openai_api_key_loaded),
         ("Embedder API Key", settings.embedder_api_key_loaded),

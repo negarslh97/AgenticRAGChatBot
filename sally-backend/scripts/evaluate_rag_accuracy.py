@@ -421,10 +421,10 @@ async def initialize_database():
     
     try:
         # Create Motor client
-        client = motor.motor_asyncio.AsyncIOMotorClient(settings.database_url)
-        
+        client = motor.motor_asyncio.AsyncIOMotorClient(settings.MONGODB_URL)
+
         # Get database
-        db_name = settings.database_url.split("/")[-1] if "/" in settings.database_url else "SallyChatBot"
+        db_name = settings.MONGODB_URL.split("/")[-1] if "/" in settings.MONGODB_URL else "SallyChatBot"
         database = client[db_name]
         
         # Initialize Beanie

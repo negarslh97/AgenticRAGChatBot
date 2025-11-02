@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     agentic_fast_model: Optional[str] = None    # برای analyze_query, plan_strategy
     agentic_power_model: Optional[str] = None   # برای synthesize_answer
     use_hybrid_model_strategy: bool = False      # فعال/غیرفعال کردن
+    
+    # Weaviate Sync Configuration
+    enable_weaviate_sync: bool = True          # فعال/غیرفعال کردن همگام‌سازی با Weaviate
 
     # Docs-as-Code Git Configuration
     kb_git_repo_url: Optional[str] = None
@@ -134,8 +137,8 @@ class Settings(BaseSettings):
     @property
     def embedder_model_loaded(self) -> str:
         import os
-        return self.embedder_model or os.getenv("EMBEDDER_MODEL") or "text-embedding-3-small"
-
+        return self.embedder_model or os.getenv("EMBEDDER_MODEL")
+        
     @property
     def ollama_url_loaded(self) -> Optional[str]:
         import os

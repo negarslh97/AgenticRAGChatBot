@@ -39,17 +39,18 @@ class MarkdownParser:
         self.max_chunk_size = max_chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def parse_to_tree(self, markdown_content: str, article_id: str, article_title: str = None) -> MarkdownTree:
+    def parse_to_tree(self, markdown_content: str, article_id: str, article_title: str = None, filename: str = None) -> MarkdownTree:
         """
         Parse markdown content into a hierarchical tree structure.
 
         Args:
             markdown_content: The markdown content to parse
             article_id: ID of the article this tree belongs to
-            article_title: Title of the article from MongoDB (will be root node)
+            article_title: Title of the article from MongoDB (fallback)
+            filename: Original filename for fallback title extraction
 
         Returns:
-            MarkdownTree: Hierarchical tree structure with article title as root
+            MarkdownTree: Hierarchical tree structure with actual H1 as root
         """
         lines = markdown_content.split('\n')
         nodes = []
@@ -58,45 +59,75 @@ class MarkdownParser:
         
         # محتوای قبل از اولین heading را برای root node ذخیره می‌کنیم
         preamble_content = []
-
-        i = 0
-        first_heading_found = False
         
+        # برای استخراج عنوان اصلی (H1) از markdown
+        main_title = None
+        root_content = []
+        
+        i = 0
         while i < len(lines):
             line = lines[i]
+            line_stripped = line.strip()
 
             # Check if this line is a heading
-            heading_match = self.heading_pattern.match(line.strip())
+            heading_match = self.heading_pattern.match(line_stripped)
 
             if heading_match:
-                first_heading_found = True
+                level = len(heading_match.group(1))
+                title = heading_match.group(2).strip()
                 
                 # Save content for previous node if exists
                 if current_node:
                     current_node.content = '\n'.join(content_buffer).strip()
                     nodes.append(current_node)
+                    content_buffer = []
 
-                # Create new node for this heading (level + 1 چون root در level 0 است)
-                level = len(heading_match.group(1)) + 1
-                title = heading_match.group(2).strip()
-
-                current_node = MarkdownNode(
-                    id=str(uuid.uuid4()),
-                    title=title,
-                    level=level,
-                    content="",  # Will be filled later
-                    parent_id=None,  # Will be set later
-                    path="",  # Will be set later
-                    order=0  # Will be set later
-                )
-
-                content_buffer = []
-            else:
-                # Add line to current content buffer
-                if not first_heading_found:
-                    preamble_content.append(line)
+                # Check if this is the first H1 heading
+                if level == 1 and main_title is None:
+                    # First H1 found - this becomes the main article title
+                    main_title = title
+                    # Content before this H1 goes to root
+                    root_content = preamble_content.copy()
+                    # Don't create a node for this H1 - it becomes the root
                 else:
+                    # This is a regular heading (H2+ or second H1+) - create a node
+                    # Adjust level to be relative to root (H2 should be level 1 when H1 exists)
+                    actual_level = level
+                    if main_title is not None:
+                        # If H1 exists, shift down by 1 (H2->1, H3->2, etc.)
+                        actual_level = level - 1
+                    else:
+                        # If no H1 found, shift down by 2 (H2->1, H3->2, etc.)
+                        actual_level = level - 2
+                    
+                    current_node = MarkdownNode(
+                        id=str(uuid.uuid4()),
+                        title=title,
+                        level=actual_level,
+                        content="",  # Will be filled later
+                        parent_id=None,
+                        path="",
+                        order=0
+                    )
+
+            else:
+                # This is regular content
+                if main_title is None and not nodes and not current_node:
+                    # No H1 found and no current node yet, this goes to preamble (until first heading)
+                    preamble_content.append(line)
+                elif current_node:
+                    # We have a current node, collect content for it
                     content_buffer.append(line)
+                elif main_title is not None:
+                    # We have an H1 but no current node, this goes to root content
+                    root_content.append(line)
+                else:
+                    # No H1 but we have nodes, collect for current node if exists
+                    if current_node:
+                        content_buffer.append(line)
+                    else:
+                        # Wait for first node to be created
+                        pass
 
             i += 1
 
@@ -108,12 +139,30 @@ class MarkdownParser:
         # 🆕 تقسیم chunks بزرگ با overlap
         nodes = self._split_large_chunks(nodes)
 
-        # ✅ ایجاد Root Node با عنوان مقاله از MongoDB
+        # تعیین عنوان اصلی مقاله
+        final_title = main_title
+        if not final_title:
+            # اگر H1 پیدا نشد، از article_title یا filename استفاده کن
+            if article_title:
+                final_title = article_title
+            elif filename:
+                # استخراج عنوان از نام فایل
+                name_without_ext = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                final_title = name_without_ext.replace('_', ' ').replace('-', ' ').title()
+            else:
+                final_title = "مقاله بدون عنوان"  # Fallback نهایی
+        
+        # محتوای root node
+        if not root_content and not main_title:
+            # اگر H1 پیدا نشد، preamble_content را به root بده
+            root_content = preamble_content
+        
+        # ✅ ایجاد Root Node با عنوان واقعی از H1
         root_node = MarkdownNode(
             id=str(uuid.uuid4()),
-            title=article_title or "مقاله",  # عنوان از MongoDB یا پیش‌فرض
+            title=final_title,
             level=0,  # Root node همیشه level 0
-            content='\n'.join(preamble_content).strip(),  # محتوای قبل از اولین heading
+            content='\n'.join(root_content).strip(),
             parent_id="-1",  # Root has no parent
             path="0",
             order=0
