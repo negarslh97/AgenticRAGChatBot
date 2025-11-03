@@ -663,39 +663,24 @@ class LangChainService:
                 max_tokens=500  # پاسخ‌های محاوره‌ای کوتاه‌تر هستند
             )
             
-            # ساخت prompt محاوره‌ای
-            conversational_prompt = f"""شما یک دستیار دوستانه و حرفه‌ای هستید. به این پیام به صورت محاوره‌ای و طبیعی پاسخ دهید:
-
-پیام کاربر: {query}
-
-دستورالعمل:
-- اگر کاربر اسم خود را معرفی کرد، از او با نام استقبال کنید
-- اگر تشکر کرد، خوشحالی خود را ابراز کنید
-- اگر سلام کرد، گرم برخورد کنید
-- اگر احوال‌پرسی کرد، پاسخی دوستانه بدهید
-- پاسخ را کوتاه (1-2 جمله) و صمیمی نگه دارید
-- در پایان بپرسید که چگونه می‌توانید کمک کنید
-
-پاسخ شما:"""
+            # 🔥 استفاده از prompt template صحیح برای پاسخ‌های محاوره‌ای
+            conversational_prompt_template = get_prompt("conversational_response")
             
             # 🧠 آماده‌سازی تاریخچه مکالمه با ConversationMemoryManager
             history_text = ""
             if conversation_history and len(conversation_history) > 0:
-                # فقط 6 پیام آخر برای محاوره (3 تبادل)
-                recent_messages = conversation_history[-6:]
-                history_text = "\n\nتاریخچه مکالمه اخیر:\n"
-                for msg in recent_messages:
-                    role_fa = "کاربر" if msg.get("role") == "user" else "دستیار"
-                    content = msg.get("content", "")
-                    history_text += f"{role_fa}: {content}\n"
-                history_text += "\n"
+                # فقط 10 پیام آخر برای محاوره
+                recent_messages = conversation_history[-10:]
+                history_text = format_history_for_prompt(recent_messages)
                 logger.info(f"📚 Conversational history: {len(recent_messages)} messages (from {len(conversation_history)} total)")
             else:
                 logger.info(f"📚 No conversation history available")
+                history_text = "هیچ تاریخچه‌ای موجود نیست. این اولین پیام است.\n\n"
             
-            # ساخت prompt template ساده
+            # ساخت prompt template با placeholders
             from langchain_core.prompts import ChatPromptTemplate
-            prompt = ChatPromptTemplate.from_template(history_text + conversational_prompt)
+            prompt = ChatPromptTemplate.from_template(conversational_prompt_template)
+            
             
             chain = prompt | model
             
@@ -704,7 +689,10 @@ class LangChainService:
             empty_chunk_count = 0
             first_content_found = False
             
-            async for chunk in chain.astream({}):
+            async for chunk in chain.astream({
+                "history": history_text,
+                "query": query
+            }):
                 chunk_num += 1
                 content = chunk.content if hasattr(chunk, 'content') else str(chunk)
 

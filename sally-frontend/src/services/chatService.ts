@@ -24,7 +24,7 @@ export interface ChatMessage {
     }>
     confidence?: number
     suggested_actions?: string[]
-    rag_type?: 'simple' | 'detailed'
+    rag_type?: 'simple' | 'detailed' | 'agentic'
     can_get_more_details?: boolean
     model_name?: string
     provider?: string
@@ -76,6 +76,7 @@ export interface Conversation {
   rag_type?: string  // "simple" or "agentic"
   model_name?: string  // LLM model used
   temperature?: number  // Temperature setting
+  type?: string  // From backend API: "Simple RAG" or "Agentic"
 }
 
 export const chatService = {

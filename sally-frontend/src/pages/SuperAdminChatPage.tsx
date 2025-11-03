@@ -41,6 +41,7 @@ import { chatService } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
 import ArticleHighlightModal from '../components/ArticleHighlightModal'
+import BlackCatImage from '../assets/Black-Cat.png'
 
 interface Message {
   id: string
@@ -76,6 +77,7 @@ interface Message {
   suggested_actions?: string[]
   complexity_fa?: string
   model?: string
+  ragType?: 'simple' | 'agentic' | 'detailed'  // 🔥 فیلد جدید برای ذخیره rag_type استخراج شده
 }
 
 interface Conversation {
@@ -85,6 +87,7 @@ interface Conversation {
   created_at?: string
   updated_at?: string
   rag_type?: 'simple' | 'agentic' | 'detailed'
+  type?: string // From backend API: "Simple RAG" or "Agentic"
 }
 
 type RAGType = 'simple' | 'agentic' | 'detailed'
@@ -97,7 +100,7 @@ const AVAILABLE_MODELS = [
   // 🥇 سریع‌ترین (264 ch/s، 0% empty chunks)
   { id: 'google/gemini-2.5-flash', name: '🏆 Gemini 2.5 Flash', provider: 'Google', description: '✅ سریع‌ترین - 264 ch/s، رایگان' },
   { id: 'qwen/qwen3-235b-a22b:free', name: 'Qwen 3', provider: 'Alibaba', description: '✅ سریع‌ترین - 264 ch/s، رایگان' },
-
+  { id:'minimax/minimax-m2:free', name: 'MINIMAX M2', provider: 'minimax', description: ''},
   // 🥈 مدل‌های رایگان عالی
   { id: 'deepseek/deepseek-chat-v3.1:free', name: '⭐ DeepSeek V3.1 (Free)', provider: 'DeepSeek', description: '✅ 117 ch/s، 0% empty، رایگان' },
   
@@ -120,9 +123,40 @@ const AVAILABLE_MODELS = [
   { id: 'ollama:llama3.1:8b-instruct-q4_0', name: 'Llama 3.1 8B', provider: 'Ollama', description: 'مدل محلی Meta' },
 ]
 
+// 🔥 Elegant Skeleton Loader Component
+const SkeletonLoader = () => (
+  <div className="flex items-start space-x-2 space-x-reverse p-3">
+    {/* Avatar Skeleton */}
+    <div className="w-8 h-8 md:w-10 md:h-10 rounded-full shimmer dark:shimmer flex-shrink-0"></div>
+    
+    {/* Message Content Skeleton */}
+    <div className="flex-1 space-y-2 min-w-0">
+      {/* First line */}
+      <div className="h-4 shimmer dark:shimmer rounded w-3/4 animate-pulse"></div>
+      {/* Second line */}
+      <div className="h-4 shimmer dark:shimmer rounded w-1/2 animate-pulse"></div>
+      {/* Optional third line for longer content */}
+      <div className="h-4 shimmer dark:shimmer rounded w-2/3 animate-pulse"></div>
+    </div>
+  </div>
+)
+
+// 🔥 Thinking Indicator Component (Legacy - keeping for compatibility)
+const ThinkingIndicator = () => (
+  <div className="flex items-center space-x-2 space-x-reverse p-3 bg-white border-t border-gray-200">
+    <div className="flex items-center gap-2">
+      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+      <span className="text-gray-500 text-sm mr-2">در حال فکر کردن...</span>
+    </div>
+  </div>
+)
+
 const SuperAdminChatPage = () => {
     const { user } = useAuth()
     const [isSidebarOpen, setIsSidebarOpen] = useState(false) // ✅ Default: closed on mobile
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false) // 🔥 New: Sidebar collapsed state
     const [conversations, setConversations] = useState<Conversation[]>([])
     const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
     const [newMessage, setNewMessage] = useState('')
@@ -134,9 +168,16 @@ const SuperAdminChatPage = () => {
     const [showSettingsModal, setShowSettingsModal] = useState(false)
     const [selectedModel, setSelectedModel] = useState<string>('google/gemini-2.5-flash')  // 🏆 سریع‌ترین و بهترین مدل برای RAG
     const [temperature, setTemperature] = useState<number>(0.7)
+    const [isThinking, setIsThinking] = useState(false)  // 🔥 State for "thinking" indicator
+    const [typewriterMessages, setTypewriterMessages] = useState<{[key: string]: string}>({})  // 🔥 Typewriter effect state
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const messagesContainerRef = useRef<HTMLDivElement>(null)
     const initializationRef = useRef(false)
-    
+
+    // Smart scroll state - using useRef for better performance
+    const userHasScrolledUp = useRef(false)
+    const [showGoToBottomBtn, setShowGoToBottomBtn] = useState(false)
+
     // 🔥 Article Highlight Modal state
     const [highlightModal, setHighlightModal] = useState<{
         isOpen: boolean;
@@ -163,15 +204,74 @@ const SuperAdminChatPage = () => {
     const isDevelopment = process.env.NODE_ENV === 'development'
 
     const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+            // Only auto-scroll if user hasn't scrolled up
+            if (!userHasScrolledUp.current && messagesContainerRef.current) {
+                messagesContainerRef.current.scrollTo({
+                    top: messagesContainerRef.current.scrollHeight,
+                    behavior: 'smooth'
+                })
+            }
+        }, [])
+        
+        // 🔥 Typewriter Effect Function
+        const startTypewriter = useCallback((messageId: string, fullText: string) => {
+            let currentIndex = 0
+            const speed = 30 // milliseconds per character
+            
+            const type = () => {
+                if (currentIndex < fullText.length) {
+                    setTypewriterMessages(prev => ({
+                        ...prev,
+                        [messageId]: fullText.substring(0, currentIndex + 1)
+                    }))
+                    currentIndex++
+                    setTimeout(type, speed)
+                }
+            }
+            
+            type()
+        }, [])
+        
+        // 🔥 Typewriter Cursor Component
+        const TypewriterCursor = () => (
+            <span className="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
+        )
+
+    const handleScroll = useCallback(() => {
+        if (!messagesContainerRef.current) return
+
+        const container = messagesContainerRef.current
+        const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 10
+
+        if (isAtBottom) {
+            userHasScrolledUp.current = false
+            setShowGoToBottomBtn(false)
+        } else {
+            userHasScrolledUp.current = true
+            setShowGoToBottomBtn(true)
+        }
     }, [])
 
-    useEffect(() => {
+    const handleGoToBottom = () => {
+        userHasScrolledUp.current = false
+        setShowGoToBottomBtn(false)
         scrollToBottom()
+    }
+
+    useEffect(() => {
+        // Always auto-scroll smoothly when messages change, but respect user scroll preference
+        if (!userHasScrolledUp.current) {
+            scrollToBottom()
+        }
     }, [selectedConversation?.messages, scrollToBottom])
     
     const toggleSidebar = () => {
         setIsSidebarOpen(!isSidebarOpen)
+    }
+
+    // 🔥 Toggle sidebar collapse/expand
+    const toggleSidebarCollapse = () => {
+        setIsSidebarCollapsed(!isSidebarCollapsed)
     }
 
     // Load conversations on component mount
@@ -189,7 +289,7 @@ const SuperAdminChatPage = () => {
                 messages: [],
                 created_at: conv.created_at,
                 updated_at: conv.updated_at,
-                rag_type: 'simple' // Default for existing conversations
+                rag_type: conv.type === 'Agentic' ? 'agentic' : 'simple' // Map backend type to rag_type
             }))
 
             setConversations(formattedConversations)
@@ -214,6 +314,7 @@ const SuperAdminChatPage = () => {
         if (newMessage.trim() === '' || !selectedConversation) return
 
         setIsLoading(true)
+        setIsThinking(true)  // 🔥 Start thinking state
         const messageContent = newMessage.trim()
 
         try {
@@ -255,185 +356,201 @@ const SuperAdminChatPage = () => {
             const currentConvId = selectedConversation.id.startsWith('new-') ? undefined : selectedConversation.id;
 
             await chatService.sendAdminMessageStream(
-                currentConvId,
-                messageContent,
-                ragType,
-                (evt: any) => {
-                    if (!evt) return;
-
-                    if (evt.type === 'init') {
-                        // Set conversation ID if it was a new chat
-                        if (!currentConvId && evt.conversation_id) {
-                            setConversations(prev =>
-                                prev.map(conv =>
-                                    conv.id === selectedConversation.id
-                                        ? { ...conv, id: evt.conversation_id }
-                                        : conv
-                                )
-                            );
-                            setSelectedConversation(prev => prev ? ({ ...prev, id: evt.conversation_id }) : prev);
-                        }
-                    }
-
-                    if (evt.type === 'sources') {
-                        console.log('📚 Admin sources:', evt.sources);
-                        // Add sources to message metadata
-                        setSelectedConversation(prev => {
-                            if (!prev) return prev;
-                            const updated = { ...prev };
-                            updated.messages = updated.messages.map(m => 
-                                m.id === assistantTempId 
-                                    ? { ...m, sources: evt.sources, confidence: evt.confidence }
-                                    : m
-                            );
-                            return updated;
-                        });
-                    }
-
-                    if (evt.type === 'chunk') {
-                        setSelectedConversation(prev => {
-                            if (!prev) return prev;
-                            const updated = { ...prev };
-                            updated.messages = updated.messages.map(m =>
-                                m.id === assistantTempId
-                                    ? { ...m, content: (m.content || '') + (evt.content || '') }
-                                    : m
-                            );
-                            return updated;
-                        });
-                    }
-
-                    if (evt.type === 'complete') {
-                        setSelectedConversation(prev => {
-                            if (!prev) return prev;
-                            const updated = { ...prev };
-                            updated.messages = updated.messages.map(m =>
-                                m.id === assistantTempId
-                                    ? { 
-                                        ...m, 
-                                        id: evt.message_id || assistantTempId, 
-                                        content: evt.full_response || m.content,
-                                        complexity_fa: evt.complexity_fa,
-                                        model: evt.model,
-                                        metadata: {
-                                            ...(m.metadata || {}),
-                                            rag_type: evt.rag_type,
-                                            can_get_more_details: evt.can_get_more_details || false  // 🔥 فیلد کلیدی برای نمایش دکمه
-                                        }
-                                    }
-                                    : m
-                            );
-                            return updated;
-                        });
-                        setIsLoading(false);
-                        
-                        // 🔥 بعد از تکمیل پاسخ، لیست conversations رو refresh کن
-                        const finalConvId = evt.conversation_id || currentConvId;
-                        console.log('🔍 DEBUG: Starting conversation refresh...', { 
-                            finalConvId, 
-                            evt_conversation_id: evt.conversation_id,
                             currentConvId,
-                            evt_rag_type: evt.rag_type 
-                        });
-                        
-                        if (finalConvId) {
-                            setTimeout(async () => {
-                                try {
-                                    console.log('📡 Fetching conversation from server:', finalConvId);
-                                    // دریافت اطلاعات به‌روز conversation از سرور
-                                    const updatedConv = await chatService.getConversation(finalConvId);
-                                    console.log('📥 Server response:', updatedConv);
-                                    
-                                    // به‌روزرسانی لیست conversations
-                                    setConversations(prev => {
-                                        console.log('📝 Current conversations before update:', prev.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
-                                        
-                                        const exists = prev.some(c => c.id === finalConvId);
-                                        console.log('🔍 Conversation exists in list:', exists);
-                                        
-                                        if (exists) {
-                                            // اگر موجود بود، اطلاعاتش رو update کن
-                                            const updated = prev.map(c => 
-                                                c.id === finalConvId 
-                                                    ? { 
-                                                        ...c, 
-                                                        title: updatedConv.title || c.title,
-                                                        rag_type: updatedConv.rag_type || evt.rag_type,
-                                                        updated_at: updatedConv.updated_at
-                                                    }
-                                                    : c
-                                            );
-                                            console.log('📝 Updated conversations:', updated.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
-                                            return updated;
-                                        } else {
-                                            // اگر موجود نبود (مکالمه جدید)، اضافه‌اش کن
-                                            const newConversation = {
-                                                id: finalConvId,
-                                                title: updatedConv.title || messageContent.slice(0, 50),
-                                                messages: [],
-                                                created_at: updatedConv.created_at || new Date().toISOString(),
-                                                updated_at: updatedConv.updated_at || new Date().toISOString(),
-                                                rag_type: updatedConv.rag_type || evt.rag_type
-                                            };
-                                            console.log('➕ Adding new conversation:', newConversation);
-                                            return [newConversation, ...prev];
-                                        }
-                                    });
-                                    
-                                    // به‌روزرسانی selectedConversation با عنوان و rag_type جدید
+                            messageContent,
+                            ragType,
+                            (evt: any) => {
+                                if (!evt) return;
+            
+                                if (evt.type === 'init') {
+                                    // Set conversation ID if it was a new chat
+                                    if (!currentConvId && evt.conversation_id) {
+                                        setConversations(prev =>
+                                            prev.map(conv =>
+                                                conv.id === selectedConversation.id
+                                                    ? { ...conv, id: evt.conversation_id }
+                                                    : conv
+                                            )
+                                        );
+                                        setSelectedConversation(prev => prev ? ({ ...prev, id: evt.conversation_id }) : prev);
+                                    }
+                                }
+            
+                                if (evt.type === 'sources') {
+                                    console.log('📚 Admin sources:', evt.sources);
+                                    // Add sources to message metadata
                                     setSelectedConversation(prev => {
                                         if (!prev) return prev;
-                                        const updated = {
-                                            ...prev,
-                                            title: updatedConv.title || prev.title,
-                                            rag_type: updatedConv.rag_type || evt.rag_type
-                                        };
-                                        console.log('🎯 Updated selectedConversation:', { 
-                                            old_title: prev.title, 
-                                            new_title: updated.title,
-                                            old_rag_type: prev.rag_type,
-                                            new_rag_type: updated.rag_type
-                                        });
+                                        const updated = { ...prev };
+                                        updated.messages = updated.messages.map(m =>
+                                            m.id === assistantTempId
+                                                ? { ...m, sources: evt.sources, confidence: evt.confidence }
+                                                : m
+                                        );
                                         return updated;
                                     });
-                                    
-                                    console.log('✅ Conversation updated successfully:', { 
-                                        id: finalConvId, 
-                                        title: updatedConv.title,
-                                        rag_type: updatedConv.rag_type || evt.rag_type 
-                                    });
-                                } catch (error) {
-                                    console.error('❌ Failed to refresh conversation:', error);
                                 }
-                            }, 500); // کمی تاخیر تا سرور عنوان رو generate کنه
-                        } else {
-                            console.warn('⚠️ No finalConvId available for refresh');
-                        }
-                    }
-
-                    if (evt.type === 'error') {
-                        toast.error(`خطا: ${evt.message}`);
-                        setSelectedConversation(prev => {
-                            if (!prev) return prev;
-                            const updated = { ...prev };
-                            updated.messages = updated.messages.map(m =>
-                                m.id === assistantTempId
-                                    ? { ...m, is_failed: true, failure_reason: evt.message }
-                                    : m
-                            );
-                            return updated;
-                        });
-                        setIsLoading(false);
-                    }
-                },
-                selectedModel,
-                temperature
-            );
+            
+                                if (evt.type === 'chunk') {
+                                    // 🔥 Hide thinking indicator when first chunk arrives
+                                    setIsThinking(false);
+                                    
+                                    setSelectedConversation(prev => {
+                                        if (!prev) return prev;
+                                        const updated = { ...prev };
+                                        const currentMessage = updated.messages.find(m => m.id === assistantTempId);
+                                        
+                                        if (currentMessage) {
+                                            // Start typewriter effect for new messages
+                                            const newContent = (currentMessage.content || '') + (evt.content || '');
+                                            
+                                            // Initialize typewriter if this is the first chunk
+                                            if (!currentMessage.content && evt.content) {
+                                                setTypewriterMessages(prev => ({
+                                                    ...prev,
+                                                    [assistantTempId]: ''
+                                                }));
+                                                startTypewriter(assistantTempId, newContent);
+                                            }
+                                            
+                                            updated.messages = updated.messages.map(m =>
+                                                m.id === assistantTempId
+                                                    ? { ...m, content: newContent }
+                                                    : m
+                                            );
+                                        }
+                                        return updated;
+                                    });
+                                }
+            
+                                if (evt.type === 'complete') {
+                                    setSelectedConversation(prev => {
+                                        if (!prev) return prev;
+                                        const updated = { ...prev };
+                                        updated.messages = updated.messages.map(m =>
+                                            m.id === assistantTempId
+                                                ? {
+                                                    ...m,
+                                                    id: evt.message_id || assistantTempId,
+                                                    content: evt.full_response || m.content,
+                                                    complexity_fa: evt.complexity_fa,
+                                                    model: evt.model,
+                                                    metadata: {
+                                                        ...(m.metadata || {}),
+                                                        rag_type: evt.rag_type,
+                                                        can_get_more_details: evt.can_get_more_details || false
+                                                    }
+                                                }
+                                                : m
+                                        );
+                                        return updated;
+                                    });
+                                    setIsLoading(false);
+                                    
+                                    // 🔥 Refresh conversations list after completion
+                                    const finalConvId = evt.conversation_id || currentConvId;
+                                    console.log('🔍 DEBUG: Starting conversation refresh...', {
+                                        finalConvId,
+                                        evt_conversation_id: evt.conversation_id,
+                                        currentConvId,
+                                        evt_rag_type: evt.rag_type
+                                    });
+                                    
+                                    if (finalConvId) {
+                                        setTimeout(async () => {
+                                            try {
+                                                console.log('📡 Fetching conversation from server:', finalConvId);
+                                                const updatedConv = await chatService.getConversation(finalConvId);
+                                                console.log('📥 Server response:', updatedConv);
+                                                
+                                                setConversations(prev => {
+                                                    console.log('📝 Current conversations before update:', prev.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
+                                                    
+                                                    const exists = prev.some(c => c.id === finalConvId);
+                                                    console.log('🔍 Conversation exists in list:', exists);
+                                                    
+                                                    if (exists) {
+                                                        const updated = prev.map(c =>
+                                                            c.id === finalConvId
+                                                                ? {
+                                                                    ...c,
+                                                                    title: updatedConv.title || c.title,
+                                                                    rag_type: updatedConv.rag_type || evt.rag_type,
+                                                                    updated_at: updatedConv.updated_at
+                                                                }
+                                                                : c
+                                                        );
+                                                        console.log('📝 Updated conversations:', updated.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
+                                                        return updated;
+                                                    } else {
+                                                        const newConversation = {
+                                                            id: finalConvId,
+                                                            title: updatedConv.title || messageContent.slice(0, 50),
+                                                            messages: [],
+                                                            created_at: updatedConv.created_at || new Date().toISOString(),
+                                                            updated_at: updatedConv.updated_at || new Date().toISOString(),
+                                                            rag_type: updatedConv.rag_type || evt.rag_type
+                                                        };
+                                                        console.log('➕ Adding new conversation:', newConversation);
+                                                        return [newConversation, ...prev];
+                                                    }
+                                                });
+                                                
+                                                setSelectedConversation(prev => {
+                                                    if (!prev) return prev;
+                                                    const updated = {
+                                                        ...prev,
+                                                        title: updatedConv.title || prev.title,
+                                                        rag_type: updatedConv.rag_type || evt.rag_type
+                                                    };
+                                                    console.log('🎯 Updated selectedConversation:', {
+                                                        old_title: prev.title,
+                                                        new_title: updated.title,
+                                                        old_rag_type: prev.rag_type,
+                                                        new_rag_type: updated.rag_type
+                                                    });
+                                                    return updated;
+                                                });
+                                                
+                                                console.log('✅ Conversation updated successfully:', {
+                                                    id: finalConvId,
+                                                    title: updatedConv.title,
+                                                    rag_type: updatedConv.rag_type || evt.rag_type
+                                                });
+                                            } catch (error) {
+                                                console.error('❌ Failed to refresh conversation:', error);
+                                            }
+                                        }, 500);
+                                    } else {
+                                        console.warn('⚠️ No finalConvId available for refresh');
+                                    }
+                                }
+            
+                                if (evt.type === 'error') {
+                                    toast.error(`خطا: ${evt.message}`);
+                                    setSelectedConversation(prev => {
+                                        if (!prev) return prev;
+                                        const updated = { ...prev };
+                                        updated.messages = updated.messages.map(m =>
+                                            m.id === assistantTempId
+                                                ? { ...m, is_failed: true, failure_reason: evt.message }
+                                                : m
+                                        );
+                                        return updated;
+                                    });
+                                    setIsLoading(false);
+                                }
+                            },
+                            selectedModel,
+                            temperature
+                        );
 
         } catch (error: any) {
             console.error('Failed to send message (streaming):', error)
             toast.error('خطا در ارسال پیام')
+        } finally {
             setIsLoading(false)
+            setIsThinking(false)  // 🔥 Always stop thinking state
         }
     }
 
@@ -482,11 +599,15 @@ const SuperAdminChatPage = () => {
         try {
             const messages = await chatService.getConversationMessages(conversationId)
             
-            // Convert API messages to our format
-            const formattedMessages: Message[] = messages.map(msg => ({
+            // Assume 'apiResponse.messages' is the array of messages received from the API.
+            // In our case, messages is the array from the API response
+            
+            // Step A: Map the incoming API data to the structure needed for the state.
+            // This MUST explicitly extract `rag_type` from the metadata.
+            const processedMessages = messages.map(msg => ({
                 id: msg.id,
                 content: msg.content,
-                role: msg.sender_type === 'AI' ? 'assistant' : 'user',
+                role: msg.sender_type === 'AI' ? ('assistant' as const) : ('user' as const),
                 timestamp: new Date(msg.created_at),
                 sender_type: msg.sender_type as any,
                 is_failed: msg.is_failed,
@@ -495,20 +616,26 @@ const SuperAdminChatPage = () => {
                 metadata: msg.metadata,
                 sources: msg.metadata?.sources || [],
                 confidence: msg.metadata?.confidence,
-                suggested_actions: msg.metadata?.suggested_actions || []
-            }))
+                suggested_actions: msg.metadata?.suggested_actions || [],
+                ragType: msg.metadata?.rag_type || 'simple' // Add ragType field
+            }));
 
+            // Step B: *** THIS IS THE MOST IMPORTANT STEP ***
+            // Add this exact console.log to print the processed data.
+            console.log('--- RAG TYPE DIAGNOSTIC DATA ---', processedMessages);
+
+            // Step C: Update the state with the processed data.
             // Update the selected conversation with messages
             setSelectedConversation(prev => prev ? {
                 ...prev,
-                messages: formattedMessages
+                messages: processedMessages
             } : null)
 
             // Also update in conversations list
-            setConversations(prev => 
-                prev.map(conv => 
-                    conv.id === conversationId 
-                        ? { ...conv, messages: formattedMessages }
+            setConversations(prev =>
+                prev.map(conv =>
+                    conv.id === conversationId
+                        ? { ...conv, messages: processedMessages }
                         : conv
                 )
             )
@@ -783,7 +910,7 @@ const SuperAdminChatPage = () => {
                 </div>
             )}
             
-            <div className="flex bg-gray-50 h-[calc(100vh-130px)] relative">
+            <div className="flex bg-gray-50 h-[calc(100vh-170px)] relative">
             {/* Mobile Overlay */}
             {isSidebarOpen && (
                 <div 
@@ -798,7 +925,7 @@ const SuperAdminChatPage = () => {
                 w-80 lg:w-80
                 h-full lg:h-auto
                 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
-                ${isSidebarOpen ? 'lg:w-80' : 'lg:w-0'}
+                ${isSidebarOpen ? (isSidebarCollapsed ? 'lg:w-16' : 'lg:w-80') : 'lg:w-0'}
                 transition-all duration-300
                 bg-white border-l border-gray-200
                 flex flex-col overflow-hidden
@@ -807,160 +934,238 @@ const SuperAdminChatPage = () => {
                 {/* Header */}
                 <div className="p-4 border-b border-gray-200">
                     <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                            <Brain className="w-5 h-5 text-purple-600" />
-                            چت ادمین ارشد
-                        </h2>
-                        <Button
-                            onClick={toggleSidebar}
-                            size="sm"
-                            variant="ghost"
-                            className="lg:hidden"
-                        >
-                            <X className="w-5 h-5" />
-                        </Button>
+                        {/* 🔥 Show title only when not collapsed */}
+                        {!isSidebarCollapsed && (
+                            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                <Brain className="w-5 h-5 text-purple-600" />
+                                چت ادمین ارشد
+                            </h2>
+                        )}
+                        
+                        <div className="flex items-center gap-1">
+                            {/* 🔥 Collapse/Expand Toggle Button */}
+                            <Button
+                                onClick={toggleSidebarCollapse}
+                                size="sm"
+                                variant="ghost"
+                                className="p-1.5 hover:bg-gray-100"
+                                title={isSidebarCollapsed ? 'باز کردن سایدبار' : 'جمع کردن سایدبار'}
+                            >
+                                <ChevronLeft className={`w-4 h-4 transition-transform duration-200 ${isSidebarCollapsed ? 'rotate-180' : ''}`} />
+                            </Button>
+                            
+                            {/* Close button for mobile */}
+                            <Button
+                                onClick={toggleSidebar}
+                                size="sm"
+                                variant="ghost"
+                                className="lg:hidden"
+                            >
+                                <X className="w-5 h-5" />
+                            </Button>
+                        </div>
                     </div>
                     
-                    {/* New Chat Button */}
-                    <Button
-                        onClick={createNewConversation}
-                        className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-md mb-3"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        گفتگوی جدید
-                    </Button>
-
-                    {/* Settings Button */}
-                    <Button
-                        onClick={() => setShowSettingsModal(true)}
-                        variant="secondary"
-                        className="w-full mb-4 flex items-center justify-center gap-2"
-                    >
-                        <Settings className="w-4 h-4" />
-                        تنظیمات پیشرفته
-                    </Button>
-
-                    {/* Current Settings Display */}
-                    <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-                        <p className="text-xs text-gray-600 mb-2 font-medium flex items-center gap-1">
-                            <Brain className="w-3 h-3" />
-                            تنظیمات فعلی:
-                        </p>
-                        <div className="space-y-1 text-xs text-gray-700">
-                            <div className="flex items-center justify-between">
-                                <span>RAG:</span>
-                                <span className={`font-bold ${
-                                    ragType === 'agentic' ? 'text-purple-700' : 'text-blue-700'
-                                }`}>
-                                    {ragType === 'agentic' ? 'پیشرفته' : 'ساده'}
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <span>مدل:</span>
-                                <span className="font-bold text-purple-700">
-                                    {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || 'GPT-4o Mini'}
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <span>Temperature:</span>
-                                <span className="font-bold text-purple-700">{temperature.toFixed(1)}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Search */}
-                    <div className="relative">
-                        <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                        <input
-                            type="text"
-                            placeholder="جستجو در گفتگوها..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full pr-10 pl-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                        />
-                    </div>
-                </div>
-
-                {/* Conversations List */}
-                <div className="flex-1 overflow-y-auto">
-                    {filteredConversations.length === 0 ? (
-                        <div className="p-6 text-center text-gray-500">
-                            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                                <Bot className="w-8 h-8 text-gray-400" />
-                            </div>
-                            <p className="text-sm">هنوز گفتگویی ندارید</p>
-                            <p className="text-xs mt-1">یک گفتگوی جدید شروع کنید</p>
-                        </div>
-                    ) : (
-                        filteredConversations.map((conversation) => (
-                            <div
-                                key={conversation.id}
-                                className={`group p-3 border-b border-gray-100 cursor-pointer transition-all ${
-                                    selectedConversation?.id === conversation.id
-                                        ? 'bg-gradient-to-r from-purple-50 to-blue-50 border-r-4 border-r-purple-500'
-                                        : 'hover:bg-gray-50'
-                                }`}
-                                onClick={() => handleConversationClick(conversation)}
+                    {/* 🔥 Show buttons only when not collapsed */}
+                    {!isSidebarCollapsed && (
+                        <>
+                            {/* New Chat Button */}
+                            <Button
+                                onClick={createNewConversation}
+                                className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-md mb-3"
                             >
-                                <div className="flex items-start justify-between gap-2">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                                                conversation.rag_type === 'agentic'
-                                                    ? 'bg-gradient-to-r from-purple-100 to-blue-100'
-                                                    : 'bg-blue-100'
-                                            }`}>
-                                            {getRagTypeIcon(conversation.rag_type || 'simple')}
-                                            </div>
-                                            <h3 className="text-sm font-medium text-gray-900 truncate flex-1">
-                                                {conversation.title}
-                                            </h3>
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-1 mb-1">
-                                            <span className={`text-xs ${
-                                                conversation.rag_type === 'agentic' ? 'text-purple-600' : 'text-blue-600'
-                                            }`}>
-                                                {getRagTypeLabel(conversation.rag_type || 'simple')}
-                                            </span>
-                                            {/* Complexity */}
-                                            {conversation.messages.length > 0 && conversation.messages[conversation.messages.length - 1].complexity_fa && (
-                                                <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">
-                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa === 'ساده' && '🟢'}
-                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa === 'متوسط' && '🟡'}
-                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa === 'پیچیده' && '🔴'}
-                                                    {conversation.messages[conversation.messages.length - 1].complexity_fa}
-                                                </span>
-                                            )}
-                                            {/* Model */}
-                                            {conversation.messages.length > 0 && conversation.messages[conversation.messages.length - 1].model && (
-                                                <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded truncate max-w-[120px]">
-                                                    {AVAILABLE_MODELS.find(m => m.id === conversation.messages[conversation.messages.length - 1].model)?.name || 
-                                                     conversation.messages[conversation.messages.length - 1].model?.split('/').pop()}
-                                                </span>
-                                            )}
-                                        </div>
-                                        {conversation.messages.length > 0 && (
-                                            <p className="text-xs text-gray-500 truncate">
-                                                {conversation.messages[conversation.messages.length - 1].content}
-                                            </p>
-                                        )}
+                                <Plus className="w-4 h-4 mr-2" />
+                                گفتگوی جدید
+                            </Button>
+
+                            {/* Settings Button */}
+                            <Button
+                                onClick={() => setShowSettingsModal(true)}
+                                variant="secondary"
+                                className="w-full mb-4 flex items-center justify-center gap-2"
+                            >
+                                <Settings className="w-4 h-4" />
+                                تنظیمات پیشرفته
+                            </Button>
+
+                            {/* Current Settings Display */}
+                            <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+                                <p className="text-xs text-gray-600 mb-2 font-medium flex items-center gap-1">
+                                    <Brain className="w-3 h-3" />
+                                    تنظیمات فعلی:
+                                </p>
+                                <div className="space-y-1 text-xs text-gray-700">
+                                    <div className="flex items-center justify-between">
+                                        <span>RAG:</span>
+                                        <span className={`font-bold ${
+                                            ragType === 'agentic' ? 'text-purple-700' : 'text-blue-700'
+                                        }`}>
+                                            {ragType === 'agentic' ? 'پیشرفته' : 'ساده'}
+                                        </span>
                                     </div>
-                                    <Button
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            deleteConversation(conversation.id)
-                                        }}
-                                        variant="ghost"
-                                        size="sm"
-                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500 p-1"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </Button>
+                                    <div className="flex items-center justify-between">
+                                        <span>مدل:</span>
+                                        <span className="font-bold text-purple-700">
+                                            {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || 'GPT-4o Mini'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span>Temperature:</span>
+                                        <span className="font-bold text-purple-700">{temperature.toFixed(1)}</span>
+                                    </div>
                                 </div>
                             </div>
-                        ))
+
+                            {/* Search */}
+                            <div className="relative">
+                                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                                <input
+                                    type="text"
+                                    placeholder="جستجو در گفتگوها..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full pr-10 pl-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                />
+                            </div>
+                        </>
                     )}
                 </div>
+
+                {/* 🔥 Conversations List - Only show when not collapsed */}
+                {!isSidebarCollapsed && (
+                    <div className="conversation-list flex-1 overflow-y-auto">
+                        {filteredConversations.length === 0 ? (
+                            <div className="p-6 text-center text-gray-500">
+                                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                    <Bot className="w-8 h-8 text-gray-400" />
+                                </div>
+                                <p className="text-sm">هنوز گفتگویی ندارید</p>
+                                <p className="text-xs mt-1">یک گفتگوی جدید شروع کنید</p>
+                            </div>
+                        ) : (
+                            filteredConversations.map((conversation) => (
+                                <div
+                                    key={conversation.id}
+                                    className={`conversation-item group p-3 border-b border-gray-100 cursor-pointer transition-all pointer-events-auto ${
+                                        selectedConversation?.id === conversation.id
+                                            ? 'bg-gradient-to-r from-purple-50 to-blue-50 border-r-4 border-r-purple-500'
+                                            : 'hover:bg-gray-50'
+                                    }`}
+                                    onClick={() => handleConversationClick(conversation)}
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center overflow-hidden ${
+                                                    conversation.rag_type === 'agentic'
+                                                        ? 'bg-gradient-to-r from-purple-100 to-blue-100'
+                                                        : 'bg-blue-100'
+                                                }`}>
+                                                    <img
+                                                        src={BlackCatImage}
+                                                        alt="AI Assistant"
+                                                        className="w-full h-full object-cover"
+                                                        onError={(e) => {
+                                                            e.currentTarget.style.display = 'none';
+                                                            const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                                                            if (nextElement) {
+                                                                nextElement.style.display = 'block';
+                                                            }
+                                                        }}
+                                                    />
+                                                </div>
+                                                <h3 className="text-sm font-medium text-gray-900 truncate flex-1">
+                                                    {conversation.title}
+                                                </h3>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-1 mb-1">
+                                                <span className={`text-xs ${
+                                                    conversation.rag_type === 'agentic' ? 'text-purple-600' : 'text-blue-600'
+                                                }`}>
+                                                    {getRagTypeLabel(conversation.rag_type || 'simple')}
+                                                </span>
+                                                {/* Complexity */}
+                                                {conversation.messages.length > 0 && conversation.messages[conversation.messages.length - 1].complexity_fa && (
+                                                    <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">
+                                                        {conversation.messages[conversation.messages.length - 1].complexity_fa === 'ساده' && '🟢'}
+                                                        {conversation.messages[conversation.messages.length - 1].complexity_fa === 'متوسط' && '🟡'}
+                                                        {conversation.messages[conversation.messages.length - 1].complexity_fa === 'پیچیده' && '🔴'}
+                                                        {conversation.messages[conversation.messages.length - 1].complexity_fa}
+                                                    </span>
+                                                )}
+                                                {/* Model */}
+                                                {conversation.messages.length > 0 && conversation.messages[conversation.messages.length - 1].model && (
+                                                    <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded truncate max-w-[120px]">
+                                                        {AVAILABLE_MODELS.find(m => m.id === conversation.messages[conversation.messages.length - 1].model)?.name ||
+                                                         conversation.messages[conversation.messages.length - 1].model?.split('/').pop()}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {conversation.messages.length > 0 && (
+                                                <p className="text-xs text-gray-500 truncate">
+                                                    {conversation.messages[conversation.messages.length - 1].content}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <Button
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                deleteConversation(conversation.id)
+                                            }}
+                                            variant="ghost"
+                                            size="sm"
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500 p-1"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                )}
+                
+                {/* 🔥 Collapsed State - Show minimal info or just icons */}
+                {isSidebarCollapsed && (
+                    <div className="conversation-list flex-1 overflow-y-auto p-2 space-y-2">
+                        {filteredConversations.slice(0, 5).map((conversation) => (
+                            <button
+                                key={conversation.id}
+                                onClick={() => handleConversationClick(conversation)}
+                                className={`conversation-item w-full p-2 rounded-lg transition-all pointer-events-auto ${
+                                    selectedConversation?.id === conversation.id
+                                        ? 'bg-purple-100 border-r-2 border-purple-500'
+                                        : 'hover:bg-gray-100'
+                                }`}
+                                title={conversation.title}
+                            >
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto overflow-hidden relative ${
+                                    conversation.rag_type === 'agentic'
+                                        ? 'bg-gradient-to-r from-purple-100 to-blue-100'
+                                        : 'bg-blue-100'
+                                }`}>
+                                    <img
+                                        src={BlackCatImage}
+                                        alt="AI Assistant"
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                            e.currentTarget.style.display = 'none';
+                                            const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                                            if (nextElement) {
+                                                nextElement.style.display = 'block';
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </button>
+                        ))}
+                        {filteredConversations.length > 5 && (
+                            <div className="text-xs text-gray-400 text-center p-2">
+                                +{filteredConversations.length - 5} more
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Main Chat Area */}
@@ -991,8 +1196,20 @@ const SuperAdminChatPage = () => {
                             
                             {/* Title */}
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
-                                    <Bot className="w-4 h-4 md:w-5 md:h-5" />
+                                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                    <img
+                                        src={BlackCatImage}
+                                        alt="AI Assistant"
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                            e.currentTarget.style.display = 'none';
+                                            const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                                            if (nextElement) {
+                                                nextElement.style.display = 'block';
+                                            }
+                                        }}
+                                    />
+                                    <Bot className="w-4 h-4 md:w-5 md:h-5 text-white hidden" />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <h1 className="text-sm md:text-lg font-bold truncate">
@@ -1024,7 +1241,12 @@ const SuperAdminChatPage = () => {
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-4">
+                <div
+                    ref={messagesContainerRef}
+                    id="messages-container"
+                    className="flex-1 overflow-y-auto p-3 md:p-6 space-y-4"
+                    onScroll={handleScroll}
+                >
                     {!selectedConversation ? (
                         <div className="flex flex-col items-center justify-center h-full text-gray-500 p-4">
                             <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-r from-purple-100 to-blue-100 rounded-full flex items-center justify-center mb-4">
@@ -1064,7 +1286,7 @@ const SuperAdminChatPage = () => {
                                         }
                                     }
                                 }
-                                
+
                                 return (
                                 <div
                                     key={message.id}
@@ -1072,17 +1294,32 @@ const SuperAdminChatPage = () => {
                                 >
                                     <div className={`flex gap-2 md:gap-3 max-w-full md:max-w-3xl ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
                                         {/* Avatar */}
-                                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden ${
                                             message.role === 'user'
                                                 ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
                                                 : message.is_failed
                                                 ? 'bg-red-100 text-red-600'
-                                                : 'bg-gradient-to-r from-green-100 to-blue-100 text-green-700'
+                                                : 'bg-gradient-to-r from-green-100 to-blue-100'
                                         }`}>
                                             {message.role === 'user' ? (
                                                 <User className="w-4 h-4 md:w-5 md:h-5" />
                                             ) : (
-                                                <Bot className="w-4 h-4 md:w-5 md:h-5" />
+                                                <>
+                                                    <img
+                                                        src={BlackCatImage}
+                                                        alt="AI Assistant"
+                                                        className="w-full h-full object-cover"
+                                                        onError={(e) => {
+                                                            // Fallback to Bot icon if image fails to load
+                                                            e.currentTarget.style.display = 'none';
+                                                            const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                                                            if (nextElement) {
+                                                                nextElement.style.display = 'block';
+                                                            }
+                                                        }}
+                                                    />
+                                                    <Bot className="w-4 h-4 md:w-5 md:h-5 text-green-700 hidden" />
+                                                </>
                                             )}
                                         </div>
 
@@ -1097,10 +1334,22 @@ const SuperAdminChatPage = () => {
                                             }`}>
                                                 {message.role === 'assistant' ? (
                                                     <div className="text-xs md:text-sm leading-relaxed">
-                                                        <MarkdownRenderer 
-                                                            content={message.content}
-                                                            variant="compact"
-                                                        />
+                                                        {/* 🔥 Use typewriter content if available, otherwise use full content */}
+                                                        {typewriterMessages[message.id] ? (
+                                                            <div>
+                                                                <MarkdownRenderer
+                                                                    content={typewriterMessages[message.id]}
+                                                                    variant="compact"
+                                                                />
+                                                                {/* Show cursor if still typing */}
+                                                                {typewriterMessages[message.id].length < message.content.length && <TypewriterCursor />}
+                                                            </div>
+                                                        ) : (
+                                                            <MarkdownRenderer
+                                                                content={message.content}
+                                                                variant="compact"
+                                                            />
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <p className="text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
@@ -1148,11 +1397,11 @@ const SuperAdminChatPage = () => {
                                                     </div>
                                                 )}
                                                 
-                                                {/* RAG Type Badge */}
-                                                    {message.metadata?.rag_type && (
+                                                {/* RAG Type Badge -- CORRECTED */}
+                                                    {message.ragType && ( // ✅ از فیلد جدید و صحیح استفاده کن
                                                     <div className="mt-2 flex items-center gap-1 text-xs text-gray-600">
-                                                            {getRagTypeIcon(message.metadata.rag_type)}
-                                                        <span>{getRagTypeLabel(message.metadata.rag_type)}</span>
+                                                            {getRagTypeIcon(message.ragType as RAGType)}
+                                                        <span>{getRagTypeLabel(message.ragType as RAGType)}</span>
                                                         </div>
                                                     )}
                                                 </div>
@@ -1244,17 +1493,32 @@ const SuperAdminChatPage = () => {
                                                                         if (!evt) return;
                                                                         
                                                                         if (evt.type === 'chunk') {
-                                                                            setSelectedConversation(prev => {
-                                                                                if (!prev) return prev;
-                                                                                const updated = { ...prev };
-                                                                                updated.messages = updated.messages.map(m =>
-                                                                                    m.id === assistantTempId
-                                                                                        ? { ...m, content: (m.content || '') + (evt.content || '') }
-                                                                                        : m
-                                                                                );
-                                                                                return updated;
-                                                                            });
-                                                                        }
+                                                                             setSelectedConversation(prev => {
+                                                                                 if (!prev) return prev;
+                                                                                 const updated = { ...prev };
+                                                                                 const currentMessage = updated.messages.find(m => m.id === assistantTempId);
+                                                                                 
+                                                                                 if (currentMessage) {
+                                                                                     const newContent = (currentMessage.content || '') + (evt.content || '');
+                                                                                     
+                                                                                     // Initialize typewriter for detailed explanation
+                                                                                     if (!currentMessage.content && evt.content) {
+                                                                                         setTypewriterMessages(prev => ({
+                                                                                             ...prev,
+                                                                                             [assistantTempId]: ''
+                                                                                         }));
+                                                                                         startTypewriter(assistantTempId, newContent);
+                                                                                     }
+                                                                                     
+                                                                                     updated.messages = updated.messages.map(m =>
+                                                                                         m.id === assistantTempId
+                                                                                             ? { ...m, content: newContent }
+                                                                                             : m
+                                                                                     );
+                                                                                 }
+                                                                                 return updated;
+                                                                             });
+                                                                         }
                                                                         
                                                                         if (evt.type === 'complete') {
                                                                             setSelectedConversation(prev => {
@@ -1396,9 +1660,29 @@ const SuperAdminChatPage = () => {
                                                     </div>
                                             </div>
                                         </div>
-                                )
-                            })}
+                                    )
+                                    })}
+                                    
+                                    {/* 🔥 Elegant Skeleton Loader */}
+                                    {isThinking && <SkeletonLoader />}
+                            
                             <div ref={messagesEndRef} />
+
+                            {/* Go to bottom button */}
+                            <button
+                                id="go-to-bottom-btn"
+                                onClick={handleGoToBottom}
+                                title="برو به آخرین پیام"
+                                className={`fixed left-20 bg-white border border-gray-300 rounded-full w-10 h-10 flex items-center justify-center cursor-pointer shadow-lg hover:shadow-xl transition-all duration-200 z-10 pointer-events-auto ${
+                                    showGoToBottomBtn ? 'block' : 'hidden'
+                                }`}
+                                style={{ bottom: 'calc(130px + 1rem)' }}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                                    <path d="M12 15.586l-4.293-4.293-1.414 1.414L12 18.414l5.707-5.707-1.414-1.414L12 15.586z"/>
+                                    <path d="M12 8.586l-4.293-4.293-1.414 1.414L12 11.414l5.707-5.707-1.414-1.414L12 8.586z"/>
+                                </svg>
+                            </button>
                         </>
                     )}
                 </div>
@@ -1415,7 +1699,7 @@ const SuperAdminChatPage = () => {
                                 {isLoading ? (
                                     <div className="animate-spin rounded-full h-4 w-4 md:h-5 md:w-5 border-2 border-white border-t-transparent"></div>
                                 ) : (
-                                    <Send className="h-4 w-4 md:h-5 md:h-5" />
+                                    <Send className="h-4 w-4 md:h-5 md:w-5" />
                                 )}
                             </Button>
                             <VoiceInput

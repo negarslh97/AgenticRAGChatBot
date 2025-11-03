@@ -468,7 +468,10 @@ class ChatUseCases:
                 "failure_reason": msg.failure_reason,
                 "rating": msg.rating.dict() if msg.rating else None,
                 "created_at": msg.created_at.isoformat(),
-                "metadata": msg.metadata
+                "metadata": {
+                    **(msg.metadata or {}),
+                    "rag_type": msg.metadata.get("rag_type") if msg.metadata and msg.metadata.get("rag_type") else conversation.rag_type
+                }
             }
             for msg in messages
         ]
@@ -494,7 +497,8 @@ class ChatUseCases:
                 "title": conv.title,
                 "tags": conv.tags,
                 "created_at": conv.created_at.isoformat(),
-                "updated_at": conv.updated_at.isoformat()
+                "updated_at": conv.updated_at.isoformat(),
+                "type": "Agentic" if conv.rag_type == "agentic" else "Simple RAG"
             }
             for conv in conversations
         ]
@@ -512,7 +516,8 @@ class ChatUseCases:
                 "title": conv.title,
                 "tags": conv.tags,
                 "created_at": conv.created_at.isoformat(),
-                "updated_at": conv.updated_at.isoformat()
+                "updated_at": conv.updated_at.isoformat(),
+                "type": "Agentic" if conv.rag_type == "agentic" else "Simple RAG"
             }
             for conv in conversations
         ]

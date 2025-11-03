@@ -63,7 +63,7 @@ interface Message {
     model_name?: string
     provider?: string
     confidence?: number
-    rag_type?: 'simple' | 'detailed'
+    rag_type?: 'simple' | 'detailed' | 'agentic'
     can_get_more_details?: boolean
     sources?: Array<{
       id: string

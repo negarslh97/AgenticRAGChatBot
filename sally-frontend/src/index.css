@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 🔥 Skeleton Loader Animation */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #f0f0f0 0%, #e0e0e0 50%, #f0f0f0 100%);
+  background-size: 200px 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+
 @layer base {
   * {
     @apply border-border;
@@ -38,5 +54,20 @@
 
   .card {
     @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+  }
+
+  /* 🔥 Fix conversation list click issues */
+  .conversation-list {
+    pointer-events: auto !important;
+  }
+  
+  .conversation-item {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    user-select: none;
+  }
+
+  .conversation-item:hover {
+    background-color: rgba(243, 244, 246, 1);
   }
 }

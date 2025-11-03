@@ -4,6 +4,10 @@ import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useAuth } from "../context/AuthContext"
 import { chatService, type ChatMessage, type ChatResponse } from "../services/chatService"
+
+interface ExtendedChatMessage extends ChatMessage {
+  ragType?: string;
+}
 import { Button } from "./ui/button"
 import toast from "react-hot-toast"
 
@@ -17,11 +21,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
   const [inputMessage, setInputMessage] = useState("")
   const [loading, setLoading] = useState(false)
   const [guestSessionId] = useState(() => `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const { user } = useAuth()
   
-  // Removed debug logging
-
+  // Smart scroll state - using useRef for better performance
+  const userHasScrolledUp = useRef(false)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
+  const [showGoToBottomBtn, setShowGoToBottomBtn] = useState(false)
+  
   const loadConversationMessages = useCallback(async () => {
     try {
       console.log("Loading messages for conversation:", conversationId)
@@ -32,12 +38,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       
       // For guests, also pass guest session ID as query parameter
       const conversationMessages = await chatService.getConversationMessages(conversationId, user ? undefined : guestSessionId)
-      
+
       console.log("Loaded conversation messages:", conversationMessages)
       console.log("Messages type:", typeof conversationMessages, "isArray:", Array.isArray(conversationMessages))
       console.log("Messages length:", conversationMessages?.length)
-      console.log("Messages content:", JSON.stringify(conversationMessages, null, 2))
-      
+
+      // Debug: بررسی rag_type در هر پیام
+      conversationMessages.forEach((msg, index) => {
+        console.log(`Message ${index}: ID=${msg.id}, sender_type=${msg.sender_type}, rag_type=${msg.metadata?.rag_type || 'NOT_SET'}`)
+      })
+
       // Show welcome message if no messages found
       console.log("Processing messages:", conversationMessages.length)
       if (conversationMessages.length === 0) {
@@ -53,8 +63,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
         console.log("Messages state after setting:", [welcomeMessage])
       } else {
         console.log("Setting conversation messages:", conversationMessages)
-        setMessages(conversationMessages)
-        console.log("Messages state after setting:", conversationMessages)
+        
+        // Assume 'apiResponse.messages' is the array of messages received from the API.
+        // In our case, conversationMessages is the array from the API response
+        
+        // Step A: Map the incoming API data to the structure needed for the state.
+        // This MUST explicitly extract `rag_type` from the metadata.
+        const processedMessages = conversationMessages.map(msg => ({
+          ...msg,
+          ragType: msg.metadata?.rag_type || 'simple'
+        }));
+
+        // Step B: *** THIS IS THE MOST IMPORTANT STEP ***
+        // Add this exact console.log to print the processed data.
+        console.log('--- RAG TYPE DIAGNOSTIC DATA ---', processedMessages);
+
+        // Step C: Update the state with the processed data.
+        setMessages(processedMessages)
       }
     } catch (error) {
       console.error("Error loading conversation:", error)
@@ -78,81 +103,149 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
   }, [conversationId, loadConversationMessages])
 
   useEffect(() => {
-    scrollToBottom()
+    // Always auto-scroll smoothly when messages change, but respect user scroll preference
+    if (!userHasScrolledUp.current) {
+      scrollToBottom()
+    }
   }, [messages])
 
   const scrollToBottom = () => {
-    // Use requestAnimationFrame to ensure DOM is updated
-    requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-    })
+    // Only auto-scroll if user hasn't scrolled up
+    if (!userHasScrolledUp.current && chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      })
+    }
   }
 
+  const handleScroll = () => {
+    if (!chatContainerRef.current) return
+    
+    const container = chatContainerRef.current
+    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 10
+
+    if (isAtBottom) {
+      userHasScrolledUp.current = false
+      setShowGoToBottomBtn(false)
+    } else {
+      userHasScrolledUp.current = true
+      setShowGoToBottomBtn(true)
+    }
+  }
+
+  const handleGoToBottom = () => {
+    userHasScrolledUp.current = false
+    setShowGoToBottomBtn(false)
+    scrollToBottom()
+  }
+
+  // ✅✅✅ نسخه نهایی و صحیح handleSendMessage ✅✅✅
   const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!inputMessage.trim() || loading) return
+    e.preventDefault();
+    if (!inputMessage.trim() || loading) return;
 
     const userMessage: ChatMessage = {
-      id: `temp_${Date.now()}`,
+      id: `temp_user_${Date.now()}`,
       content: inputMessage,
-        sender_type: user ? "Customer" : "Guest" as const,
+      sender_type: user ? "Customer" : "Guest",
       created_at: new Date().toISOString(),
-    }
+    };
 
-    setMessages((prev) => [...prev, userMessage])
-    setInputMessage("")
-    setLoading(true)
+    const aiMessageId = `ai_stream_${Date.now()}`;
+    const tempAiMessage: ChatMessage = {
+      id: aiMessageId,
+      content: "", // شروع با محتوای خالی
+      sender_type: "AI",
+      created_at: new Date().toISOString(),
+    };
+
+    // ✅✅✅ اصلاح کلیدی: هر دو پیام را در یک فراخوانی setMessages اضافه کن ✅✅✅
+    setMessages((prev) => [...prev, userMessage, tempAiMessage]);
+
+    setInputMessage("");
+    setLoading(true);
 
     try {
-      const guestSessionIdToSend = user ? undefined : guestSessionId
-      
-      const response: ChatResponse = await chatService.sendMessage({
-        content: inputMessage,
-        conversation_id: conversationId,
-        guest_session_id: guestSessionIdToSend
-      })
+      let fullResponseContent = "";
+      let finalEventData: any = null;
 
-      console.log("API Response:", response)
+      // Wrap the streaming call in a promise to wait for completion
+      await new Promise<void>((resolve, reject) => {
+        const streamPromise = chatService.sendMessageStream(
+          inputMessage,
+          conversationId,
+          user ? undefined : guestSessionId,
+          (event) => {
+            console.log("Stream event:", event);
 
-      // Update conversation ID if this is a new conversation
-      if (!conversationId && onNewConversation) {
-        console.log("Setting new conversation ID:", response.conversation_id)
-        onNewConversation(response.conversation_id)
+            if (event.type === 'init' && !conversationId && onNewConversation) {
+              onNewConversation(event.conversation_id);
+            }
+            if (event.type === 'chunk') {
+              fullResponseContent += event.content;
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === aiMessageId ? { ...msg, content: fullResponseContent } : msg
+                )
+              );
+            }
+            if (event.type === 'complete') {
+              finalEventData = event;
+              resolve(); // Resolve the promise when complete
+            }
+            if (event.type === 'error') {
+              reject(new Error(event.message || "Stream error"));
+            }
+          }
+        );
+
+        // Handle the promise rejection if stream setup fails
+        streamPromise.catch(reject);
+      });
+
+      if (finalEventData) {
+        setMessages(prev =>
+          prev.map(msg => {
+            if (msg.id === aiMessageId) {
+              return {
+                ...msg,
+                id: finalEventData.message_id,
+                content: finalEventData.message || fullResponseContent,
+                metadata: {
+                  sources: finalEventData.sources,
+                  confidence: finalEventData.confidence,
+                  suggested_actions: finalEventData.suggested_actions,
+                  rag_type: finalEventData.metadata?.rag_type || 'simple'
+                }
+              };
+            }
+            return msg;
+          })
+        );
+      } else {
+        // اگر استریم بدون رویداد complete تمام شد (مثلا خطا)
+        // پیام موقت AI را حذف کن
+        setMessages(prev => prev.filter(msg => msg.id !== aiMessageId));
       }
 
-      const aiMessage: ChatMessage = {
-        id: response.message_id,
-        content: response.message,
-        sender_type: "AI" as const,
-        created_at: new Date().toISOString(),
-        metadata: {
-          sources: response.sources,
-          confidence: response.confidence,
-          suggested_actions: response.suggested_actions,
-        },
-      }
-
-      // Replace the temporary user message with the real one from the server
-      // and add the AI's response
-      setMessages((prev) => [
-        ...prev.filter((msg) => msg.id !== userMessage.id),
-        aiMessage,
-      ])
-      console.log("Messages state after setting:", messages)
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to send message")
-      setMessages((prev) => prev.slice(0, -1)) // Remove the temporary user message
+      toast.error(error.message || "Failed to get response");
+      setMessages(prev => prev.filter(msg => msg.id !== aiMessageId && msg.id !== userMessage.id));
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const renderMessage = (message: ChatMessage) => {
+  const renderMessage = (message: ExtendedChatMessage) => {
     const isUser = message.sender_type !== 'AI'
     const sources = message.metadata?.sources || []
     const suggestedActions = message.metadata?.suggested_actions || []
     const canGetMoreDetails = message.metadata?.can_get_more_details || false
-    const ragType = message.metadata?.rag_type || 'simple'
+    const ragType = message.ragType || 'simple' // از فیلد جدید و صحیح استفاده کن
+
+    // نمایش rag_type برای پیام‌های AI
+    const displayRagType = !isUser && ragType
 
     return (
       <div key={message.id} className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
@@ -198,6 +291,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
                   </button>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* نمایش rag_type برای پیام‌های AI */}
+          {displayRagType && (
+            <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                {ragType === 'simple' ? '🔍 Simple RAG' :
+                 ragType === 'detailed' ? '📚 Detailed RAG' :
+                 ragType === 'agentic' ? '🤖 Agentic RAG' :
+                 ragType}
+              </span>
             </div>
           )}
 
@@ -323,7 +428,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-br from-background to-muted/20">
+      <div
+        ref={chatContainerRef}
+        id="chat-container"
+        className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-br from-background to-muted/20"
+        onScroll={handleScroll}
+      >
         {/* Always render messages */}
         {messages.map(renderMessage)}
 
@@ -338,7 +448,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
           </div>
         )}
 
-        <div ref={messagesEndRef} />
+        
+        {/* Go to bottom button */}
+        <button
+          id="go-to-bottom-btn"
+          onClick={handleGoToBottom}
+          title="برو به آخرین پیام"
+          className={`fixed bottom-24 left-1/2 transform -translate-x-1/2 bg-white border border-gray-300 rounded-full w-10 h-10 flex items-center justify-center cursor-pointer shadow-lg hover:shadow-xl transition-all duration-200 z-10 ${
+            showGoToBottomBtn ? 'block' : 'hidden'
+          }`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+            <path d="M12 15.586l-4.293-4.293-1.414 1.414L12 18.414l5.707-5.707-1.414-1.414L12 15.586z"/>
+            <path d="M12 8.586l-4.293-4.293-1.414 1.414L12 11.414l5.707-5.707-1.414-1.414L12 8.586z"/>
+          </svg>
+        </button>
       </div>
 
       {/* Input */}
