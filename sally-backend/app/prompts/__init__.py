@@ -48,6 +48,16 @@ class PromptManager:
         # خواندن از فایل
         prompt_path = PROMPTS_DIR / f"{prompt_name}.txt"
         
+        # اگر فایل در مسیر اصلی پیدا نشد، در زیردایرکتوری‌ها جستجو کن
+        if not prompt_path.exists():
+            # بررسی آیا prompt_name شامل مسیر نسبی است (مثلاً "response_guides/specific")
+            if "/" in prompt_name:
+                subdir_name, file_name = prompt_name.split("/", 1)
+                prompt_path = PROMPTS_DIR / subdir_name / f"{file_name}.txt"
+            else:
+                logger.error(f"❌ Prompt file not found: {prompt_path}")
+                raise FileNotFoundError(f"Prompt template not found: {prompt_name}")
+        
         if not prompt_path.exists():
             logger.error(f"❌ Prompt file not found: {prompt_path}")
             raise FileNotFoundError(f"Prompt template not found: {prompt_name}")
@@ -82,7 +92,19 @@ class PromptManager:
     
     def list_prompts(self):
         """لیست تمام prompts موجود"""
-        prompts = [f.stem for f in PROMPTS_DIR.glob("*.txt")]
+        prompts = []
+        
+        # پیدا کردن فایل‌های txt در دایرکتوری اصلی
+        for f in PROMPTS_DIR.glob("*.txt"):
+            prompts.append(f.stem)
+        
+        # پیدا کردن فایل‌های txt در زیردایرکتوری‌ها
+        for subdir in PROMPTS_DIR.iterdir():
+            if subdir.is_dir():
+                for f in subdir.glob("*.txt"):
+                    # ذخیره نام کامل با مسیر نسبی
+                    prompts.append(f"{subdir.name}/{f.stem}")
+        
         logger.info(f"📋 Available prompts: {prompts}")
         return prompts
 

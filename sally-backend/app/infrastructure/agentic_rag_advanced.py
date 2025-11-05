@@ -21,6 +21,7 @@ from datetime import datetime
 
 from app.core.logging_config import get_logger, PerformanceLogger
 from app.core.config import settings
+from app.infrastructure.model_factory import model_factory
 
 logger = get_logger(__name__)
 
@@ -119,11 +120,57 @@ class AdvancedAgenticRAG:
         self.weaviate_connector = weaviate_connector
         self.graph = None
         
+        # 🔥 Configuration validation
+        self._validate_configuration()
+        
         if LANGGRAPH_AVAILABLE:
             self._build_graph()
             logger.info("🤖 AdvancedAgenticRAG initialized with multi-agent workflow")
         else:
             logger.warning("⚠️ LangGraph not available, using fallback mode")
+    
+    def _validate_configuration(self):
+        """
+        🔥 Validate critical configuration settings
+        """
+        validation_errors = []
+        
+        # Validate model configurations
+        if not settings.chat_model_loaded:
+            validation_errors.append("chat_model_loaded is not configured")
+        
+        if not settings.rag_model_loaded:
+            validation_errors.append("rag_model_loaded is not configured")
+        
+        # Validate hybrid model strategy if enabled
+        if settings.use_hybrid_model_strategy:
+            if not settings.agentic_fast_model:
+                validation_errors.append("agentic_fast_model is required when hybrid strategy is enabled")
+            if not settings.agentic_power_model:
+                validation_errors.append("agentic_power_model is required when hybrid strategy is enabled")
+        
+        # Validate Weaviate configuration if tree search is enabled
+        if not settings.weaviate_url_loaded:
+            logger.warning("⚠️ Weaviate URL not configured - tree search will be disabled")
+        
+        if not settings.weaviate_api_key_loaded:
+            logger.warning("⚠️ Weaviate API key not configured - tree search will be disabled")
+        
+        # Validate embedder configuration
+        if not settings.embedder_api_key_loaded:
+            validation_errors.append("embedder_api_key_loaded is not configured")
+        
+        if not settings.embedder_model_loaded:
+            validation_errors.append("embedder_model_loaded is not configured")
+        
+        # Log validation results
+        if validation_errors:
+            logger.error("❌ Configuration validation failed:")
+            for error in validation_errors:
+                logger.error(f"   - {error}")
+            raise ValueError(f"Configuration validation failed: {', '.join(validation_errors)}")
+        else:
+            logger.info("✅ Configuration validation passed")
     
     def _build_graph(self):
         """ساخت workflow graph پیشرفته"""
@@ -136,6 +183,7 @@ class AdvancedAgenticRAG:
         workflow.add_node("plan_strategy", self.plan_strategy)
         workflow.add_node("tree_search", self.tree_search)
         workflow.add_node("simple_search", self.simple_search)  # 🔥 گره fallback
+        workflow.add_node("parallel_subquery_search", self.parallel_subquery_search)
         workflow.add_node("aggregate_context", self.aggregate_context)
         workflow.add_node("analyze_results", self.analyze_results)
         workflow.add_node("synthesize_answer", self.synthesize_answer)
@@ -156,16 +204,9 @@ class AdvancedAgenticRAG:
             }
         )
         
-        # مسیر برای سوالات پیچیده
-        workflow.add_edge("decompose_query", "process_subquery")
-        workflow.add_conditional_edges(
-            "process_subquery",
-            self.check_more_subqueries,
-            {
-                "continue": "tree_search",
-                "done": "aggregate_context"
-            }
-        )
+        # مسیر برای سوالات پیچیده - پردازش موازی زیرسوالات
+        workflow.add_edge("decompose_query", "parallel_subquery_search")
+        workflow.add_edge("parallel_subquery_search", "aggregate_context")
         
         # مسیر برای سوالات متوسط
         workflow.add_edge("plan_strategy", "tree_search")
@@ -215,7 +256,7 @@ class AdvancedAgenticRAG:
                 # آماده‌سازی context از تاریخچه
                 history_context = ""
                 if state.get("conversation_history"):
-                    recent_messages = state["conversation_history"][-3:]  # 3 پیام آخر
+                    recent_messages = state["conversation_history"][-settings.agentic_history_messages_count:]  # پیام‌های آخر از تنظیمات
                     history_context = "\n\nتاریخچه مکالمه:\n"
                     for msg in recent_messages:
                         role = msg.get("role", "user")
@@ -277,7 +318,6 @@ class AdvancedAgenticRAG:
         """
         with PerformanceLogger(logger, "decompose_query"):
             logger.info(f"🔨 Decomposing complex query: {state['query'][:100]}")
-            logger.info(f"🤖 Using fast model: {fast_model}")
             
             try:
                 prompt = ChatPromptTemplate.from_template("""
@@ -312,7 +352,7 @@ class AdvancedAgenticRAG:
                         clean_line = re.sub(r'^\d+[\.\-\)]\s*', '', clean_line)
                         subqueries.append(clean_line)
                 
-                state["decomposed_queries"] = subqueries[:3]  # حداکثر 3 زیرسوال
+                state["decomposed_queries"] = subqueries[:settings.agentic_max_subqueries]  # حداکثر زیرسوالات از تنظیمات
                 state["current_subquery_index"] = 0
                 
                 logger.info(f"✅ Query decomposed into {len(state['decomposed_queries'])} subqueries:")
@@ -355,6 +395,111 @@ class AdvancedAgenticRAG:
         else:
             logger.info(f"✅ All subqueries processed")
             return "done"
+    
+    async def parallel_subquery_search(self, state: AgenticRAGState) -> AgenticRAGState:
+        """
+        🔥 پردازش موازی زیرسوالات برای افزایش سرعت
+        
+        این متد تمام زیرسوالات را به صورت موازی پردازش کرده و نتایج را جمع‌آوری می‌کند
+        """
+        with PerformanceLogger(logger, "parallel_subquery_search"):
+            logger.info(f"🚀 Processing {len(state['decomposed_queries'])} subqueries in parallel")
+            
+            try:
+                import asyncio
+                
+                # ایجاد لیست وظایف برای پردازش موازی
+                tasks = []
+                for subquery in state["decomposed_queries"]:
+                    task = self._process_single_subquery(subquery)
+                    tasks.append(task)
+                
+                # اجرای موازی تمام وظایف
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # جمع‌آوری نتایج
+                successful_results = []
+                failed_subqueries = []
+                
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        failed_subqueries.append({
+                            "subquery": state["decomposed_queries"][i],
+                            "error": str(result)
+                        })
+                        logger.error(f"❌ Subquery {i+1} failed: {result}")
+                    else:
+                        successful_results.extend(result)
+                        logger.info(f"✅ Subquery {i+1} completed successfully")
+                
+                # افزودن نتایج موفق به state
+                state["search_results"].extend(successful_results)
+                
+                # لاگ نتایج
+                logger.info(f"📊 Parallel search completed:")
+                logger.info(f"   ✅ Successful: {len(successful_results)} results")
+                logger.info(f"   ❌ Failed: {len(failed_subqueries)} subqueries")
+                
+                if failed_subqueries:
+                    state["errors"].extend([f"parallel_subquery_error:{err['error']}" for err in failed_subqueries])
+                
+                state["action_history"].append(AgentAction.SEARCH)
+                
+            except Exception as e:
+                logger.error(f"❌ Parallel subquery search failed: {e}")
+                state["errors"].append(f"parallel_search_error:{str(e)}")
+                # fallback به پردازش ترتیبی
+                logger.warning(f"🔄 Falling back to sequential processing")
+                for subquery in state["decomposed_queries"]:
+                    sequential_results = await self._process_single_subquery(subquery)
+                    state["search_results"].extend(sequential_results)
+            
+            return state
+    
+    async def _process_single_subquery(self, subquery: str) -> List[TreeNode]:
+        """
+        پردازش یک زیرسوال به صورت مستقل
+        
+        Args:
+            subquery: زیرسوال برای پردازشن
+            
+        Returns:
+            لیست نتایج جستجو برای این زیرسوال
+        """
+        try:
+            # ایجاد state موقت برای این زیرسوال
+            temp_state: AgenticRAGState = {
+                "query": subquery,
+                "user_id": None,
+                "session_id": str(uuid.uuid4()),
+                "conversation_history": [],
+                "query_complexity": QueryComplexity.SIMPLE,
+                "decomposed_queries": [],
+                "current_subquery_index": 0,
+                "search_results": [],
+                "tree_context": {},
+                "analyzed_results": [],
+                "partial_answers": [],
+                "final_response": None,
+                "confidence_score": 0.0,
+                "sources": [],
+                "current_action": None,
+                "action_history": [],
+                "reflection_notes": [],
+                "errors": [],
+                "retry_count": 0,
+                "max_retries": 1,
+                "needs_fallback": False
+            }
+            
+            # اجرای جستجوی درختی برای این زیرسوال
+            await self.tree_search(temp_state)
+            
+            return temp_state["search_results"]
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process subquery '{subquery[:50]}...': {e}")
+            raise e
     
     async def plan_strategy(self, state: AgenticRAGState) -> AgenticRAGState:
         """
@@ -415,7 +560,7 @@ class AdvancedAgenticRAG:
         """
         with PerformanceLogger(logger, "tree_search"):
             logger.info(f"🌳 Performing tree-aware search for: {state['query'][:100]}")
-            logger.info(f"🔍 Search limit: 5 nodes")
+            logger.info(f"🔍 Search limit: {settings.agentic_search_limit} nodes")
             
             try:
                 # جستجوی vector در Weaviate
@@ -538,7 +683,7 @@ class AdvancedAgenticRAG:
                 
                 search_response = collection.query.near_vector(
                     near_vector=query_vector,
-                    limit=limit,
+                    limit=settings.agentic_search_limit,
                     return_metadata=['distance', 'certainty']
                 )
                 
@@ -887,25 +1032,116 @@ class AdvancedAgenticRAG:
         """
         دریافت مدل سریع برای وظایف ساده
         
-        🔥 Hybrid Model Strategy: برای کاهش هزینه و افزایش سرعت
+        🔥 Unified Model Strategy: برای کاهش هزینه و افزایش سرعت
         """
-        if settings.use_hybrid_model_strategy and settings.agentic_fast_model:
-            logger.info(f"⚡ Agentic RAG - Using FAST model: {settings.agentic_fast_model}")
-            return settings.agentic_fast_model
-        logger.info(f"⚡ Agentic RAG - Using CHAT model as FAST: {settings.chat_model_loaded}")
-        return settings.chat_model_loaded
+        # Use ModelFactory for fast model selection
+        try:
+            fast_model = model_factory.get_optimal_model("chat")
+            logger.info(f"⚡ Agentic RAG - Using FAST model: {fast_model}")
+            return fast_model
+        except Exception as e:
+            logger.warning(f"⚠️ ModelFactory fast model selection failed: {e}")
+            return self._select_model_by_strategy("fast")
     
     def _get_power_model(self) -> str:
         """
         دریافت مدل قدرتمند برای وظایف پیچیده
         
-        🔥 Hybrid Model Strategy: برای کیفیت بالاتر در وظایف مهم
+        🔥 Unified Model Strategy: برای کیفیت بالاتر در وظایف مهم
         """
-        if settings.use_hybrid_model_strategy and settings.agentic_power_model:
-            logger.info(f"🚀 Agentic RAG - Using POWER model: {settings.agentic_power_model}")
-            return settings.agentic_power_model
-        logger.info(f"🚀 Agentic RAG - Using RAG model as POWER: {settings.rag_model_loaded}")
-        return settings.rag_model_loaded
+        # Use ModelFactory for power model selection
+        try:
+            power_model = model_factory.get_optimal_model("rag")
+            logger.info(f"🚀 Agentic RAG - Using POWER model: {power_model}")
+            return power_model
+        except Exception as e:
+            logger.warning(f"⚠️ ModelFactory power model selection failed: {e}")
+            return self._select_model_by_strategy("power")
+    
+    def _select_model_by_strategy(self, strategy: str) -> str:
+        """
+        🆕 Unified model selection logic based on strategy and system requirements using ModelFactory
+        
+        Args:
+            strategy: "fast", "power", or "balanced"
+            
+        Returns:
+            Selected model name
+            
+        Strategy Documentation:
+        - fast: Prioritizes speed and cost efficiency for simple tasks
+        - power: Prioritizes quality and capability for complex tasks
+        - balanced: Uses hybrid approach for moderate complexity tasks
+        """
+        try:
+            # Map strategy to task type for ModelFactory
+            strategy_mapping = {
+                "fast": "chat",      # Fast tasks use chat models
+                "power": "rag",      # Complex tasks use RAG models
+                "balanced": "rag"    # Balanced approach uses RAG models
+            }
+            
+            task_type = strategy_mapping.get(strategy, "rag")
+            
+            # Get optimal model from ModelFactory
+            selected_model = model_factory.get_optimal_model(task_type)
+            
+            # Log the selection
+            self._log_model_selection(strategy, selected_model, f"ModelFactory selected optimal model for {task_type} task")
+            
+            return selected_model
+            
+        except Exception as e:
+            logger.warning(f"⚠️ ModelFactory selection failed for strategy '{strategy}', using fallback: {e}")
+            # Fallback to original logic
+            if strategy == "fast":
+                if settings.use_hybrid_model_strategy and settings.agentic_fast_model:
+                    selected_model = settings.agentic_fast_model
+                    self._log_model_selection("fast", selected_model, "Hybrid strategy - Fast model configured")
+                else:
+                    selected_model = settings.chat_model_loaded
+                    self._log_model_selection("fast", selected_model, "Using chat model as fallback")
+                    
+            elif strategy == "power":
+                if settings.use_hybrid_model_strategy and settings.agentic_power_model:
+                    selected_model = settings.agentic_power_model
+                    self._log_model_selection("power", selected_model, "Hybrid strategy - Power model configured")
+                else:
+                    selected_model = settings.rag_model_loaded
+                    self._log_model_selection("power", selected_model, "Using RAG model as fallback")
+                    
+            else:  # balanced
+                if settings.use_hybrid_model_strategy:
+                    selected_model = settings.agentic_power_model if settings.agentic_power_model else settings.rag_model_loaded
+                    self._log_model_selection("balanced", selected_model, "Hybrid strategy - Balanced approach")
+                else:
+                    selected_model = settings.rag_model_loaded
+                    self._log_model_selection("balanced", selected_model, "Using RAG model for balanced approach")
+            
+            return selected_model
+    
+    def _log_model_selection(self, strategy: str, model_name: str, reason: str):
+        """
+        🆕 Log model selection with detailed reasoning for transparency
+        
+        Args:
+            strategy: The strategy used for selection
+            model_name: The selected model name
+            reason: The reason for selection
+        """
+        logger.info(f"🎯 Model Selection Strategy: {strategy.upper()}")
+        logger.info(f"🤖 Selected Model: {model_name}")
+        logger.info(f"📋 Reason: {reason}")
+        
+        # Log model capabilities and limitations
+        if "gpt-4" in model_name.lower():
+            logger.info("🔥 Model Capabilities: High reasoning, complex tasks, detailed analysis")
+        elif "gpt-3.5" in model_name.lower() or "gpt-4o-mini" in model_name.lower():
+            logger.info("🔥 Model Capabilities: Fast responses, cost-effective, good for simple tasks")
+        elif "gemini" in model_name.lower():
+            logger.info("🔥 Model Capabilities: Multi-modal, creative tasks, good context understanding")
+        else:
+            logger.info("🔥 Model Capabilities: Standard AI capabilities")
     
     def _calculate_confidence(self, state: AgenticRAGState) -> float:
         """
@@ -998,6 +1234,16 @@ class AdvancedAgenticRAG:
         """
         
         with PerformanceLogger(logger, "advanced_agentic_rag", query=query[:100]):
+            
+            # 🔥 comprehensive logging and monitoring
+            logger.info("="*80)
+            logger.info("🚀 Advanced Agentic RAG System - Starting Workflow")
+            logger.info(f"📊 System Status:")
+            logger.info(f"   - LangGraph Available: {LANGGRAPH_AVAILABLE}")
+            logger.info(f"   - Graph Compiled: {self.graph is not None}")
+            logger.info(f"   - Hybrid Model Strategy: {settings.use_hybrid_model_strategy}")
+            logger.info(f"   - Configuration Validated: {self._validate_configuration() if hasattr(self, '_validate_configuration') else 'N/A'}")
+            logger.info("="*80)
             
             if not LANGGRAPH_AVAILABLE or not self.graph:
                 logger.warning("⚠️ LangGraph not available, using fallback")

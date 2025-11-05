@@ -32,7 +32,7 @@ async def load_conversation_history(conversation_id: str, max_messages: int = 10
                 "role": "user" if msg.sender_type in [e.value for e in SenderType if e != SenderType.AI] else "assistant",
                 "content": msg.content
             })
-        logger.info(f"Loaded {len(conversation_history)} messages from conversation history (max: {max_messages})")
+        logger.debug(f"Loaded {len(conversation_history)} messages from conversation history (max: {max_messages})")
     except Exception as e:
         logger.warning(f"Could not load conversation history: {e}", exc_info=True)
     return conversation_history
@@ -66,7 +66,7 @@ class ChatUseCases:
         confidence = 0.5
         
         try:
-            logger.info("Proceeding with RAG pipeline - Factual query detected")
+            logger.debug("Proceeding with RAG pipeline - Factual query detected")
             
             # 1. Retrieve documents
             relevant_docs = await rag_service.retrieve_relevant_documents(
@@ -83,7 +83,7 @@ class ChatUseCases:
                     query_type=query_type_analysis['query_type']
                 )
                 confidence = confidence_analysis['confidence_score']
-                logger.info(f"Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
+                logger.debug(f"Confidence: {confidence:.2f} ({confidence_analysis['confidence_level']})")
                 
                 yield {"type": "sources", "sources": sources, "confidence": confidence}
                 
@@ -136,7 +136,7 @@ class ChatUseCases:
                 }
             )
             await ai_message.insert()
-            logger.info(f"Response time: {response_time_seconds:.2f} seconds")
+            logger.debug(f"Response time: {response_time_seconds:.2f} seconds")
             
             # 6. Send complete event
             yield {
@@ -178,7 +178,7 @@ class ChatUseCases:
         پردازش پیام ادمین با پشتیبانی از استریمینگ (نسخه تمیز و Refactor شده).
         """
         temperature = 0.2 if temperature > 0.3 else temperature
-        logger.info(f"Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
+        logger.debug(f"Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
 
         # 1. Get or create conversation
         if conversation_id:
@@ -193,18 +193,18 @@ class ChatUseCases:
                 temperature=temperature
             )
             await conversation.insert()
-            logger.info(f"Created admin conversation: {conversation.id} - '{smart_title}'")
+            logger.debug(f"Created admin conversation: {conversation.id} - '{smart_title}'")
 
         # 2. Load history and analyze query
         conversation_history = await load_conversation_history(str(conversation.id))
         history_for_cache = tuple((msg['role'], msg['content']) for msg in conversation_history)
         query_analysis_result = await query_analyzer.analyze(content, history_for_cache)
         query_analysis = query_analysis_result.model_dump()
-        logger.info(f"Query intent: {query_analysis['intent']} (needs_rag: {query_analysis['needs_rag']})")
+        logger.debug(f"Query intent: {query_analysis['intent']} (needs_rag: {query_analysis['needs_rag']})")
         
         # 3. Handle conversational bypass
         if not query_analysis['needs_rag']:
-            logger.info("💬 Conversational query detected - bypassing RAG and generating a conversational response.")
+            logger.debug("💬 Conversational query detected - bypassing RAG and generating a conversational response.")
 
             # 1. Save user message first
             sender_type = SenderType.SUPER_ADMIN.value if admin.role_name == "SuperAdmin" else SenderType.ADMIN.value
@@ -307,7 +307,7 @@ class ChatUseCases:
         """
         پردازش پیام کاربر عادی/مهمان با پشتیبانی از استریمینگ (نسخه تمیز و Refactor شده).
         """
-        logger.info(f"Starting streaming chat for {user_type}")
+        logger.debug(f"Starting streaming chat for {user_type}")
         rag_type = "simple" # کاربران عادی همیشه از simple RAG استفاده می‌کنند
 
         # 1. Get or create conversation
@@ -328,11 +328,11 @@ class ChatUseCases:
         history_for_cache = tuple((msg['role'], msg['content']) for msg in conversation_history)
         query_analysis_result = await query_analyzer.analyze(content, history_for_cache)
         query_analysis = query_analysis_result.model_dump()
-        logger.info(f"Query intent: {query_analysis['intent']} (needs_rag: {query_analysis['needs_rag']})")
+        logger.debug(f"Query intent: {query_analysis['intent']} (needs_rag: {query_analysis['needs_rag']})")
 
         # 3. Handle conversational bypass
         if not query_analysis['needs_rag']:
-            logger.info("💬 Conversational query detected - bypassing RAG and generating a conversational response.")
+            logger.debug("💬 Conversational query detected - bypassing RAG and generating a conversational response.")
 
             # 1. Save user message first
             sender_id = str(user.id) if user else None

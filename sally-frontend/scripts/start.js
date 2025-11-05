@@ -12,7 +12,7 @@ const server = createServer(app)
 app.use(
   '/api',
   createProxyMiddleware({
-    target: 'http://localhost:8000',
+    target: 'http://0.0.0.0:8000',
     changeOrigin: true,
   })
 )
@@ -39,6 +39,6 @@ app.get('*', (req, res, next) => {
 const PORT = process.env.PORT || 3000
 server.listen(PORT, (err) => {
   if (err) throw err
-  console.log(`> Ready on http://localhost:${PORT}`)
+  console.log(`> Ready on http://0.0.0.0:${PORT}`)
   console.log('> Client-side routing enabled')
 })

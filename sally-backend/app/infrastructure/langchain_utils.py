@@ -1,8 +1,11 @@
+# langchain_utils.py
+
 """
 LangChain utilities for AI model interactions.
 این ماژول یک interface کامل و حرفه‌ای برای استفاده از LangChain فراهم می‌کند.
 
 Features:
+- Refactored to use dedicated service classes
 - Chains & Runnables برای workflow‌های پیچیده
 - Callbacks برای monitoring و logging
 - Retry logic با exponential backoff
@@ -17,7 +20,6 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional, Union
 import asyncio
 import re
-from enum import Enum
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -28,53 +30,12 @@ from tenacity import (
 from app.core.config import settings
 from app.core.logging_config import get_logger, PerformanceLogger
 from app.infrastructure.langchain_callbacks import get_default_callbacks
-from app.prompts import get_prompt
-from app.infrastructure.conversation_memory import ConversationMemoryManager, format_history_for_prompt
+from app.services.model_service import model_service
+from app.services.prompt_service import prompt_service
+from app.infrastructure.conversation_memory_service import conversation_memory_service
+from app.infrastructure.langchain_orchestrator import orchestrator as langchain_orchestrator
 
 logger = get_logger(__name__)
-
-
-class ModelProvider(str, Enum):
-    """Supported LLM providers"""
-    OPENAI = "openai"          # OpenAI رسمی (gpt-4o, gpt-3.5-turbo, ...)
-    OPENROUTER = "openrouter"  # OpenRouter (Grok, Gemini, Claude, Llama, Mistral, ...)
-    OLLAMA = "ollama"          # Ollama محلی
-
-
-def detect_model_provider(model_name: str) -> ModelProvider:
-    """
-    تشخیص provider از روی نام مدل
-    
-    🔍 منطق تشخیص:
-    - ollama:*       → Ollama (محلی)
-    - gpt-*          → OpenAI (رسمی)
-    - سایر مدل‌ها     → OpenRouter (Grok, Gemini, Claude, Llama, Mistral, DeepSeek, Qwen, ...)
-    
-    Args:
-        model_name: نام مدل (e.g., "gpt-4o", "x-ai/grok-beta", "google/gemini-2.0")
-    
-    Returns:
-        ModelProvider enum
-    """
-    if not model_name:
-        return ModelProvider.OPENAI  # Default
-    
-    model_lower = model_name.lower()
-    
-    # ✅ Ollama: prefix با "ollama:"
-    if model_lower.startswith("ollama:"):
-        logger.debug(f"🔍 Detected Ollama model: {model_name}")
-        return ModelProvider.OLLAMA
-
-    # ✅ OpenAI رسمی: شروع با "gpt-" (gpt-4o, gpt-3.5-turbo, gpt-4-turbo, ...)
-    if model_lower.startswith("gpt-"):
-        logger.debug(f"🔍 Detected OpenAI official model: {model_name}")
-        return ModelProvider.OPENAI
-
-    # ✅ OpenRouter: همه بقیه مدل‌ها
-    # (google/gemini, x-ai/grok, anthropic/claude, meta-llama/*, mistralai/*, deepseek/*, qwen/*, openai/o1-*, ...)
-    logger.debug(f"🔍 Detected OpenRouter model: {model_name}")
-    return ModelProvider.OPENROUTER
 
 
 class MetadataOutput(BaseModel):
@@ -91,138 +52,22 @@ class MetadataOutput(BaseModel):
 
 class LangChainService:
     """
-    Service برای مدیریت کامل تعاملات AI از طریق LangChain
+    Refactored LangChain Service using dedicated service classes
     
-    این کلاس شامل:
-    - Model management با caching
-    - Callback integration برای monitoring
-    - Retry logic برای reliability
-    - Performance tracking
+    این کلاس به عنوان یک orchestrator عمل می‌کند و از سرویس‌های تخصصی استفاده می‌کند:
+    - ModelService: مدیریت مدل‌ها
+    - PromptService: مدیریت پرامپت‌ها
+    - ConversationMemoryService: مدیریت حافظه مکالمه
     """
 
     def __init__(self):
-        self._models = {}
         self._embeddings = None
         self._callbacks = get_default_callbacks()
+        self._response_cache = {}
+        self._cache_ttl = 300  # 5 minutes
         
-        logger.info("🎯 LangChainService initialized")
+        logger.info("🎯 LangChainService initialized (refactored)")
 
-    def _get_model(
-        self,
-        model_name: str,
-        force_json: bool = False,
-        max_tokens: int = 500,
-        temperature: float = 0.7,
-        streaming: bool = False
-    ) -> Union[ChatOpenAI, Any]:
-        """
-        دریافت یا ایجاد یک instance از LLM model (پشتیبانی از همه provider ها)
-
-        Args:
-            model_name: نام مدل (e.g., "gpt-4o", "ollama:llama3.2", "claude-3-5-sonnet")
-            force_json: فعال کردن JSON mode (فقط برای OpenAI)
-            max_tokens: حداکثر توکن‌های خروجی
-            temperature: دمای sampling
-            streaming: فعال کردن streaming
-
-        Returns:
-            LLM instance (ChatOpenAI, ChatOllama, ChatAnthropic, etc.)
-        """
-        # 🎯 Gemini models: double the max_tokens and adjust temperature for better output quality
-        if model_name and "gemini" in model_name.lower():
-            original_max_tokens = max_tokens
-            max_tokens = max_tokens * 2
-            # 🎯 Lower temperature for more accurate responses with Gemini
-            original_temperature = temperature
-            temperature = min(temperature, 0.2)  # Cap temperature at 0.2 for Gemini
-            logger.info(f"🔥 Gemini model detected: {model_name} - Doubling max_tokens from {original_max_tokens} to {max_tokens}, adjusting temperature from {original_temperature} to {temperature}")
-
-        cache_key = f"{model_name}_{'json' if force_json else 'text'}_{max_tokens}_{temperature}_{'stream' if streaming else 'batch'}"
-
-        if cache_key not in self._models:
-            provider = detect_model_provider(model_name)
-
-            logger.info(
-                f"🤖 Loading model: {model_name} (Provider: {provider.value})",
-                extra={
-                    'extra_data': {
-                        'model': model_name,
-                        'provider': provider.value,
-                        'max_tokens': max_tokens,
-                        'temperature': temperature,
-                        'json_mode': force_json,
-                        'streaming': streaming
-                    }
-                }
-            )
-
-            # بسته به provider، instance مناسب را بسازیم
-            if provider == ModelProvider.OLLAMA:
-                # ✅ Ollama محلی (using new langchain-ollama package)
-                try:
-                    from langchain_ollama import ChatOllama
-                    
-                    # حذف prefix "ollama:" از نام مدل
-                    actual_model_name = model_name.replace("ollama:", "").replace("Ollama:", "")
-                    
-                    ollama_url = settings.ollama_url_loaded
-                    
-                    self._models[cache_key] = ChatOllama(
-                        model=actual_model_name,
-                        base_url=ollama_url,
-                        temperature=temperature,
-                        num_predict=max_tokens,  # Ollama uses num_predict instead of max_tokens
-                    )
-                    logger.info(f"✅ Ollama model {actual_model_name} ready at {ollama_url}")
-                    
-                except ImportError:
-                    logger.error("❌ langchain-ollama not installed. Install with: pip install -U langchain-ollama")
-                    raise Exception("Ollama support requires langchain-ollama package")
-            
-            elif provider == ModelProvider.OPENROUTER:
-                # ✅ OpenRouter (Grok, Gemini, Claude, Llama, Mistral, DeepSeek, Qwen, O1, ...)
-                # 🔑 از OPENAI_API_KEY و OPENAI_BASE_URL استفاده می‌کند
-                model_kwargs = {}
-                if force_json:
-                    model_kwargs["response_format"] = {"type": "json_object"}
-                    logger.info("📋 JSON mode enabled")
-
-                self._models[cache_key] = ChatOpenAI(
-                    model_name=model_name,
-                    openai_api_key=settings.openai_api_key_loaded,      # 🔑 OpenRouter API Key
-                    base_url=settings.openai_base_url_loaded,           # 🔗 OpenRouter Base URL
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    streaming=streaming,
-                    callbacks=self._callbacks,
-                    model_kwargs=model_kwargs
-                )
-                logger.info(f"✅ OpenRouter model {model_name} ready (via {settings.openai_base_url_loaded})")
-            
-            else:  # ModelProvider.OPENAI (رسمی)
-                # ✅ OpenAI رسمی (gpt-4o, gpt-3.5-turbo, ...)
-                # 🔑 از Embedder_API_KEY و Embedder_OPENAI_BASE_URL استفاده می‌کند
-                model_kwargs = {}
-                if force_json:
-                    model_kwargs["response_format"] = {"type": "json_object"}
-                    logger.info("📋 JSON mode enabled")
-
-                self._models[cache_key] = ChatOpenAI(
-                    model_name=model_name,
-                    openai_api_key=settings.embedder_api_key_loaded or settings.openai_api_key_loaded,        # 🔑 OpenAI Official API Key
-                    base_url=settings.embedder_openai_base_url_loaded or settings.openai_base_url_loaded,     # 🔗 OpenAI Official Base URL
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    streaming=streaming,
-                    callbacks=self._callbacks,
-                    model_kwargs=model_kwargs
-                )
-                logger.info(f"✅ OpenAI model {model_name} ready (Official API)")
-        else:
-            logger.debug(f"♻️ Using cached model: {cache_key}")
-        
-        return self._models[cache_key]
-    
     def get_embeddings(self) -> OpenAIEmbeddings:
         """
         دریافت embedding model
@@ -240,6 +85,96 @@ class LangChainService:
             logger.info("✅ Embeddings model ready")
         
         return self._embeddings
+    
+    def _determine_task_complexity(self, query: str, context_length: int, history_length: int) -> str:
+        """
+        Determine task complexity using LangChain Orchestrator
+        
+        Args:
+            query: User query
+            context_length: Length of context
+            history_length: Length of conversation history
+            
+        Returns:
+            str: Task complexity (simple, moderate, complex)
+        """
+        # Use LangChain Orchestrator for query analysis
+        analysis = langchain_orchestrator.query_analyzer.analyze_query(query, context_length, history_length)
+        complexity = analysis.get("complexity", "simple")
+        
+        logger.info(f"🎯 Task complexity determined: {complexity} (query: {len(query)}, context: {context_length}, history: {history_length})")
+        return complexity
+    
+    def _get_cache_key(self, query: str, context: str, query_type: str, conversation_history: Optional[List] = None) -> str:
+        """Generate cache key for RAG response"""
+        import hashlib
+        
+        # Include conversation history in cache key if available
+        history_str = ""
+        if conversation_history:
+            history_str = "_".join([f"{msg.get('role', '')}:{msg.get('content', '')[:50]}" for msg in conversation_history[-5:]])
+        
+        content = f"{query}_{context}_{query_type}_{history_str}"
+        return hashlib.md5(content.encode()).hexdigest()
+    
+    def _is_cache_valid(self, cache_entry: dict) -> bool:
+        """Check if cache entry is still valid"""
+        import time
+        return (time.time() - cache_entry["timestamp"]) < self._cache_ttl
+    
+    def _get_cached_response(self, cache_key: str) -> Optional[str]:
+        """Get cached response if valid"""
+        cache_entry = self._response_cache.get(cache_key)
+        if cache_entry and self._is_cache_valid(cache_entry):
+            logger.info(f"✅ Using cached response for key: {cache_key[:8]}...")
+            return cache_entry["response"]
+        return None
+    
+    def _cache_response(self, cache_key: str, response: str):
+        """Cache response"""
+        import time
+        self._response_cache[cache_key] = {
+            "response": response,
+            "timestamp": time.time()
+        }
+        logger.debug(f"📝 Cached response for key: {cache_key[:8]}...")
+    
+    def _select_model_by_strategy(self, query_type: str, task_complexity: str, streaming: bool = False) -> str:
+        """
+        Select model based on query type and task complexity using ModelFactory
+        
+        Args:
+            query_type: Type of query (specific, general, explanation)
+            task_complexity: Task complexity (simple, moderate, complex)
+            streaming: Whether streaming is enabled
+            
+        Returns:
+            str: Model name
+        """
+        # Use ModelFactory for optimal model selection
+        try:
+            # Map task complexity to task type
+            task_mapping = {
+                "simple": "chat",
+                "moderate": "rag",
+                "complex": "rag"
+            }
+            
+            task_type = task_mapping.get(task_complexity, "rag")
+            
+            # Get optimal model from ModelFactory
+            optimal_model = model_factory.get_optimal_model(task_type)
+            logger.info(f"🎯 ModelFactory selected optimal model: {optimal_model} for task: {task_type}")
+            
+            return optimal_model
+            
+        except Exception as e:
+            logger.warning(f"⚠️ ModelFactory selection failed, using fallback: {e}")
+            # Fallback to simple strategy
+            if task_complexity == "simple":
+                return settings.chat_model_loaded
+            else:
+                return settings.rag_model_loaded
     
     @retry(
         stop=stop_after_attempt(3),
@@ -291,12 +226,16 @@ class LangChainService:
                     }
                 )
 
-                # استفاده از 1000 توکن برای metadata generation
-                model = self._get_model(selected_model, force_json=True, max_tokens=1000)
+                # Get model from ModelService
+                model = model_service.get_model(
+                    selected_model, 
+                    force_json=True, 
+                    max_tokens=1000
+                )
                 logger.info(f"✅ Model loaded successfully: {selected_model}")
 
-                # 🔥 استفاده از prompt template جداگانه
-                prompt_template = get_prompt("metadata_generation")
+                # Get prompt from PromptService
+                prompt_template = prompt_service.get_prompt("metadata_generation")
                 prompt = ChatPromptTemplate.from_template(prompt_template)
 
                 # Create the chain with JSON parser
@@ -373,12 +312,16 @@ class LangChainService:
             logger.info(f"📝 عنوان: {title[:100]}...")
             logger.info(f"📊 طول محتوا: {len(content)} کاراکتر")
 
-            # استفاده از max_tokens بالا برای markdown conversion (4096 توکن)
-            model = self._get_model(selected_model, force_json=False, max_tokens=4096)
+            # Get model from ModelService
+            model = model_service.get_model(
+                selected_model, 
+                force_json=False, 
+                max_tokens=4096
+            )
             logger.info(f"✅ مدل {selected_model} برای تبدیل Markdown بارگذاری شد (max_tokens: 4096)")
 
-            # 🔥 استفاده از prompt template جداگانه
-            prompt_template = get_prompt("markdown_conversion")
+            # Get prompt from PromptService
+            prompt_template = prompt_service.get_prompt("markdown_conversion")
             prompt = ChatPromptTemplate.from_template(prompt_template)
 
             # Create the chain
@@ -412,14 +355,14 @@ class LangChainService:
             AI response string
         """
         try:
-            model = self._get_model(settings.chat_model_loaded, force_json=False)
+            model = model_service.get_model(settings.chat_model_loaded, force_json=False)
             logger.info(f"🗣️ LangChain - Using CHAT model: {settings.chat_model_loaded}")
 
-            # Create prompt for chat
-            system_message = "You are a helpful customer support assistant. Answer questions in Persian (Farsi)."
+            # Get system message from PromptService
+            system_message = prompt_service.get_prompt("chat_system_message")
 
             if context:
-                system_message += f"\n\nRelevant context:\n{context}"
+                system_message += f"\n\n**منابع مرتبط:**\n{context}"
 
             # Convert messages to LangChain format
             langchain_messages = [
@@ -455,19 +398,19 @@ class LangChainService:
             Chunks of the AI response as they are generated
         """
         try:
-            # استفاده از مدل با streaming enabled
-            model = self._get_model(
+            # Get model from ModelService with streaming enabled
+            model = model_service.get_model(
                 settings.chat_model_loaded,
                 force_json=False,
                 streaming=True
             )
             logger.info(f"📝 LangChain - Using CHAT model for metadata: {settings.chat_model_loaded}")
             
-            # Create prompt for chat
-            system_message = "You are a helpful customer support assistant. Answer questions in Persian (Farsi)."
+            # Get system message from PromptService
+            system_message = prompt_service.get_prompt("chat_system_message")
             
             if context:
-                system_message += f"\n\nRelevant context:\n{context}"
+                system_message += f"\n\n**منابع مرتبط:**\n{context}"
             
             # Convert messages to LangChain format
             langchain_messages = [
@@ -495,6 +438,7 @@ class LangChainService:
             logger.error(f"❌ Streaming chat response failed: {e}", exc_info=True)
             yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم."
 
+
     async def generate_rag_response(
         self,
         query: str,
@@ -503,7 +447,8 @@ class LangChainService:
         custom_model: Optional[str] = None,
         custom_temperature: Optional[float] = None,
         query_type: str = "general",  # 🎯 نوع سوال: specific, general, explanation
-        prompt_name: str = "rag_response"  # 🆕 پارامتر جدید برای نام پرامپت
+        prompt_name: str = "rag_response",  # 🆕 پارامتر جدید برای نام پرامپت
+        agentic_mode: bool = False  # 🆕 پارامتر جدید برای حالت Agentic
     ) -> str:
         """
         Generate a RAG response using AI - uses provided context and conversation history.
@@ -519,22 +464,46 @@ class LangChainService:
             AI response string
         """
         try:
-            model_name = custom_model or settings.rag_model_loaded
-            temperature = custom_temperature if custom_temperature is not None else 0.3
-            logger.info(f"🔄 LangChain - Using RAG model: {model_name}")
+            # Determine task complexity
+            task_complexity = self._determine_task_complexity(
+                query,
+                len(context),
+                len(conversation_history) if conversation_history else 0
+            )
             
-            # 🎯 تطبیق max_tokens با نوع سوال - کاهش برای پاسخ‌های کوتاه‌تر
-            # 🔥 OPTIMIZED: کاهش max_tokens برای جلوگیری از پاسخ‌های خیلی طولانی
-            if query_type == "specific":
-                max_tokens = 2000  # سوالات خاص: پاسخ متعادل (کاهش از 4000 به 2000)
-            elif query_type == "explanation":
-                max_tokens = 2500  # توضیحات: پاسخ کامل اما کوتاه‌تر (کاهش از 4000 به 2500)
-            else:  # general
-                max_tokens = 3000  # سوالات عمومی: پاسخ جامع اما نه خیلی طولانی (کاهش از 8000 به 3000)
+            # Check cache first
+            cache_key = self._get_cache_key(query, context, query_type, conversation_history)
+            cached_response = self._get_cached_response(cache_key)
+            if cached_response:
+                return cached_response
+            
+            # Select model based on strategy if custom_model is not provided
+            if custom_model is None:
+                model_name = self._select_model_by_strategy(query_type, task_complexity, streaming=False)
+            else:
+                model_name = custom_model
+                
+            temperature = custom_temperature if custom_temperature is not None else 0.3
+            logger.info(f"🔄 LangChain - Using RAG model: {model_name} (complexity: {task_complexity})")
+            
+            # 🎯 تطبیق max_tokens با نوع سوال و حالت Agentic
+            if agentic_mode:
+                # در حالت Agentic، اجازه پاسخ‌های کامل‌تر و طولانی‌تر را می‌دهیم
+                max_tokens = 4000
+                logger.info(f"🧠 Agentic Mode enabled: Using extended max_tokens={max_tokens}")
+            else:
+                # حالت عادی: پاسخ‌های کوتاه‌تر برای سرعت و مختصر بودن
+                if query_type == "specific":
+                    max_tokens = 2000  # سوالات خاص: پاسخ متعادل (کاهش از 4000 به 2000)
+                elif query_type == "explanation":
+                    max_tokens = 2500  # توضیحات: پاسخ کامل اما کوتاه‌تر (کاهش از 4000 به 2500)
+                else:  # general
+                    max_tokens = 3000  # سوالات عمومی: پاسخ جامع اما نه خیلی طولانی (کاهش از 8000 به 3000)
             
             logger.info(f"🎯 Max Tokens for query type '{query_type}': {max_tokens}")
             
-            model = self._get_model(
+            # Get model from ModelService
+            model = model_service.get_model(
                 model_name, 
                 force_json=False,
                 temperature=temperature,
@@ -549,55 +518,20 @@ class LangChainService:
             logger.info(f"❓ Query: {query}")
             logger.info(f"📚 Conversation history: {len(conversation_history) if conversation_history else 0} messages")
 
-            # Build conversation history text
-            history_text = ""
-            if conversation_history and len(conversation_history) > 0:
-                history_text = "\n**تاریخچه مکالمه:**\n"
-                for msg in conversation_history:
-                    # Handle both tuple format (('user', 'content'),) and dict format ({'role': 'user', 'content': 'content'})
-                    if isinstance(msg, tuple) and len(msg) >= 2:
-                        role = msg[0]
-                        content = msg[1]
-                    elif isinstance(msg, dict):
-                        role = msg.get("role", "user")
-                        content = msg.get("content", "")
-                    else:
-                        continue  # Skip invalid format
-                    
-                    role_fa = "کاربر" if role == "user" else "سالی"
-                    history_text += f"{role_fa}: {content}\n"
-                history_text += "\n"
+            # Build conversation history text using ConversationMemoryService
+            history_text = conversation_memory_service.format_history_for_prompt(conversation_history)
 
-            # 🎯 تطبیق سبک پاسخ با نوع سوال - تاکید بر پاسخ‌های کوتاه‌تر
+            # 🎯 تطبیق سبک پاسخ با نوع سوال - استفاده از prompt files
             logger.info(f"🎯 Query Type: {query_type}")
             if query_type == "specific":
-                response_guide = """
-📏 **راهنمای طول و سبک پاسخ:**
-   - این یک سوال خاص است - پاسخ باید دقیق و مفید باشد
-   - ابتدا پاسخ مستقیم را ارائه دهید
-   - سپس نکات کلیدی و مهم را به طور مختصر توضیح دهید
-   - از ساختار واضح استفاده کنید اما پاسخ را کوتاه نگه دارید
-   - حداکثر 2-3 پاراگراف برای پوشش تمام اطلاعات ضروری
-"""
+                response_guide = prompt_service.get_prompt("response_guides/specific_response_guide")
             elif query_type == "explanation":
-                response_guide = """
-📏 **راهنمای طول و سبک پاسخ:**
-   - این یک درخواست توضیح است - پاسخ کامل اما مختصر ارائه دهید
-   - ابتدا خلاصه‌ای بدهید، سپس مراحل کلیدی را با شماره‌گذاری توضیح دهید
-   - هر مرحله را به طور مفید توضیح دهید بدون جزئیات غیرضروری
-   - پاسخ کل باید حداکثر 4-5 پاراگراف باشد
-"""
+                response_guide = prompt_service.get_prompt("response_guides/explanation_response_guide")
             else:  # general
-                response_guide = """
-📏 **راهنمای طول و سبک پاسخ:**
-   - این یک سوال عمومی است - پاسخ جامع اما نه خیلی طولانی ارائه دهید
-   - نکات اصلی موضوع را پوشش دهید
-   - از ساختار سلسله مراتبی استفاده کنید اما پاسخ را متعادل نگه دارید
-   - حداکثر 3-5 پاراگراف برای پوشش تمام جنبه‌های مهم
-"""
+                response_guide = prompt_service.get_prompt("response_guides/general_response_guide")
 
-            # 🔥 استفاده از prompt template جداگانه
-            prompt_template = get_prompt(prompt_name)
+            # Get prompt from PromptService
+            prompt_template = prompt_service.get_prompt(prompt_name)
             prompt = ChatPromptTemplate.from_template(prompt_template)
 
             chain = prompt | model
@@ -614,6 +548,9 @@ class LangChainService:
             # حذف هر چیزی بین <thinking> و </thinking> (با پشتیبانی از multiline)
             response = re.sub(r'<thinking>.*?</thinking>', '', response, flags=re.DOTALL)
             response = response.strip()
+
+            # Cache the response
+            self._cache_response(cache_key, response)
 
             logger.info(f"✅ RAG response generated: {len(response)} characters")
             return response
@@ -654,8 +591,8 @@ class LangChainService:
             
             logger.info(f"💬 Conversational streaming with model: {model_name}, temperature: {temperature}")
             
-            # استفاده از مدل با streaming enabled
-            model = self._get_model(
+            # Get model from ModelService with streaming enabled
+            model = model_service.get_model(
                 model_name, 
                 force_json=False,
                 streaming=True,
@@ -663,24 +600,14 @@ class LangChainService:
                 max_tokens=500  # پاسخ‌های محاوره‌ای کوتاه‌تر هستند
             )
             
-            # 🔥 استفاده از prompt template صحیح برای پاسخ‌های محاوره‌ای
-            conversational_prompt_template = get_prompt("conversational_response")
+            # Get prompt from PromptService
+            conversational_prompt_template = prompt_service.get_prompt("conversational_response")
             
-            # 🧠 آماده‌سازی تاریخچه مکالمه با ConversationMemoryManager
-            history_text = ""
-            if conversation_history and len(conversation_history) > 0:
-                # فقط 10 پیام آخر برای محاوره
-                recent_messages = conversation_history[-10:]
-                history_text = format_history_for_prompt(recent_messages)
-                logger.info(f"📚 Conversational history: {len(recent_messages)} messages (from {len(conversation_history)} total)")
-            else:
-                logger.info(f"📚 No conversation history available")
-                history_text = "هیچ تاریخچه‌ای موجود نیست. این اولین پیام است.\n\n"
+            # 🧠 آماده‌سازی تاریخچه مکالمه با ConversationMemoryService
+            history_text = conversation_memory_service.format_history_for_prompt(conversation_history)
             
             # ساخت prompt template با placeholders
-            from langchain_core.prompts import ChatPromptTemplate
             prompt = ChatPromptTemplate.from_template(conversational_prompt_template)
-            
             
             chain = prompt | model
             
@@ -716,7 +643,7 @@ class LangChainService:
                     yield content
                     if len(content) > 5:
                         await asyncio.sleep(0.01)
-                    
+            
             logger.info(f"✅ Conversational streaming completed: {chunk_num} total chunks")
                     
         except Exception as e:
@@ -731,7 +658,8 @@ class LangChainService:
         custom_model: Optional[str] = None,
         custom_temperature: Optional[float] = None,
         query_type: str = "general",  # 🎯 نوع سوال: specific, general, explanation
-        prompt_name: str = "rag_response"  # 🆕 پارامتر جدید برای نام پرامپت
+        prompt_name: str = "rag_response",  # 🆕 پارامتر جدید برای نام پرامپت
+        agentic_mode: bool = False  # 🆕 پارامتر جدید برای حالت Agentic
     ):
         """
         Generate a streaming RAG response using AI - STRICT MODE: Only use provided context.
@@ -747,25 +675,51 @@ class LangChainService:
             Chunks of the AI response as they are generated
         """
         try:
-            model_name = custom_model or settings.rag_model_loaded
+            # Determine task complexity
+            task_complexity = self._determine_task_complexity(
+                query,
+                len(context),
+                len(conversation_history) if conversation_history else 0
+            )
+            
+            # Check cache first (for streaming, we'll use a different approach)
+            cache_key = self._get_cache_key(query, context, query_type, conversation_history)
+            cached_response = self._get_cached_response(cache_key)
+            if cached_response:
+                # Yield cached response as chunks
+                for i in range(0, len(cached_response), 10):
+                    yield cached_response[i:i+10]
+                return
+            
+            # Select model based on strategy if custom_model is not provided
+            if custom_model is None:
+                model_name = self._select_model_by_strategy(query_type, task_complexity, streaming=True)
+            else:
+                model_name = custom_model
+                
             temperature = custom_temperature if custom_temperature is not None else 0.3
-            logger.info(f"🎯 LangChain - Using RAG model for response: {model_name}")
+            logger.info(f"🎯 LangChain - Using RAG model for response: {model_name} (complexity: {task_complexity})")
             
             logger.info(f"🌊 Streaming with model: {model_name}, temperature: {temperature}")
             
-            # 🎯 تطبیق max_tokens با نوع سوال - کاهش برای پاسخ‌های کوتاه‌تر
-            # 🔥 OPTIMIZED: کاهش max_tokens برای جلوگیری از پاسخ‌های خیلی طولانی
-            if query_type == "specific":
-                max_tokens = 2000  # سوالات خاص: پاسخ متعادل (کاهش از 4000 به 2000)
-            elif query_type == "explanation":
-                max_tokens = 2500  # توضیحات: پاسخ کامل اما کوتاه‌تر (کاهش از 4000 به 2500)
-            else:  # general
-                max_tokens = 3000  # سوالات عمومی: پاسخ جامع اما نه خیلی طولانی (کاهش از 8000 به 3000)
+            # 🎯 تطبیق max_tokens با نوع سوال و حالت Agentic
+            if agentic_mode:
+                # در حالت Agentic، اجازه پاسخ‌های کامل‌تر و طولانی‌تر را می‌دهیم
+                max_tokens = 4000
+                logger.info(f"🧠 Agentic Mode enabled: Using extended max_tokens={max_tokens}")
+            else:
+                # حالت عادی: پاسخ‌های کوتاه‌تر برای سرعت و مختصر بودن
+                if query_type == "specific":
+                    max_tokens = 2000  # سوالات خاص: پاسخ متعادل (کاهش از 4000 به 2000)
+                elif query_type == "explanation":
+                    max_tokens = 2500  # توضیحات: پاسخ کامل اما کوتاه‌تر (کاهش از 4000 به 2500)
+                else:  # general
+                    max_tokens = 3000  # سوالات عمومی: پاسخ جامع اما نه خیلی طولانی (کاهش از 8000 به 3000)
             
             logger.info(f"🎯 Max Tokens for query type '{query_type}': {max_tokens}")
             
-            # استفاده از مدل با streaming enabled
-            model = self._get_model(
+            # Get model from ModelService with streaming enabled
+            model = model_service.get_model(
                 model_name, 
                 force_json=False,
                 streaming=True,
@@ -774,51 +728,25 @@ class LangChainService:
             )
             
             # 🔥 DEBUG: Log context preview
-            logger.info(f"📝 Context preview (first 500 chars): {context[:500]}...")
-            logger.info(f"📝 Context length: {len(context)} characters")
-            logger.info(f"❓ Query: {query}")
+            logger.debug(f"📝 Context preview (first 500 chars): {context[:500]}...")
+            logger.debug(f"📝 Context length: {len(context)} characters")
+            logger.debug(f"❓ Query: {query}")
             
-            # 🎯 تطبیق سبک پاسخ با نوع سوال - تاکید بر پاسخ‌های کوتاه‌تر
-            logger.info(f"🎯 Query Type: {query_type}")
+            # 🎯 تطبیق سبک پاسخ با نوع سوال - استفاده از prompt files
+            logger.debug(f"🎯 Query Type: {query_type}")
             if query_type == "specific":
-                response_guide = """
-📏 **راهنمای طول و سبک پاسخ:**
-   - این یک سوال خاص است - پاسخ باید دقیق و مفید باشد
-   - ابتدا پاسخ مستقیم را ارائه دهید
-   - سپس نکات کلیدی و مهم را به طور مختصر توضیح دهید
-   - از ساختار واضح استفاده کنید اما پاسخ را کوتاه نگه دارید
-   - حداکثر 2-3 پاراگراف برای پوشش تمام اطلاعات ضروری
-"""
+                response_guide = prompt_service.get_prompt("response_guides/specific_response_guide")
             elif query_type == "explanation":
-                response_guide = """
-📏 **راهنمای طول و سبک پاسخ:**
-   - این یک درخواست توضیح است - پاسخ کامل اما مختصر ارائه دهید
-   - ابتدا خلاصه‌ای بدهید، سپس مراحل کلیدی را با شماره‌گذاری توضیح دهید
-   - هر مرحله را به طور مفید توضیح دهید بدون جزئیات غیرضروری
-   - پاسخ کل باید حداکثر 4-5 پاراگراف باشد
-"""
+                response_guide = prompt_service.get_prompt("response_guides/explanation_response_guide")
             else:  # general
-                response_guide = """
-📏 **راهنمای طول و سبک پاسخ:**
-   - این یک سوال عمومی است - پاسخ جامع اما نه خیلی طولانی ارائه دهید
-   - نکات اصلی موضوع را پوشش دهید
-   - از ساختار سلسله مراتبی استفاده کنید اما پاسخ را متعادل نگه دارید
-   - حداکثر 3-5 پاراگراف برای پوشش تمام جنبه‌های مهم
-"""
+                response_guide = prompt_service.get_prompt("response_guides/general_response_guide")
             
-            # 🔥 استفاده از prompt template جداگانه
-            prompt_template = get_prompt(prompt_name)
+            # Get prompt from PromptService
+            prompt_template = prompt_service.get_prompt(prompt_name)
             prompt = ChatPromptTemplate.from_template(prompt_template)
 
-            # 🧠 Build conversation history با استفاده از ConversationMemoryManager
-            history_text = ""
-            if conversation_history and len(conversation_history) > 0:
-                # استفاده از helper function برای فرمت‌بندی
-                history_text = format_history_for_prompt(conversation_history[-10:])  # فقط 10 پیام آخر
-                logger.info(f"📚 Conversation history: {len(conversation_history)} messages (using last 10)")
-            else:
-                history_text = "هیچ تاریخچه‌ای موجود نیست. این اولین پیام است.\n\n"
-                logger.info(f"📚 No conversation history available")
+            # 🧠 Build conversation history با استفاده از ConversationMemoryService
+            history_text = conversation_memory_service.format_history_for_prompt(conversation_history[-10:] if conversation_history else None)
             
             chain = prompt | model
             
@@ -846,16 +774,16 @@ class LangChainService:
                         empty_chunk_count += 1
                         # Skip empty chunks but log them
                         if empty_chunk_count == 1:
-                            logger.info(f"⏭️ Skipping initial empty chunks...")
-                        # هشدار برای chunk های خالی زیاد (احتمال مشکل مدل)
-                        if empty_chunk_count % 100 == 0:
-                            logger.warning(f"⚠️ Still getting empty chunks: {empty_chunk_count} so far (chunk #{chunk_num})")
+                            logger.debug(f"⏭️ Skipping initial empty chunks...")
+                            # هشدار برای chunk های خالی زیاد (احتمال مشکل مدل)
+                            if empty_chunk_count % 100 == 0:
+                                logger.debug(f"⚠️ Still getting empty chunks: {empty_chunk_count} so far (chunk #{chunk_num})")
                         continue
                     else:
                         # اولین محتوای معنادار پیدا شد
                         first_content_found = True
                         if empty_chunk_count > 0:
-                            logger.info(f"✅ Skipped {empty_chunk_count} empty chunks, starting content stream...")
+                            logger.debug(f"✅ Skipped {empty_chunk_count} empty chunks, starting content stream...")
 
                 # بعد از پیدا شدن اولین محتوا، همه chunks را ارسال می‌کنیم (حتی فاصله‌ها)
                 if not isinstance(content, str):
@@ -874,7 +802,7 @@ class LangChainService:
                         if before_thinking:
                             yield before_thinking
                         thinking_buffer = thinking_buffer.split('<thinking>', 1)[1] if '<thinking>' in thinking_buffer else ""
-                        logger.info(f"🧠 Detected <thinking> block start, filtering...")
+                        logger.debug(f"🧠 Detected <thinking> block start, filtering...")
                         continue
                     
                     # اگر داخل thinking هستیم، بررسی پایان آن
@@ -884,7 +812,7 @@ class LangChainService:
                             # ارسال محتوای بعد از thinking
                             after_thinking = thinking_buffer.split('</thinking>', 1)[1] if '</thinking>' in thinking_buffer else ""
                             thinking_buffer = after_thinking
-                            logger.info(f"🧠 Detected </thinking> block end, resuming stream...")
+                            logger.debug(f"🧠 Detected </thinking> block end, resuming stream...")
                             if after_thinking:
                                 yield after_thinking
                                 thinking_buffer = ""
@@ -906,18 +834,37 @@ class LangChainService:
             # 🧹 ارسال محتوای باقی‌مانده در بافر (اگر thinking پیدا نشد)
             if thinking_buffer and not inside_thinking:
                 yield thinking_buffer
-                logger.info(f"✅ Flushed remaining buffer: {len(thinking_buffer)} characters")
+                logger.debug(f"✅ Flushed remaining buffer: {len(thinking_buffer)} characters")
                     
-            logger.info(f"✅ Streaming completed: {chunk_num} total chunks, {empty_chunk_count} empty chunks skipped")
+            logger.debug(f"✅ Streaming completed: {chunk_num} total chunks, {empty_chunk_count} empty chunks skipped")
             
             # 🔥 اگر همه chunks خالی بودن، یعنی مدل مشکل داره
             if chunk_num > 0 and empty_chunk_count == chunk_num:
                 error_msg = f"⚠️ مدل '{custom_model or settings.rag_model_loaded}' پاسخ معتبری برنگرداند. لطفاً مدل دیگری انتخاب کنید (مثل gpt-4o-mini یا google/gemini-2.0-flash-exp:free)."
-                logger.error(error_msg)
+                logger.debug(error_msg)
                 yield error_msg
+            
+            # Cache the complete response
+            # Rebuild the complete response from chunks for caching
+            complete_response = ""
+            for chunk in chain.astream({
+                "response_guide": response_guide,
+                "context": context,
+                "history": history_text,
+                "query": query
+            }):
+                if hasattr(chunk, 'content'):
+                    complete_response += chunk.content
+                else:
+                    complete_response += str(chunk)
+            
+            # Clean the response and cache it
+            complete_response = re.sub(r'<thinking>.*?</thinking>', '', complete_response, flags=re.DOTALL)
+            complete_response = complete_response.strip()
+            self._cache_response(cache_key, complete_response)
                     
         except Exception as e:
-            logger.error(f"❌ Streaming RAG response failed: {e}", exc_info=True)
+            logger.debug(f"❌ Streaming RAG response failed: {e}", exc_info=True)
             yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم."
 
 

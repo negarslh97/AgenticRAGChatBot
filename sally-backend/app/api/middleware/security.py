@@ -445,7 +445,7 @@ SECURITY_PRESETS = {
     "development": SecurityHeaders(
         enable_hsts=False,
         enable_content_security_policy=False,
-        cors_origins=["http://localhost:3000", "http://localhost:3001"],
+        cors_origins=["http://localhost:3000", "http://localhost:3001", "http://0.0.0.0:3000", "http://0.0.0.0:3001"],
         csp_directives={
             "default-src": "'self' 'unsafe-inline' 'unsafe-eval'",
             "script-src": "'self' 'unsafe-inline' 'unsafe-eval'",

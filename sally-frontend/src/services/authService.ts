@@ -1,7 +1,7 @@
 import axios, { AxiosResponse, AxiosError, InternalAxiosRequestConfig } from "axios";
 import type { User } from "../types/user";
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = "http://0.0.0.0:8000";
 
 // ===================================================================================
 // ١. اینترفیس User برای مطابقت با پاسخ بک‌اند اصلاح شد

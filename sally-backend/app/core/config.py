@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     default_SuperAdmin_password: str = "admin123"
     
     # CORS
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:3001"]
+    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:3001", "http://0.0.0.0:3000", "http://0.0.0.0:3001"]
 
     # Weaviate Vector Database Configuration
     weaviate_url: Optional[str] = None
@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     agentic_fast_model: Optional[str] = None    # برای analyze_query, plan_strategy
     agentic_power_model: Optional[str] = None   # برای synthesize_answer
     use_hybrid_model_strategy: bool = False      # فعال/غیرفعال کردن
+    
+    # 🆕 Agentic RAG Configuration
+    # تنظیمات برای بهینه‌سازی عملکرد و کنترل رفتار
+    agentic_search_limit: int = 5                # تعداد نتایج جستجو
+    agentic_max_subqueries: int = 3              # حداکثر تعداد زیرسوالات
+    agentic_context_chunk_size: int = 500       # اندازه chunk برای context
+    agentic_history_messages_count: int = 5      # تعداد پیام‌های تاریخچه برای در نظر گرفتن
+    agentic_min_confidence_threshold: float = 0.3 # حداقل confidence برای retry
+    agentic_max_retries: int = 1                 # حداکثر تعداد retry
     
     # Weaviate Sync Configuration
     enable_weaviate_sync: bool = True          # فعال/غیرفعال کردن همگام‌سازی با Weaviate
@@ -158,6 +167,14 @@ class Settings(BaseSettings):
     # App settings
     app_name: str = "Sally Customer Support"
     debug: bool = True
+
+    # Prompts directory configuration
+    prompts_dir: str = "app/prompts"
+
+    @property
+    def prompts_dir_loaded(self) -> str:
+        import os
+        return self.prompts_dir or os.getenv("PROMPTS_DIR")
 
     # Versioning for A/B Testing
     prompt_version: str = "v1.0.0"

@@ -1,3 +1,5 @@
+# permissions.py
+
 """
 RBAC (Role-Based Access Control) system for admin and customer permissions.
 This file defines permission constants, default roles, and FastAPI dependencies for authentication and authorization.
@@ -8,7 +10,7 @@ from typing import List, Optional, Union
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from app.domain.entities import Admin, Customer, Role, PermissionDetail
-from app.core.security import verify_token
+from app.core.security import verify_token, get_user_info_from_token
 
 logger = logging.getLogger(__name__)
 
@@ -268,22 +270,67 @@ async def get_current_customer(credentials: Optional[HTTPAuthorizationCredential
 
 
 # --- 6. Optional & Combined User Dependencies ---
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Union[Admin, Customer]:
+    """
+    FastAPI dependency to get the current authenticated user (admin or customer).
+    
+    This function optimizes user identification by:
+    1. Using unified token verification
+    2. Checking user type once to prevent redundant authentication attempts
+    3. Direct database lookup based on user type
+    """
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    
+    try:
+        # Use unified user info extraction to avoid redundant token verification
+        user_type, payload = get_user_info_from_token(credentials.credentials)
+        
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token: missing user ID")
+        
+        logger.info(f"🔍 User type identified: {user_type}, User ID: {user_id}")
+        
+        # Direct database lookup based on user type
+        if user_type in ["Admin", "SuperAdmin"]:
+            admin = await Admin.get(user_id)
+            if admin and admin.is_active:
+                logger.info(f"✅ Admin authenticated: {admin.full_name} ({admin.email})")
+                return admin
+            else:
+                logger.warning(f"⚠️ Admin not found or inactive: {user_id}")
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin credentials")
+        
+        elif user_type == "Customer":
+            customer = await Customer.get(user_id)
+            if customer and customer.is_active:
+                logger.info(f"✅ Customer authenticated: {customer.full_name} ({customer.email})")
+                return customer
+            else:
+                logger.warning(f"⚠️ Customer not found or inactive: {user_id}")
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid customer credentials")
+        
+        else:
+            logger.error(f"❌ Unknown user type: {user_type}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Authentication error: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
+
+
 async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Optional[Union[Admin, Customer]]:
     """Gets the current user (admin or Customer) if authenticated, otherwise returns None."""
     if not credentials or not credentials.credentials:
         return None
     
-    # ابتدا سعی می‌کنیم به عنوان ادمین احراز هویت کنیم
-    admin = await get_admin_from_token(credentials.credentials)
-    if admin:
-        return admin
-
-    # اگر ادمین نبود، سعی می‌کنیم به عنوان مشتری احراز هویت کنیم
-    customer = await get_current_customer_from_token(credentials.credentials)
-    if customer:
-        return customer
-        
-    return None
+    try:
+        return await get_current_user(credentials)
+    except HTTPException:
+        return None
 
 async def get_optional_admin(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Optional[Admin]:
     """
