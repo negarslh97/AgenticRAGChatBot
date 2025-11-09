@@ -361,9 +361,18 @@ def weaviate_client():
     client = _weaviate_manager.get_client()
     
     try:
+        # Ensure client is connected
+        if hasattr(client, 'connect'):
+            client.connect()
         yield client
     finally:
-        logger.debug("🔓 Weaviate client used")
+        # Clean up connection
+        if hasattr(client, 'close'):
+            try:
+                client.close()
+            except:
+                pass
+        logger.debug("🔓 Weaviate client used and closed")
 
 
 @asynccontextmanager
@@ -439,8 +448,17 @@ def weaviate_client_context():
     client = manager.get_client()
     
     try:
+        # Ensure client is connected
+        if hasattr(client, 'connect'):
+            client.connect()
         yield client
     finally:
+        # Clean up connection
+        if hasattr(client, 'close'):
+            try:
+                client.close()
+            except:
+                pass
         logger.debug("🔓 Weaviate client released from context manager")
 
 

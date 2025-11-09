@@ -313,13 +313,18 @@ class ChatUseCases:
         user: Optional[Union[Customer, Admin]] = None,
         user_type: str = "guest",
         conversation_id: Optional[str] = None,
-        guest_session_id: Optional[str] = None
+        guest_session_id: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         پردازش پیام کاربر عادی/مهمان با پشتیبانی از استریمینگ (نسخه تمیز و Refactor شده).
         """
         logger.debug(f"Starting streaming chat for {user_type}")
         rag_type = "simple" # کاربران عادی همیشه از simple RAG استفاده می‌کنند
+        # استفاده از مدل انتخاب شده توسط کاربر یا مدل پیش‌فرض
+        actual_model = model or settings.chat_model_loaded
+        actual_temperature = temperature or 0.7
 
         # 1. Get or create conversation
         if conversation_id:
@@ -372,8 +377,8 @@ class ChatUseCases:
                 query=content,
                 conversation_history=conversation_history,
                 custom_prompt="basic_response",  # 🔥 استفاده از پرامپت محاوره‌ای
-                custom_model=settings.chat_model_loaded,
-                custom_temperature=0.7
+                custom_model=actual_model,
+                custom_temperature=actual_temperature
             )
             full_response = result.content
             yield {
@@ -386,7 +391,7 @@ class ChatUseCases:
                 conversation_id=str(conversation.id),
                 sender_type=SenderType.AI.value,
                 content=full_response,
-                metadata={"rag_type": "conversational", "model": settings.chat_model_loaded}
+                metadata={"rag_type": "conversational", "model": actual_model}
             )
             await ai_message.insert()
 
@@ -428,7 +433,9 @@ class ChatUseCases:
             query_analysis=query_analysis,
             conversation_history=conversation_history,
             is_public_only=(not user), # کاربران مهمان فقط اسناد عمومی را می‌بینند
-            rag_type=rag_type
+            rag_type=rag_type,
+            custom_model=actual_model,
+            custom_temperature=actual_temperature
         ):
             yield event
 

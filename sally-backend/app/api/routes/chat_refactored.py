@@ -31,6 +31,8 @@ class ChatMessage(BaseModel):
     conversation_id: Optional[str] = None
     guest_session_id: Optional[str] = None
     rag_type: str = "simple"  # 🆕 "simple" or "detailed" for two-speed RAG
+    model: Optional[str] = None  # Model name (e.g., "gpt-4o", "ollama:llama3.2", "claude-3-5-sonnet")
+    temperature: Optional[float] = 0.7  # Temperature for text generation (0.0-2.0)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -109,7 +111,9 @@ async def send_message(
             user_type=user_type,
             conversation_id=message.conversation_id,
             guest_session_id=message.guest_session_id,
-            rag_type=message.rag_type
+            rag_type=message.rag_type,
+            model=message.model,
+            temperature=message.temperature
         )
         
         return ChatResponse(**response)
@@ -1099,7 +1103,9 @@ async def send_message_stream(
                     user=current_user,
                     user_type=user_type,
                     conversation_id=message.conversation_id,
-                    guest_session_id=message.guest_session_id
+                    guest_session_id=message.guest_session_id,
+                    model=message.model,
+                    temperature=message.temperature
                 ):
                     chunk_count += 1
                     # 🔥 DEBUG: Log each chunk

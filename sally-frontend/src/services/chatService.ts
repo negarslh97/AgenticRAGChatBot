@@ -83,13 +83,15 @@ export const chatService = {
   // Base URL for API (needed for some direct fetch calls)
   API_BASE_URL: '',  // Will use relative URLs with api interceptor
   
-  async sendMessage(data: { content: string; conversation_id?: string | null; guest_session_id?: string | null; rag_type?: 'simple' | 'detailed' }): Promise<ChatResponse> {
+  async sendMessage(data: { content: string; conversation_id?: string | null; guest_session_id?: string | null; rag_type?: 'simple' | 'detailed'; model?: string; temperature?: number }): Promise<ChatResponse> {
     // Use the same api instance that has the Authorization interceptor
     const requestData = {
       content: data.content,
       conversation_id: data.conversation_id,
       guest_session_id: data.guest_session_id,
       rag_type: data.rag_type || 'simple',
+      ...(data.model && { model: data.model }),
+      ...(data.temperature !== undefined && { temperature: data.temperature }),
     }
     
     try {
@@ -106,7 +108,9 @@ export const chatService = {
     content: string,
     conversationId: string | undefined,
     guestSessionId: string | undefined,
-    onEvent: (evt: any) => void
+    onEvent: (evt: any) => void,
+    model?: string,
+    temperature?: number
   ): Promise<{ abort: () => void }> {
     const controller = new AbortController()
 
@@ -114,6 +118,8 @@ export const chatService = {
       content,
       conversation_id: conversationId,
       guest_session_id: guestSessionId,
+      ...(model && { model }),
+      ...(temperature !== undefined && { temperature }),
     }
 
     const token = localStorage.getItem("token")
@@ -174,12 +180,14 @@ export const chatService = {
     return { abort: () => controller.abort() }
   },
 
-  async sendAdminMessage(content: string, conversationId?: string, ragType: 'simple' | 'agentic' = 'simple'): Promise<ChatResponse> {
+  async sendAdminMessage(content: string, conversationId?: string, ragType: 'simple' | 'agentic' = 'simple', model?: string, temperature?: number): Promise<ChatResponse> {
     // Admin-specific message sending with RAG type selection (non-streaming)
     const requestData = {
       content,
       conversation_id: conversationId,
       rag_type: ragType,
+      ...(model && { model }),
+      ...(temperature !== undefined && { temperature }),
     }
     
     try {

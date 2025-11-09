@@ -56,10 +56,10 @@ class Settings(BaseSettings):
     
     # 🆕 RAG Retrieval Configuration
     # 🔥 OPTIMIZED for Performance - Reduced from high values to prevent memory issues
-    weaviate_retrieval_limit: int = 8       # تعداد اسناد برای بازیابی اولیه (کاهش یافته از 30)
-    reranker_top_k: int = 5                 # تعداد اسناد برتر بعد از reranking (کاهش یافته از 30)
-    context_documents_count: int = 5        # تعداد اسناد TOP برای ارسال full context (بهینه)
-    max_sources_to_format: int = 5          # حداکثر تعداد منابع یکتا برای نمایش (کاهش یافته از 10)
+    weaviate_retrieval_limit: int = 12      # تعداد اسناد برای بازیابی اولیه (افزایش یافته از 8)
+    reranker_top_k: int = 8                 # تعداد اسناد برتر بعد از reranking (افزایش یافته از 5)
+    context_documents_count: int = 8        # تعداد اسناد TOP برای ارسال full context (افزایش یافته از 5)
+    max_sources_to_format: int = 8          # حداکثر تعداد منابع یکتا برای نمایش (افزایش یافته از 5)
     
     # 🆕 Hybrid Model Strategy (برای کاهش هزینه و بهبود سرعت)
     # برای وظایف ساده از مدل سریع و ارزان، برای وظایف پیچیده از مدل قدرتمند
@@ -69,12 +69,12 @@ class Settings(BaseSettings):
     
     # 🆕 Agentic RAG Configuration
     # 🔥 OPTIMIZED for Performance - Reduced resource usage
-    agentic_search_limit: int = 3                # تعداد نتایج جستجو (کاهش یافته از 5)
-    agentic_max_subqueries: int = 2              # حداکثر تعداد زیرسوالات (کاهش یافته از 3)
-    agentic_context_chunk_size: int = 400        # اندازه chunk برای context (کاهش یافته از 500)
-    agentic_history_messages_count: int = 3      # تعداد پیام‌های تاریخچه (کاهش یافته از 5)
-    agentic_min_confidence_threshold: float = 0.4 # حداقل confidence برای retry (افزایش یافته از 0.3)
-    agentic_max_retries: int = 1                 # حداکثر تعداد retry (ثابت)
+    agentic_search_limit: int = 5                # تعداد نتایج جستجو (افزایش یافته از 3 برای پاسخ‌های کامل‌تر)
+    agentic_max_subqueries: int = 3              # حداکثر تعداد زیرسوالات (افزایش یافته از 2)
+    agentic_context_chunk_size: int = 600        # اندازه chunk برای context (افزایش یافته از 400)
+    agentic_history_messages_count: int = 7      # تعداد پیام‌های تاریخچه (افزایش یافته از 3)
+    agentic_min_confidence_threshold: float = 0.3 # حداقل confidence برای retry (کاهش یافته از 0.4)
+    agentic_max_retries: int = 2                 # حداکثر تعداد retry (افزایش یافته از 1)
     
     # Weaviate Sync Configuration
     enable_weaviate_sync: bool = True          # فعال/غیرفعال کردن همگام‌سازی با Weaviate

@@ -13,11 +13,13 @@ import {
   Sparkles,
   Lightbulb,
   HelpCircle,
-  ExternalLink
+  ExternalLink,
+  Settings
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import ArticleHighlightModal from './ArticleHighlightModal';
+import ModelSelector from './ModelSelector';
 
 // Define component-specific types
 interface Message {
@@ -64,6 +66,8 @@ const Chat: React.FC = () => {
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [selectedModel, setSelectedModel] = useState('google/gemini-2.5-flash'); // Default model
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // 🔥 State برای Article Highlight Modal
@@ -111,6 +115,12 @@ const Chat: React.FC = () => {
   const handleNewChat = () => {
     setSelectedConversation(null);
     setNewMessage('');
+  };
+
+  // Model selection handler
+  const handleModelChange = (modelId: string) => {
+    setSelectedModel(modelId);
+    setShowModelSelector(false);
   };
 
   // 4. Simplified "Conversation Select" handler
@@ -302,7 +312,9 @@ const Chat: React.FC = () => {
             });
             setIsLoading(false);
           }
-        }
+        },
+        selectedModel,
+        0.7  // Default temperature
       );
 
     } catch (error) {
@@ -342,26 +354,52 @@ const Chat: React.FC = () => {
       {/* =============================================================== */}
       <main className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarOpen ? 'mr-80' : 'mr-0'}`}>
         <header className="flex items-center justify-between p-4 bg-white shadow-sm">
-            {/* ... Header content remains the same ... */}
-            <div className="flex items-center gap-3"> {/* For RTL, remove mr-4 */}
+            {/* Left side - Bot info and model selector */}
+            <div className="flex items-center gap-3">
                 <div className="relative">
                     <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center">
                         <Bot className="h-4 w-4 text-white" />
                     </div>
                     <div className="absolute -bottom-1 -right-1 h-3 w-3 bg-green-500 border-2 border-white rounded-full"></div>
                 </div>
-                <div>
+                <div className="flex flex-col">
                     <h1 className="font-semibold text-gray-900">سالی</h1>
-                    <p className="text-xs text-gray-500">آنلاین</p>
+                    <div className="flex items-center gap-2">
+                        <p className="text-xs text-gray-500">آنلاین</p>
+                        <Button
+                            onClick={() => setShowModelSelector(!showModelSelector)}
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto p-1 text-xs"
+                        >
+                            <Settings className="h-3 w-3" />
+                            <span className="mr-1">
+                                {selectedModel.split('/').pop()?.split(':')[0] || selectedModel}
+                            </span>
+                        </Button>
+                    </div>
                 </div>
             </div>
-            <Button
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                variant="ghost"
-                size="icon"
-            >
-                {isSidebarOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </Button>
+
+            {/* Right side - Sidebar toggle */}
+            <div className="flex items-center gap-2">
+                {showModelSelector && (
+                    <div className="w-80">
+                        <ModelSelector
+                            selectedModel={selectedModel}
+                            onModelChange={handleModelChange}
+                            disabled={isLoading}
+                        />
+                    </div>
+                )}
+                <Button
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    variant="ghost"
+                    size="icon"
+                >
+                    {isSidebarOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                </Button>
+            </div>
         </header>
 
         {/* Chat messages area */}

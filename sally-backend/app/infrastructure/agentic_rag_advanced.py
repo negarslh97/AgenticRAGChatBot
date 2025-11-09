@@ -67,6 +67,10 @@ class TreeNode(TypedDict):
     path: str
     article_id: str
     score: float
+    # 🔥 اضافه شده برای RERANKING
+    raw_content: str
+    full_article_content: str
+    rerank_score: Optional[float] = None
 
 
 class AgenticRAGState(TypedDict):
@@ -152,9 +156,16 @@ class AdvancedAgenticRAG:
         # Validate Weaviate configuration if tree search is enabled
         if not settings.weaviate_url_loaded:
             logger.warning("⚠️ Weaviate URL not configured - tree search will be disabled")
+        else:
+            logger.info("✅ Weaviate URL configured")
         
-        if not settings.weaviate_api_key_loaded:
-            logger.warning("⚠️ Weaviate API key not configured - tree search will be disabled")
+        # Weaviate API key is optional for many deployments
+        weaviate_api_key = settings.weaviate_api_key_loaded
+        if weaviate_api_key is not None and weaviate_api_key.strip():
+            logger.info("✅ Weaviate API key configured")
+        else:
+            # API key is empty or not configured - this is fine for unauthenticated Weaviate
+            logger.info("ℹ️ Weaviate API key not configured (using unauthenticated mode)")
         
         # Validate embedder configuration
         if not settings.embedder_api_key_loaded:
@@ -171,6 +182,7 @@ class AdvancedAgenticRAG:
             raise ValueError(f"Configuration validation failed: {', '.join(validation_errors)}")
         else:
             logger.info("✅ Configuration validation passed")
+            logger.info("🌳 Tree search enabled (Weaviate connection working)")
     
     def _build_graph(self):
         """ساخت workflow graph پیشرفته"""
@@ -652,61 +664,56 @@ class AdvancedAgenticRAG:
     async def _search_weaviate_tree(self, query: str, limit: int = 5) -> List[TreeNode]:
         """
         جستجوی vector در ساختار درختی Weaviate
+        
+        🔥 ENHANCED: استفاده از near_text و اضافه کردن reranking
         """
         try:
-            from openai import OpenAI
-            from app.infrastructure.connection_manager import weaviate_client
-            
-            # تولید vector از query
-            embedder_api_key = settings.embedder_api_key_loaded
-            embedder_base_url = settings.embedder_openai_base_url_loaded
-            embedder_model = settings.embedder_model_loaded
-            
-            if not embedder_api_key:
-                raise ValueError("Embedder API key not configured in settings")
-            if not embedder_model:
-                raise ValueError("Embedder model not configured in settings")
-                
-            openai_client = OpenAI(
-                api_key=embedder_api_key,
-                base_url=embedder_base_url
-            )
-            
-            response = openai_client.embeddings.create(
-                model=embedder_model,
-                input=query
-            )
-            
-            query_vector = response.data[0].embedding
-            
             # استفاده از Connection Manager
+            from app.infrastructure.connection_manager import weaviate_client
             with weaviate_client() as client:
                 # جستجو در collection
                 from app.core.weaviate_utils import get_weaviate_collection_name
                 collection_name = get_weaviate_collection_name()
                 collection = client.collections.get(collection_name)
                 
-                search_response = collection.query.near_vector(
-                    near_vector=query_vector,
-                    limit=settings.agentic_search_limit,
+                # 🔥 استفاده از near_text به جای near_vector (مثل RAG معمولی)
+                search_response = collection.query.near_text(
+                    query=query,
+                    limit=limit,
                     return_metadata=['distance', 'certainty']
                 )
                 
                 results = []
                 for obj in search_response.objects:
+                    # آماده‌سازی محتوای کامل برای reranking
+                    node_content = obj.properties.get("content", "")
+                    full_content = obj.properties.get("full_content", "")
+                    
+                    # ترکیب محتوا برای reranking (مثل RAG معمولی)
+                    combined_content = f"Title: {obj.properties.get('title', '')}\nContent: {node_content}"
+                    if full_content:
+                        combined_content += f"\n\nFull Article: {full_content}..."
+                    
                     node = TreeNode(
                         node_id=obj.properties.get("node_id", ""),
                         title=obj.properties.get("title", ""),
                         level=obj.properties.get("level", 1),
-                        content=obj.properties.get("content", ""),
+                        content=combined_content,  # محتوای ترکیبی
                         parent_id=obj.properties.get("parent_id", ""),
                         path=obj.properties.get("path", ""),
                         article_id=obj.properties.get("article_id", ""),
-                        score=obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5
+                        score=obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5,
+                        raw_content=node_content,  # 🔥 برای reranking
+                        full_article_content=full_content  # 🔥 برای reranking
                     )
                     results.append(node)
                 
-                return results
+                # 🔥 RERANKING اضافه شده (مثل RAG معمولی)
+                logger.info(f"🎯 Applying RERANKING to {len(results)} results...")
+                reranked_results = await self._rerank_documents(query, results, top_k=limit)
+                logger.info(f"✅ RERANKING completed. Top {len(reranked_results)} results selected.")
+                
+                return reranked_results
             # client به صورت خودکار بسته می‌شود
             
         except Exception as e:
@@ -799,7 +806,9 @@ class AdvancedAgenticRAG:
                             parent_id=obj.properties.get("parent_id", ""),
                             path=obj.properties.get("path", ""),
                             article_id=obj.properties.get("article_id", ""),
-                            score=0.5
+                            score=0.5,
+                            raw_content=obj.properties.get("content", ""),  # 🔥 اضافه شده
+                            full_article_content=obj.properties.get("full_content", "")  # 🔥 اضافه شده
                         )
                 
                 return nodes_map
@@ -816,6 +825,111 @@ class AdvancedAgenticRAG:
         برای performance بهتر از _fetch_nodes_by_ids استفاده کنید.
         """
         nodes_map = await self._fetch_nodes_by_ids([node_id])
+    
+    async def _rerank_documents(self, query: str, documents: List[TreeNode], top_k: int = 15) -> List[TreeNode]:
+        """
+        Rerank documents using external Reranker API (Colab) with fallback to local scoring.
+        
+        🔥 این متد از RAG service معمولی کپی شده است
+        """
+        # 🎯 تلاش برای استفاده از API خارجی
+        reranker_api_url = settings.RERANKER_API_URL
+        if reranker_api_url:
+            try:
+                import requests
+                logger.debug(f"🚀 Reranking {len(documents)} documents with external API...")
+                
+                # 1️⃣ آماده‌سازی داده‌ها
+                doc_contents = [doc.get("raw_content", doc.get("content", "")) for doc in documents]
+                
+                # 2️⃣ ساخت payload برای API
+                payload = {
+                    "query": query,
+                    "documents": doc_contents
+                }
+                
+                # 3️⃣ ارسال درخواست به API
+                response = requests.post(
+                    reranker_api_url,
+                    json=payload,
+                    timeout=settings.reranker_timeout
+                )
+                
+                # 4️⃣ بررسی موفقیت
+                response.raise_for_status()
+                
+                # 5️⃣ دریافت امتیازات
+                result = response.json()
+                scores = result.get("scores", [])
+                
+                if len(scores) != len(documents):
+                    raise ValueError(f"Score count mismatch: got {len(scores)}, expected {len(documents)}")
+                
+                # 6️⃣ اعمال امتیازات جدید
+                for idx, (doc, score) in enumerate(zip(documents, scores)):
+                    doc["rerank_score"] = float(score)
+                    doc["score"] = float(score)  # بروزرسانی score اصلی
+                
+                # 7️⃣ مرتب‌سازی بر اساس امتیازات جدید
+                documents.sort(key=lambda x: x.get("rerank_score", -999), reverse=True)
+                
+                logger.debug(f"✅ API Reranking completed. Top score: {documents[0]['score']:.4f}")
+                
+                return documents[:top_k]
+                
+            except requests.exceptions.Timeout:
+                logger.debug("❌ Reranker API timeout - falling back to local scoring")
+            except requests.exceptions.ConnectionError:
+                logger.debug("❌ Reranker API connection failed - falling back to local scoring")
+            except Exception as e:
+                logger.debug(f"❌ Reranker API error: {e} - falling back to local scoring")
+        
+        # 🔄 Fallback: scoring محلی
+        logger.debug(f"⚙️ Using fallback local scoring for {len(documents)} documents...")
+        
+        try:
+            import requests
+            query_lower = query.lower()
+            query_keywords = set(query_lower.split())
+            
+            for doc in documents:
+                # شروع با vector score از Weaviate
+                vector_score = doc.get("score", 0.5)
+                
+                # Keyword matching score
+                content_lower = doc.get("raw_content", "").lower()
+                title_lower = doc.get("title", "").lower()
+                
+                # تعداد کلمات مشترک
+                content_keywords = set(content_lower.split())
+                keyword_overlap = len(query_keywords & content_keywords)
+                keyword_score = min(keyword_overlap / max(len(query_keywords), 1), 1.0)
+                
+                # Title matching
+                title_score = 0.0
+                for keyword in query_keywords:
+                    if len(keyword) > 2 and keyword in title_lower:
+                        title_score += 0.2
+                title_score = min(title_score, 1.0)
+                
+                # ترکیب امتیازات: 60% vector, 25% keyword, 15% title
+                combined_score = (0.60 * vector_score) + (0.25 * keyword_score) + (0.15 * title_score)
+                
+                doc["rerank_score"] = combined_score
+                doc["score"] = combined_score
+            
+            # مرتب‌سازی
+            documents.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
+            
+            logger.debug(f"✅ Fallback reranking completed. Top score: {documents[0]['score']:.4f}")
+            
+            return documents[:top_k]
+            
+        except Exception as e:
+            logger.debug(f"❌ Fallback reranking failed: {e}")
+            # آخرین راه: برگرداندن documents با ترتیب اصلی
+            documents.sort(key=lambda x: x.get("score", 0), reverse=True)
+            return documents[:top_k]
         return nodes_map.get(node_id)
     
     async def aggregate_context(self, state: AgenticRAGState) -> AgenticRAGState:
@@ -895,41 +1009,75 @@ class AdvancedAgenticRAG:
         """
         with PerformanceLogger(logger, "synthesize_answer"):
             logger.info(f"💡 Synthesizing final answer using {len(state['search_results'])} search results")
-            logger.info(f"🎯 Using power model: {power_model}")
             
             try:
+                # 🔥 ENHANCED: استفاده از تعداد بیشتر نتایج (افزایش از 5 به 8)
+                results_to_use = state["search_results"][:8]  # افزایش تعداد نتایج
+                
                 # آماده‌سازی context از نتایج جستجو
-                # 🔥 SMALL-TO-BIG RETRIEVAL (Phase 1): استفاده از full content
+                # 🔥 SMALL-TO-BIG RETRIEVAL (Phase 1): استفاده از full content با منطق بهتر
                 context_parts = []
-                for idx, result in enumerate(state["search_results"][:5], 1):
-                    # 🎯 استفاده از full content اگر موجود باشد
+                total_content_length = 0
+                max_context_length = 8000  # افزایش از 6000 به 8000 کاراکتر
+                
+                for idx, result in enumerate(results_to_use, 1):
+                    # 🎯 استفاده از full content اگر موجود و مناسب باشد
                     full_content = result.get('full_article_content', '')
                     chunk_content = result.get('content', '')
+                    title = result.get('title', '')
+                    path = result.get('path', '')
                     
-                    # اگر full content موجود است و بزرگتر از chunk است، از آن استفاده کن
-                    if full_content and len(full_content) > len(chunk_content):
+                    # منطق بهتر برای انتخاب محتوا:
+                    # 1. اگر full content موجود است و کمتر از 2000 کاراکتر است، از آن استفاده کن
+                    # 2. اگر بزرگتر از 2000 است، 1500 کاراکتر اولش را بگیر
+                    # 3. اگر full content نداریم، chunk content را بگیر (افزایش از 1500 به 2000)
+                    
+                    if full_content and len(full_content) <= 2000:
                         content_to_use = full_content
                         logger.info(f"   📄 Result {idx}: Using FULL content ({len(full_content)} chars)")
+                    elif full_content and len(full_content) > 2000:
+                        content_to_use = full_content[:1500]  # محدودیت برای full content بزرگ
+                        logger.info(f"   📄 Result {idx}: Using TRUNCATED full content ({len(content_to_use)} chars)")
                     else:
-                        content_to_use = chunk_content[:1500]  # محدود کردن chunk به 1500 کاراکتر
-                        logger.info(f"   📄 Result {idx}: Using chunk content ({len(content_to_use)} chars)")
+                        content_to_use = chunk_content[:2000]  # افزایش از 1500 به 2000 کاراکتر
+                        logger.info(f"   📄 Result {idx}: Using extended chunk content ({len(content_to_use)} chars)")
                     
-                    context_parts.append(f"""
-مسیر: {result.get('path', '')}
-عنوان: {result.get('title', '')}
+                    # بررسی کل طول context (حداکثر 8000 کاراکتر)
+                    content_with_formatting = f"""
+مسیر: {path}
+عنوان: {title}
 محتوا: {content_to_use}
 ---
-""")
+"""
+                    
+                    if total_content_length + len(content_with_formatting) > max_context_length:
+                        remaining_length = max_context_length - total_content_length
+                        if remaining_length > 100:  # اگر فضای کافی موجود است
+                            content_to_use = content_to_use[:remaining_length - 200]  # فضای رزرو برای formatting
+                            content_with_formatting = f"""
+مسیر: {path}
+عنوان: {title}
+محتوا: {content_to_use}...
+---
+"""
+                            logger.info(f"   ⚠️ Result {idx}: Truncated to fit context limit (total: {total_content_length + len(content_with_formatting)} chars)")
+                        else:
+                            logger.info(f"   ⏭️ Result {idx}: Skipped to avoid context overflow")
+                            continue
+                    
+                    context_parts.append(content_with_formatting)
+                    total_content_length += len(content_with_formatting)
                 
                 context = "\n".join(context_parts)
+                logger.info(f"📊 Total context length: {len(context)} characters ({len(context_parts)} sources included)")
                 
                 # آماده‌سازی تاریخچه مکالمه
                 history_text = ""
                 if state.get("conversation_history") and len(state["conversation_history"]) > 0:
                     logger.info(f"💬 Including conversation history ({len(state['conversation_history'])} messages)")
                     history_text = "\n\nتاریخچه مکالمه:\n"
-                    # فقط 5 پیام آخر را در نظر بگیر
-                    recent_messages = state["conversation_history"][-5:]
+                    # افزایش تعداد پیام‌های تاریخچه از 5 به 7
+                    recent_messages = state["conversation_history"][-7:]
                     for msg in recent_messages:
                         role = "کاربر" if msg.get("role") == "user" else "دستیار"
                         content = msg.get("content", "")
@@ -964,9 +1112,9 @@ class AdvancedAgenticRAG:
                 state["final_response"] = response
                 state["confidence_score"] = self._calculate_confidence(state)
                 
-                # استخراج sources
+                # 🔥 ENHANCED: استخراج منابع بیشتر (افزایش از 3 به 5)
                 sources = []
-                for result in state["search_results"][:3]:
+                for result in state["search_results"][:5]:  # افزایش تعداد sources
                     sources.append({
                         "title": result.get("title", ""),
                         "path": result.get("path", ""),
@@ -977,7 +1125,8 @@ class AdvancedAgenticRAG:
                 
                 logger.info(f"✅ Answer synthesized (confidence: {state['confidence_score']:.2f})")
                 logger.info(f"📝 Response length: {len(state['final_response'])} characters")
-                logger.info(f"📚 Sources extracted: {len(state['sources'])}")
+                logger.info(f"📚 Sources extracted: {len(state['sources'])} (enhanced selection)")
+                logger.info(f"🔍 Context details: {len(context_parts)} sources, {len(context)} chars total")
                 state["action_history"].append(AgentAction.SYNTHESIZE)
                 
             except Exception as e:
@@ -1391,4 +1540,3 @@ def get_advanced_agentic_rag(langchain_service, rag_service, weaviate_connector=
         )
     
     return advanced_agentic_rag
-
