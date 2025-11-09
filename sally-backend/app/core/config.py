@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 43200  # 30 days
     
     # RBAC Settings for Default Super admin
-    default_SuperAdmin_email: str = "admin@sally.com"
+    default_SuperAdmin_email: str = "xtra@sally.com"
     default_SuperAdmin_password: str = "admin123"
     
     # CORS
@@ -55,11 +55,11 @@ class Settings(BaseSettings):
     reranker_timeout: int = 60  # تایم‌اوت به ثانیه
     
     # 🆕 RAG Retrieval Configuration
-    # 🔥 OPTIMIZED for Small-to-Big Retrieval Strategy (Phase 1)
-    weaviate_retrieval_limit: int = 30      # تعداد اسناد برای بازیابی اولیه (افزایش یافته)
-    reranker_top_k: int = 30                # تعداد اسناد برتر بعد از reranking (افزایش یافته از 20)
-    context_documents_count: int = 5        # تعداد اسناد TOP برای ارسال full context (کاهش یافته اما با context غنی‌تر)
-    max_sources_to_format: int = 10         # حداکثر تعداد منابع یکتا برای نمایش
+    # 🔥 OPTIMIZED for Performance - Reduced from high values to prevent memory issues
+    weaviate_retrieval_limit: int = 8       # تعداد اسناد برای بازیابی اولیه (کاهش یافته از 30)
+    reranker_top_k: int = 5                 # تعداد اسناد برتر بعد از reranking (کاهش یافته از 30)
+    context_documents_count: int = 5        # تعداد اسناد TOP برای ارسال full context (بهینه)
+    max_sources_to_format: int = 5          # حداکثر تعداد منابع یکتا برای نمایش (کاهش یافته از 10)
     
     # 🆕 Hybrid Model Strategy (برای کاهش هزینه و بهبود سرعت)
     # برای وظایف ساده از مدل سریع و ارزان، برای وظایف پیچیده از مدل قدرتمند
@@ -68,13 +68,13 @@ class Settings(BaseSettings):
     use_hybrid_model_strategy: bool = False      # فعال/غیرفعال کردن
     
     # 🆕 Agentic RAG Configuration
-    # تنظیمات برای بهینه‌سازی عملکرد و کنترل رفتار
-    agentic_search_limit: int = 5                # تعداد نتایج جستجو
-    agentic_max_subqueries: int = 3              # حداکثر تعداد زیرسوالات
-    agentic_context_chunk_size: int = 500       # اندازه chunk برای context
-    agentic_history_messages_count: int = 5      # تعداد پیام‌های تاریخچه برای در نظر گرفتن
-    agentic_min_confidence_threshold: float = 0.3 # حداقل confidence برای retry
-    agentic_max_retries: int = 1                 # حداکثر تعداد retry
+    # 🔥 OPTIMIZED for Performance - Reduced resource usage
+    agentic_search_limit: int = 3                # تعداد نتایج جستجو (کاهش یافته از 5)
+    agentic_max_subqueries: int = 2              # حداکثر تعداد زیرسوالات (کاهش یافته از 3)
+    agentic_context_chunk_size: int = 400        # اندازه chunk برای context (کاهش یافته از 500)
+    agentic_history_messages_count: int = 3      # تعداد پیام‌های تاریخچه (کاهش یافته از 5)
+    agentic_min_confidence_threshold: float = 0.4 # حداقل confidence برای retry (افزایش یافته از 0.3)
+    agentic_max_retries: int = 1                 # حداکثر تعداد retry (ثابت)
     
     # Weaviate Sync Configuration
     enable_weaviate_sync: bool = True          # فعال/غیرفعال کردن همگام‌سازی با Weaviate

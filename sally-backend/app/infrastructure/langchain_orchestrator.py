@@ -18,6 +18,7 @@ from .circuit_breaker import CircuitBreaker, circuit_breaker_protect
 from .cache_manager import CacheManager, cache_result, CacheConfig
 from .security_utils import SecurityManager, SecurityConfig, SecurityLevel
 from .model_factory import ModelFactory, ModelConfig, ModelProvider, ModelType
+from .model_factory import model_factory as global_model_factory
 from .conversation_memory_service import ConversationMemoryService
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
@@ -157,9 +158,12 @@ class ResponseGenerator:
             
             # Generate response
             if request_context.streaming:
-                content = await self._generate_streaming_response(
+                # For streaming, we need to collect the async generator into a string
+                # This is used when the caller wants the complete response but with streaming enabled internally
+                streaming_generator = self._generate_streaming_response(
                     model, request_context, memory_service
                 )
+                content = "".join([chunk async for chunk in streaming_generator])
             else:
                 content = await self._generate_non_streaming_response(
                     model, request_context, memory_service
@@ -213,39 +217,37 @@ class ResponseGenerator:
         return result.strip()
     
     async def _generate_streaming_response(
-        self, 
-        model, 
+        self,
+        model,
         request_context: RequestContext,
         memory_service: ConversationMemoryService
-    ) -> str:
-        """Generate streaming response."""
+    ) -> AsyncGenerator[str, None]:
+        """Generate streaming response as async generator."""
         # Build conversation history
         history_text = memory_service.format_history_for_prompt(request_context.conversation_history)
         
         # Get prompt based on query type
         prompt = self._build_prompt(request_context, history_text)
         
-        # Collect streaming chunks
-        chunks = []
+        # Stream chunks directly as they arrive
         async for chunk in model.generate_stream(prompt):
-            chunks.append(chunk)
-        
-        # Combine chunks
-        result = "".join(chunks)
-        
-        # Clean up thinking blocks
-        result = re.sub(r'<thinking>.*?</thinking>', '', result, flags=re.DOTALL)
-        return result.strip()
+            # Clean up thinking blocks from each chunk
+            clean_chunk = re.sub(r'<thinking>.*?</thinking>', '', chunk, flags=re.DOTALL).strip()
+            if clean_chunk:  # Only yield non-empty chunks
+                yield clean_chunk
     
     def _select_model(self, request_context: RequestContext) -> str:
         """Select optimal model based on request context."""
         # Use custom model if provided
         if request_context.custom_model:
+            logger.info(f"Using custom model: {request_context.custom_model}")
             return request_context.custom_model
         
         # Select model based on query type and complexity
         if request_context.agentic_mode:
-            return self.model_factory.get_optimal_model("rag", context_length=4000)
+            model_name = self.model_factory.get_optimal_model("rag", context_length=4000)
+            logger.info(f"Agentic mode - selected model: {model_name}")
+            return model_name
         
         model_mapping = {
             QueryType.SPECIFIC: "completion",
@@ -258,7 +260,10 @@ class ResponseGenerator:
         }
         
         task_type = model_mapping.get(request_context.query_type, "chat")
-        return self.model_factory.get_optimal_model(task_type)
+        logger.info(f"Query type: {request_context.query_type}, task_type: {task_type}")
+        model_name = self.model_factory.get_optimal_model(task_type)
+        logger.info(f"Selected model: {model_name}")
+        return model_name
     
     def _get_temperature(self, request_context: RequestContext) -> float:
         """Get temperature based on query type."""
@@ -503,7 +508,7 @@ class LangChainOrchestrator:
         security_config: Optional[SecurityConfig] = None,
         cache_ttl: int = 300
     ):
-        self.model_factory = model_factory or ModelFactory()
+        self.model_factory = model_factory or global_model_factory
         self.security_manager = SecurityManager(security_config)
         self.memory_service = ConversationMemoryService()
         self.query_analyzer = QueryAnalyzer(self.security_manager)

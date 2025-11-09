@@ -439,8 +439,13 @@ class MemoryCacheHandler(CacheHandler):
     def handle(self, key: str, value: Any, ttl: int) -> bool:
         """Handle cache set operation."""
         try:
-            # Check if object is blacklisted for serialization
-            if serialization_blacklist.is_blacklisted(value):
+            # Check if object is inherently non-serializable
+            import types
+            if (isinstance(value, (types.CoroutineType, types.GeneratorType, types.AsyncGeneratorType)) or
+                hasattr(value, '__code__') and hasattr(value.__code__, 'co_flags')):
+                logger.debug(f"Skipping serialization for non-serializable object type: {type(value).__name__}")
+                entry = CacheEntry(key, value, ttl, compressed=False, serialized=False)
+            elif serialization_blacklist.is_blacklisted(value):
                 logger.debug(f"Skipping serialization for blacklisted object type: {type(value).__name__}")
                 # Store without serialization
                 entry = CacheEntry(key, value, ttl, compressed=False, serialized=False)
@@ -451,7 +456,7 @@ class MemoryCacheHandler(CacheHandler):
                     entry = CacheEntry(key, serialized_value, ttl, compressed=False, serialized=True)
                 except Exception as e:
                     serialization_blacklist.add_failure(type(value))
-                    logger.warning(f"Serialization failed for {type(value).__name__}, storing as-is: {e}")
+                    logger.debug(f"Serialization failed for {type(value).__name__}, storing as-is: {e}")
                     entry = CacheEntry(key, value, ttl, compressed=False, serialized=False)
             
             with self._lock:

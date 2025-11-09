@@ -43,6 +43,7 @@ class ErrorType(str, Enum):
     # Network/Connection errors
     NETWORK_ERROR = "network_error"
     CONNECTION_TIMEOUT = "connection_timeout"
+    CONNECTION_FAILED = "connection_failed"
     API_UNAVAILABLE = "api_unavailable"
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     
@@ -211,6 +212,7 @@ class AIException(Exception):
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         original_exception: Optional[Exception] = None,
+        original_error: Optional[Exception] = None,  # For backward compatibility
         details: Optional[Dict[str, Any]] = None,
         retry_after: Optional[int] = None,
         auto_recovery: bool = False,
@@ -225,7 +227,8 @@ class AIException(Exception):
         self.user_id = user_id
         self.session_id = session_id
         self.request_id = request_id
-        self.original_exception = original_exception
+        # Use original_error if provided, otherwise use original_exception
+        self.original_exception = original_error or original_exception
         self.details = details or {}
         self.retry_after = retry_after
         self.auto_recovery = auto_recovery

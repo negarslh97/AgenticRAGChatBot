@@ -594,7 +594,7 @@ async def advanced_agentic_rag_stream(
             
             try:
                 # Import services
-                from app.infrastructure.langchain_utils import langchain_service
+                from app.infrastructure.langchain_orchestrator import orchestrator
                 from app.infrastructure.rag_service import get_rag_service
                 from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
                 from app.domain.entities import Conversation, Message, SenderType
@@ -606,7 +606,7 @@ async def advanced_agentic_rag_stream(
                 
                 # دریافت Advanced Agentic RAG
                 advanced_rag = get_advanced_agentic_rag(
-                    langchain_service, 
+                    orchestrator,
                     rag_service
                 )
                 
@@ -791,7 +791,7 @@ async def advanced_agentic_rag(
             )
         
         # Import services
-        from app.infrastructure.langchain_utils import langchain_service
+        from app.infrastructure.langchain_orchestrator import orchestrator
         from app.infrastructure.rag_service import get_rag_service
         from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
         from app.domain.entities import Conversation, Message
@@ -802,7 +802,7 @@ async def advanced_agentic_rag(
         
         # دریافت Advanced Agentic RAG
         advanced_rag = get_advanced_agentic_rag(
-            langchain_service, 
+            orchestrator,
             rag_service
         )
         

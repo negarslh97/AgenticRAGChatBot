@@ -662,6 +662,11 @@ class AdvancedAgenticRAG:
             embedder_base_url = settings.embedder_openai_base_url_loaded
             embedder_model = settings.embedder_model_loaded
             
+            if not embedder_api_key:
+                raise ValueError("Embedder API key not configured in settings")
+            if not embedder_model:
+                raise ValueError("Embedder model not configured in settings")
+                
             openai_client = OpenAI(
                 api_key=embedder_api_key,
                 base_url=embedder_base_url

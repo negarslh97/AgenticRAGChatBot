@@ -18,6 +18,7 @@ from .ai_exceptions import AIException, ErrorType, AISeverity
 from .circuit_breaker import CircuitBreaker, circuit_breaker_protect, CircuitBreakerConfig
 from .cache_manager import CacheManager, cache_result, CacheConfig
 from .security_utils import SecurityManager, SecurityConfig
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class ModelConfig:
     provider: ModelProvider
     model_type: ModelType
     max_tokens: int = 4096
-    temperature: float = 0.7
+    temperature: float = 0.2
     top_p: float = 1.0
     top_k: Optional[int] = None
     frequency_penalty: float = 0.0
@@ -166,13 +167,14 @@ class OpenAIModel(BaseModelInterface):
                 timeout=self.config.timeout
             )
             
-            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.messages import HumanMessage
             from langchain_core.output_parsers import StrOutputParser
             
-            prompt_template = ChatPromptTemplate.from_template(prompt)
-            chain = prompt_template | model | StrOutputParser()
+            # Use HumanMessage for plain text prompts instead of ChatPromptTemplate
+            messages = [HumanMessage(content=prompt)]
+            chain = model | StrOutputParser()
             
-            result = await chain.ainvoke({})
+            result = await chain.ainvoke(messages)
             return result
             
         except Exception as e:
@@ -203,12 +205,13 @@ class OpenAIModel(BaseModelInterface):
                 timeout=self.config.timeout
             )
             
-            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.messages import HumanMessage
             
-            prompt_template = ChatPromptTemplate.from_template(prompt)
-            chain = prompt_template | model
+            # Use HumanMessage for plain text prompts instead of ChatPromptTemplate
+            messages = [HumanMessage(content=prompt)]
+            chain = model
             
-            async for chunk in chain.astream({}):
+            async for chunk in chain.astream(messages):
                 if hasattr(chunk, 'content'):
                     yield chunk.content
                 else:
@@ -314,13 +317,14 @@ class OpenRouterModel(BaseModelInterface):
                 timeout=self.config.timeout
             )
             
-            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.messages import HumanMessage
             from langchain_core.output_parsers import StrOutputParser
             
-            prompt_template = ChatPromptTemplate.from_template(prompt)
-            chain = prompt_template | model | StrOutputParser()
+            # Use HumanMessage for plain text prompts instead of ChatPromptTemplate
+            messages = [HumanMessage(content=prompt)]
+            chain = model | StrOutputParser()
             
-            result = await chain.ainvoke({})
+            result = await chain.ainvoke(messages)
             return result
             
         except Exception as e:
@@ -354,12 +358,13 @@ class OpenRouterModel(BaseModelInterface):
                 timeout=self.config.timeout
             )
             
-            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.messages import HumanMessage
             
-            prompt_template = ChatPromptTemplate.from_template(prompt)
-            chain = prompt_template | model
+            # Use HumanMessage for plain text prompts instead of ChatPromptTemplate
+            messages = [HumanMessage(content=prompt)]
+            chain = model
             
-            async for chunk in chain.astream({}):
+            async for chunk in chain.astream(messages):
                 if hasattr(chunk, 'content'):
                     yield chunk.content
                 else:
@@ -461,12 +466,23 @@ class ModelFactory:
     
     def get_model(self, model_name: str, **kwargs) -> BaseModelInterface:
         """Get a model instance by name."""
+        # 🔧 SAFETY CHECK: If model not found, try to use first available model
         if model_name not in self._models:
-            raise AIException(
-                message=f"Model {model_name} not found",
-                error_type=ErrorType.MODEL_UNAVAILABLE,
-                severity=AISeverity.HIGH
-            )
+            logger.warning(f"Model {model_name} not found in factory")
+            logger.warning(f"Available models: {list(self._models.keys())}")
+            
+            # If no models available at all, raise the original error
+            if not self._models:
+                raise AIException(
+                    message=f"Model {model_name} not found",
+                    error_type=ErrorType.MODEL_UNAVAILABLE,
+                    severity=AISeverity.HIGH
+                )
+            
+            # Use the first available model as a fallback
+            first_model = list(self._models.keys())[0]
+            logger.warning(f"Using fallback model: {first_model} instead of {model_name}")
+            model_name = first_model
         
         model = self._models[model_name]
         
@@ -518,6 +534,12 @@ class ModelFactory:
     
     def get_optimal_model(self, task_type: str, context_length: int = 0) -> str:
         """Get optimal model for a specific task."""
+
+         # ✅✅✅ این خطوط را برای دیباگ اضافه کنید ✅✅✅
+        logger.info(f"Searching for optimal model for task: '{task_type}'")
+        logger.info(f"Available models to choose from: {list(self._models.keys())}")
+        # ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+        
         task_requirements = {
             "chat": {"streaming": True, "json": True, "min_context": 1000},
             "embedding": {"embeddings": True, "min_context": 100},
@@ -537,6 +559,15 @@ class ModelFactory:
             config = model.get_config()
             
             # Check if model meets requirements
+            # Ensure model type matches task type
+            if task_type == "chat" and config.model_type != ModelType.CHAT:
+                continue
+            if task_type == "rag" and config.model_type != ModelType.CHAT: # RAG typically uses chat models for generation
+                continue
+            if task_type == "embedding" and config.model_type != ModelType.EMBEDDING:
+                continue
+            # Add other task types as needed
+
             if (requirements.get("streaming", False) and not capabilities.supports_streaming):
                 continue
             if (requirements.get("json", False) and not capabilities.supports_json):
@@ -558,7 +589,7 @@ class ModelFactory:
                 score += 1
             
             # Prefer models with lower cost
-            if "cost_per_1k_tokens" in capabilities and "input" in capabilities.cost_per_1k_tokens:
+            if hasattr(capabilities, "cost_per_1k_tokens") and "input" in capabilities.cost_per_1k_tokens:
                 score += (1 / capabilities.cost_per_1k_tokens["input"])
             
             if score > best_score:
@@ -566,17 +597,26 @@ class ModelFactory:
                 best_model = name
         
         if best_model is None:
-            raise AIException(
-                message=f"No suitable model found for task type: {task_type}",
-                error_type=ErrorType.MODEL_UNAVAILABLE,
-                severity=AISeverity.HIGH
-            )
+            # 🔧 SAFETY FALLBACK: If no model meets requirements, use the first available model
+            if self._models:
+                first_model = list(self._models.keys())[0]
+                logger.warning(f"No suitable model found for task '{task_type}', using first available model: {first_model}")
+                logger.warning(f"Available models: {list(self._models.keys())}")
+                return first_model
+            else:
+                raise AIException(
+                    message=f"No suitable model found for task type: {task_type}",
+                    error_type=ErrorType.MODEL_UNAVAILABLE,
+                    severity=AISeverity.HIGH
+                )
         
+        logger.info(f"Selected optimal model: {best_model} for task: {task_type}")
         return best_model
     
     @cache_result(ttl_seconds=300)
     def get_model_info(self, model_name: str) -> Dict[str, Any]:
         """Get detailed information about a model."""
+        
         if model_name not in self._models:
             raise AIException(
                 message=f"Model {model_name} not found",
@@ -661,3 +701,87 @@ model_factory = ModelFactory()
 # Register default providers
 model_factory.register_provider(ModelProvider.OPENAI, OpenAIModel)
 model_factory.register_provider(ModelProvider.OPENROUTER, OpenRouterModel)
+
+# Add default models based on settings
+def _register_default_models():
+    """Register AI models based on settings configuration."""
+    try:
+        models_to_add = []
+        
+        # Check for configured models from settings
+        if settings.chat_model_loaded:
+            chat_model_config = ModelConfig(
+                name=settings.chat_model_loaded,
+                provider=ModelProvider.OPENROUTER,  # Default to OpenRouter for flexibility
+                model_type=ModelType.CHAT,
+                max_tokens=4096,
+                temperature=0.7,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded
+            )
+            models_to_add.append(chat_model_config)
+        
+        if settings.rag_model_loaded:
+            rag_model_config = ModelConfig(
+                name=settings.rag_model_loaded,
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded
+            )
+            models_to_add.append(rag_model_config)
+        
+        if settings.metadata_model_loaded:
+            metadata_model_config = ModelConfig(
+                name=settings.metadata_model_loaded,
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=2048,
+                temperature=0.3,  # Lower temperature for metadata tasks
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded
+            )
+            models_to_add.append(metadata_model_config)
+        
+        # Add OpenRouter free models if no models configured
+        if not models_to_add:
+            logger.info("No models configured in settings, adding default OpenRouter models")
+            
+            # Add default OpenRouter models - each with unique names
+            default_models = [
+                ModelConfig(
+                    name="google/gemini-2.5-flash",
+                    provider=ModelProvider.OPENROUTER,
+                    model_type=ModelType.CHAT,
+                    max_tokens=8192,
+                    temperature=0.2,
+                    api_key=settings.openai_api_key_loaded,
+                    base_url=settings.openai_base_url_loaded
+                ),
+                ModelConfig(
+                    name="moonshotai/kimi-linear-48b-a3b-instruct",
+                    provider=ModelProvider.OPENROUTER,
+                    model_type=ModelType.CHAT,
+                    max_tokens=8192,
+                    temperature=0.7,
+                    api_key=settings.openai_api_key_loaded,
+                    base_url=settings.openai_base_url_loaded
+                )
+            ]
+            models_to_add.extend(default_models)
+        
+        # Add all models to factory
+        for model_config in models_to_add:
+            success = model_factory.add_model(model_config)
+            if not success:
+                logger.warning(f"Failed to add model {model_config.name}")
+        
+        logger.info(f"✅ Registered {len(models_to_add)} models from settings/defaults")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to register default models: {e}")
+
+# Initialize default models
+_register_default_models()

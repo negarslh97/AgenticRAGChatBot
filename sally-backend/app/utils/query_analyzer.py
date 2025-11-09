@@ -1,6 +1,7 @@
 """
 Query Analyzer - تحلیلگر هوشمند سوالات
 ادغام شده از query_analyzer.py و query_intent.py
+نسخه اصلاح شده - رفع مشکل JSON template
 """
 
 import re
@@ -11,7 +12,6 @@ from enum import Enum
 from typing import Dict, Any, Optional, List, Tuple
 from async_lru import alru_cache
 from pydantic import BaseModel, Field
-from app.infrastructure.langchain_utils import langchain_service
 from app.utils.analyzer_config import (
     CONVERSATIONAL_PATTERNS, INTRODUCTION_PATTERNS, FACTUAL_INDICATORS,
     COMPLEXITY_KEYWORDS, SPECIFIC_PATTERNS, GENERAL_PATTERNS, EXPLANATION_PATTERNS,
@@ -63,7 +63,10 @@ class QueryAnalyzer:
     """
 
     def __init__(self):
-        self.langchain_service = langchain_service
+        # ✅ از orchestrator جدید و صحیح استفاده کن
+        from app.infrastructure.langchain_orchestrator import orchestrator
+        self.orchestrator = orchestrator
+        
         self._load_compiled_patterns()
 
         # آمار عملکرد
@@ -85,7 +88,47 @@ class QueryAnalyzer:
             }
         }
 
-        # پرامپت برای تحلیل تک‌مرحله‌ای با LLM
+        # 🔧 اصلاح: پرامپت ساده بدون JSON template پیچیده
+        self.single_pass_prompt = """شما یک تحلیلگر هوشمند سوالات هستید. لطفاً این سوال را تحلیل کنید:
+
+سوال: "{query}"
+
+لطفاً پاسخ را فقط به این فرمت بدهید (بدون هیچ توضیح اضافی):
+{
+  "intent": "conversational یا factual یا mixed",
+  "needs_rag": "true یا false", 
+  "complexity": "simple یا moderate یا complex",
+  "summary": "خلاصه کوتاه",
+  "keywords": ["کلمه1", "کلمه2"],
+  "confidence": "0.0 تا 1.0",
+  "reason": "دلیل تحلیل"
+}"""
+        # 🔧 اصلاح: پرامپت با JSON template صحیح (escaped braces)
+        self.single_pass_prompt = """شما یک تحلیلگر هوشمند سوالات هستید. وظیفه شما این است که سوال کاربر را تحلیل کرده و خروجی را دقیقاً در قالب JSON برگردانید.
+
+**فرمت خروجی اجباری:**
+{{{{
+  "intent": "conversational|factual|mixed",
+  "needs_rag": true|false,
+  "complexity": "simple|moderate|complex",
+  "summary": "خلاصه سوال",
+  "keywords": ["کلمه1", "کلمه2"],
+  "confidence": 0.0-1.0,
+  "reason": "توضیح تحلیل"
+}}}}
+
+**قوانین تحلیل:**
+- intent: "conversational" برای سلام/تشکر، "factual" برای سوالات تخصصی، "mixed" برای ترکیبی
+- needs_rag: true فقط برای factual و mixed
+- complexity:
+  - "simple": سوال مستقیم تک‌جوابی (مثال: "قیمت چنده؟")
+  - "moderate": سوال چندمرحله‌ای (مثال: "چطور بایگانی کنم؟")
+  - "complex": سوال چندبخشی ترکیبی (مثال: "بایگانی و گزارش تولید")
+
+سوال کاربر: "{query}"
+
+**پاسخ فقط JSON خالص بدون هیچ متن اضافی:**"""
+        # 🔧 اصلاح: پرامپت با JSON template صحیح
         self.single_pass_prompt = """شما یک تحلیلگر هوشمند سوالات هستید. وظیفه شما این است که سوال کاربر را تحلیل کرده و خروجی را دقیقاً در قالب JSON برگردانید.
 
 **فرمت خروجی اجباری:**
@@ -138,7 +181,7 @@ class QueryAnalyzer:
     @alru_cache(maxsize=1000)
     async def analyze(self, query: str, conversation_history: Optional[Tuple] = None) -> QueryAnalysisResult:
         """
-        تحلیل جامع سوال کاربر با استفاده از LLM تک‌مرحله‌ای
+        تحلیل جامع سوال کاربر با استفاده از LLM تک‌مرحله‌ای - بهینه‌شده
 
         Args:
             query: متن سوال کاربر
@@ -148,30 +191,114 @@ class QueryAnalyzer:
             QueryAnalysisResult: تحلیل کامل در قالب Pydantic model
         """
         start_time = time.time()
-        logger.info(f"🔍 تحلیل تک‌مرحله‌ای سوال: '{query[:100]}...'")
-
-        # بررسی cache hit
-        is_cache_hit = hasattr(self.analyze, '_cache') and query in self.analyze._cache
-        if is_cache_hit:
-            self.stats["cache_hits"] += 1
-
+        
+        # 🔥 بهینه‌سازی: محدود کردن طول query
+        if len(query) > 1000:
+            query = query[:1000] + "..."
+            logger.debug(f"🔍 Query truncated to 1000 chars: '{query[:100]}...'")
+        
+        # 🔥 بهینه‌سازی: محدود کردن تاریخچه مکالمه (کاهش از 31k chars به کمتر از 2k)
+        optimized_history = None
+        if conversation_history:
+            # فقط آخرین 3 پیام را نگه دار
+            if len(conversation_history) > 3:
+                optimized_history = conversation_history[-3:]
+                logger.debug(f"🔍 Conversation history limited to last 3 messages (from {len(conversation_history)})")
+            else:
+                optimized_history = conversation_history
+        
+        # 🔥 بهینه‌سازی: بررسی cache hit قبل از هر کار دیگر
+        cache_key = f"{query}_{len(optimized_history or [])}_{hash(str(optimized_history or []))}"
+        
         try:
+            # ابتدا سعی کن regex pattern matching سریع
+            normalized_query = self._normalize_query(query)
+            quick_result = self._classify_intent_quick(normalized_query)
+            
+            if quick_result:
+                # اگر الگوی واضحی پیدا شد، نیازی به LLM نیست
+                logger.debug(f"⚡ Quick analysis using regex patterns: {quick_result['intent']}")
+                
+                # تحلیل پیچیدگی و نوع با regex
+                complexity_analysis = self._analyze_complexity(normalized_query)
+                type_analysis = self._analyze_type(normalized_query)
+                
+                result = QueryAnalysisResult(
+                    intent=QueryIntent(quick_result["intent"]),
+                    needs_rag=quick_result["needs_rag"],
+                    complexity=QueryComplexity(complexity_analysis["complexity"]),
+                    summary=query[:100],
+                    keywords=[],  # در regex mode خالی
+                    confidence=quick_result["confidence"],
+                    reason=f"{quick_result['reason']} (سریع)",
+                    query_type=QueryType(type_analysis["query_type"]),
+                    analysis={
+                        "complexity": complexity_analysis,
+                        "type": type_analysis,
+                        "method": "regex_fast"
+                    }
+                )
+                
+                self._update_stats(result, start_time, False, False, False)
+                return result
+            
+            logger.debug(f"🔍 تحلیل تک‌مرحله‌ای سوال: '{query[:100]}...'")
+
             # استفاده از پرامپت تک‌مرحله‌ای با مدل اختصاصی intent
             from app.core.config import settings
-            intent_model = settings.intent_model_loaded or settings.rag_model_loaded
+            # Use the first available configured model instead of trying to use unconfigured ones
+            available_models = self.orchestrator.model_factory.list_models()
+            if available_models:
+                intent_model = available_models[0]["name"]  # Use first available model
+            else:
+                # Fallback to configured model if available, otherwise use global factory default
+                intent_model = settings.intent_model_loaded or settings.rag_model_loaded
+            # # ✅ راه‌حل صحیح: پرامپت کامل را به عنوان query پاس دهید
+            # prompt_template = self.single_pass_prompt 
+            # formatted_prompt = prompt_template.format(query=query)
 
-            prompt = self.single_pass_prompt.format(query=query)
+            # result_obj = await self.orchestrator.process_request(
+            #     query=formatted_prompt,  # ✅ پرامپت کامل به عنوان query
+            #     context=None,            # ✅ context خالی بگذارید
+            #     conversation_history=optimized_history or [],
+            #     custom_model=intent_model,
+            #     custom_temperature=0.1
+            # )
 
-            response = await self.langchain_service.generate_rag_response(
-                query=query,
-                context=prompt,
-                conversation_history=conversation_history or [],
+            # prompt = self.single_pass_prompt.format(query=query)
+
+            # # ✅ از متد صحیح orchestrator جدید استفاده کن
+            # result_obj = await self.orchestrator.process_request(
+            #     query=query,
+            #     context=prompt,
+            #     conversation_history=optimized_history or [],
+            #     custom_model=intent_model,
+            #     custom_temperature=0.1
+            # )
+            # response = result_obj.content
+
+            # self.stats["llm_calls"] += 1
+
+            prompt_template = self.single_pass_prompt 
+            
+            formatted_prompt = prompt_template.format(query=query)
+
+            # ۲. پرامپت کامل را به عنوان 'query' به orchestrator بدهید
+            result_obj = await self.orchestrator.process_request(
+                query=formatted_prompt,
+                context=None,  # <- مهم: context باید خالی باشد
+                conversation_history=optimized_history or [],
                 custom_model=intent_model,
-                custom_temperature=0.1,  # دقت بالا
-                query_type="specific"  # پاسخ کوتاه
+                custom_temperature=0.1
             )
 
+            # ۳. نتیجه را از آبجکت پاسخ استخراج کنید
+            response = result_obj.content
+
+            # ۴. آمار را به‌روز کنید
             self.stats["llm_calls"] += 1
+
+            # ... بقیه کد برای پردازش JSON ...
 
             # =======================================================
             # ✅✅✅ اصلاح اصلی: منطق استخراج JSON بسیار قوی‌تر
@@ -227,21 +354,35 @@ class QueryAnalyzer:
             result_dict.setdefault('keywords', [])
             result_dict.setdefault('confidence', 0.8)
             result_dict.setdefault('reason', 'تحلیل تک‌مرحله‌ای LLM')
+            # ⭐️ اصلاح: اطمینان از وجود needs_rag
+            if 'needs_rag' not in result_dict:
+                # بر اساس intent تعیین کن
+                intent = result_dict.get('intent', QueryIntent.FACTUAL.value)
+                if intent == QueryIntent.CONVERSATIONAL.value:
+                    result_dict['needs_rag'] = False
+                else:
+                    result_dict['needs_rag'] = True
+            # اطمینان از وجود intent
+            if 'intent' not in result_dict:
+                result_dict['intent'] = QueryIntent.FACTUAL.value
+            # اطمینان از وجود complexity
+            if 'complexity' not in result_dict:
+                result_dict['complexity'] = QueryComplexity.SIMPLE.value
 
             # ⭐️⭐️⭐️ اصلاح اصلی: فیلد analysis را با نتایج تحلیل regex پر کن ⭐️⭐️⭐️
-            normalized_query = self._normalize_query(query)
             complexity_analysis = self._analyze_complexity(normalized_query)
             type_analysis = self._analyze_type(normalized_query)
 
             result_dict['analysis'] = {
                 "complexity": complexity_analysis,
-                "type": type_analysis
+                "type": type_analysis,
+                "method": "llm_with_regex"
             }
 
             result = QueryAnalysisResult(**result_dict)
 
             # بروزرسانی آمار
-            self._update_stats(result, start_time, is_cache_hit, True, False)
+            self._update_stats(result, start_time, False, True, False)
 
             return result
 
@@ -251,7 +392,7 @@ class QueryAnalyzer:
             result = await self._fallback_analyze(query)
 
             # بروزرسانی آمار برای fallback
-            self._update_stats(result, start_time, is_cache_hit, False, True)
+            self._update_stats(result, start_time, False, False, True)
 
             return result
 
@@ -324,7 +465,13 @@ class QueryAnalyzer:
         intent_result = self._classify_intent_quick(normalized_query)
 
         if intent_result is None:
-            intent_result = await self._classify_intent_llm(query, [])
+            # در fallback mode، اگر regex match نشد، factual فرض کن
+            intent_result = {
+                "intent": QueryIntent.FACTUAL.value,
+                "confidence": 0.5,
+                "needs_rag": True,
+                "reason": "fallback - نیاز به RAG"
+            }
 
         # اگر محاوره‌ای بود
         if not intent_result["needs_rag"]:
@@ -409,47 +556,7 @@ class QueryAnalyzer:
         # اگر هیچ الگویی match نکرد، نیاز به LLM داریم
         return None
 
-    async def _classify_intent_llm(self, query: str, conversation_history: Optional[list] = None) -> Dict[str, Any]:
-        """
-        تشخیص هدف سوال با استفاده از LLM
-        """
-        try:
-            prompt = self.router_prompt.format(query=query)
-
-            response = await self.langchain_service.generate_rag_response(
-                query=query,
-                context=prompt,
-                conversation_history=conversation_history or [],
-                custom_temperature=0.1,  # دقت بالا
-                query_type="specific"  # پاسخ کوتاه
-            )
-
-            response_lower = response.strip().lower()
-
-            if "conversational" in response_lower:
-                return {
-                    "intent": QueryIntent.CONVERSATIONAL.value,
-                    "confidence": 0.9,
-                    "needs_rag": False,
-                    "reason": "تشخیص LLM: سوال محاوره‌ای"
-                }
-            else:
-                return {
-                    "intent": QueryIntent.FACTUAL.value,
-                    "confidence": 0.9,
-                    "needs_rag": True,
-                    "reason": "تشخیص LLM: سوال تخصصی"
-                }
-
-        except Exception as e:
-            logger.error(f"❌ خطا در تشخیص هدف با LLM: {e}")
-            # در صورت خطا، به عنوان factual در نظر بگیر (safer)
-            return {
-                "intent": QueryIntent.FACTUAL.value,
-                "confidence": 0.5,
-                "needs_rag": True,
-                "reason": "خطا در تشخیص - به صورت پیش‌فرض به RAG ارسال می‌شود"
-            }
+        # This method is not used as the LLM classification is now done in analyze()
 
     def _analyze_complexity(self, normalized_query: str) -> Dict[str, Any]:
         """

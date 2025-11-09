@@ -26,6 +26,7 @@ from langchain.schema import HumanMessage, AIMessage, BaseMessage
 from langchain.memory import ConversationBufferWindowMemory
 
 from app.core.logging_config import get_logger
+from app.core.config import settings
 
 logger = get_logger(__name__)
 
@@ -42,7 +43,7 @@ class ConversationMemoryService:
     - پشتیبانی از فرمت‌های مختلف مکالمه
     """
     
-    def __init__(self, max_history_length: int = 20, max_context_length: int = 4000):
+    def __init__(self, max_history_length: int = None, max_context_length: int = None):
         """
         مقداردهی اولیه سرویس حافظه مکالمه
         
@@ -50,10 +51,11 @@ class ConversationMemoryService:
             max_history_length: حداکثر تعداد پیام‌های تاریخچه
             max_context_length: حداکثر طول بافت (به کاراکتر)
         """
-        self.max_history_length = max_history_length
-        self.max_context_length = max_context_length
+        # Use settings values if not provided, with fallbacks
+        self.max_history_length = max_history_length or getattr(settings, 'agentic_history_messages_count', 20)
+        self.max_context_length = max_context_length or 4000
         
-        logger.debug(f"🧠 ConversationMemoryService initialized (max_history: {max_history_length}, max_context: {max_context_length})")
+        logger.debug(f"🧠 ConversationMemoryService initialized (max_history: {self.max_history_length}, max_context: {self.max_context_length})")
     
     def format_history_for_prompt(self, conversation_history: List[Dict[str, str]], max_messages: Optional[int] = None) -> str:
         """
@@ -413,11 +415,15 @@ class ConversationMemoryManager:
     و آن‌ها را به فرمت مناسب برای LangChain تبدیل می‌کند.
     """
     
-    def __init__(self, max_messages: int = 10):
+    def __init__(self, max_messages: int = None):
         """
         Args:
-            max_messages: تعداد پیام‌های نگهداری شده (پیش‌فرض: 10)
+            max_messages: تعداد پیام‌های نگهداری شده (پیش‌فرض: از settings یا 10)
         """
+        # Use settings value if not provided
+        if max_messages is None:
+            max_messages = getattr(settings, 'agentic_history_messages_count', 10) * 2
+        
         self.max_messages = max_messages
         # استفاده از ConversationBufferWindowMemory برای نگهداری تعداد محدودی پیام
         self.memory = ConversationBufferWindowMemory(

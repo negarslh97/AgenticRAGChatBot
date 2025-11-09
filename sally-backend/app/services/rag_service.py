@@ -333,159 +333,106 @@ class RAGService(ABC):
 
     async def _retrieve_from_weaviate(self, query: str, is_public_only: bool = True, limit: int = None) -> List[Dict[str, Any]]:
         """
-        Retrieve documents using Enhanced Weaviate vector search with:
-        1. Query Expansion برای coverage بهتر
-        2. Hybrid Search (vector + keyword)
-        3. تعداد بیشتر documents (قابل تنظیم از settings)
-        4. Content غنی‌تر (2000 کاراکتر به جای 1000)
-        5. Powerful Reranking (BAAI/bge-reranker-v2-m3)
+        Retrieve documents using Optimized Weaviate vector search with:
+        1. محدود کردن تعداد documents (کاهش از 20 به 8)
+        2. محتوای محدودتر (1000 chars به جای 2000)
+        3. حذف query expansion برای سرعت بیشتر
+        4. Context manager بهینه‌شده
         """
-        # 🔥 استفاده از تنظیمات به جای hardcoded values
+        # 🔥 بهینه‌سازی: محدود کردن limit به 8 به جای مقادیر بزرگتر
         if limit is None:
-            limit = settings.weaviate_retrieval_limit
+            limit = min(settings.weaviate_retrieval_limit, 8)  # حداکثر 8 نتیجه
         logger.debug("🔗 Connecting to Weaviate vector database...")
         
         try:
             import os
-            # settings already imported at top of file - no need to import again
             from app.infrastructure.connection_manager import weaviate_client
-            from openai import OpenAI
 
             logger.debug(f"🌐 Weaviate URL: {settings.weaviate_url_loaded or 'http://localhost:8080'}")
-            logger.debug(f"🔑 Weaviate API Key: {'✅ Set' if settings.weaviate_api_key_loaded else '❌ Not Set'}")
 
-            # Set API key in environment
+            # Set API key if available
             embedder_api_key = settings.embedder_api_key_loaded
             openai_api_key = settings.openai_api_key_loaded
             api_key_to_use = embedder_api_key or openai_api_key
             
             if api_key_to_use:
                 os.environ['Embedder_API_KEY'] = api_key_to_use
-                logger.debug("🔑 OpenAI API key set for embeddings")
-                logger.debug(f"🔑 API Key source: {'Embedder' if embedder_api_key else 'OpenAI'}")
-            else:
-                logger.debug("⚠️  No OpenAI API key found for embeddings")
 
-            # 🔥 STEP 1: Query Expansion - توسعه query برای پوشش بهتر
-            expanded_queries = await self._expand_query(query)
-            logger.debug(f"🔍 Query expanded: {len(expanded_queries)} variations")
-            for i, eq in enumerate(expanded_queries[:3], 1):
-                logger.debug(f"   {i}. {eq[:80]}...")
-
-            # استفاده از Server-Side Vectorization - دیگر نیازی به تولید vector نیست
-            logger.debug(f"🔢 استفاده از Server-Side Vectorization برای جستجو...")
-
-            # استفاده از Connection Manager - کل عملیات داخل with
+            # استفاده از Connection Manager بهینه‌شده
             with weaviate_client() as client:
-                logger.debug("✅ Weaviate client ready (using connection manager)")
+                logger.debug("✅ Weaviate client ready")
                 
-                # Build where filter for visibility
-                if is_public_only:
-                    logger.debug("🔒 Applied visibility filter: public documents only")
-                else:
-                    logger.debug("🔓 No visibility filter: searching all documents")
-
-                logger.debug(f"🎯 جستجوی معنایی با vector...")
+                logger.debug(f"🎯 جستجوی معنایی با vector (limit: {limit})...")
 
                 # استفاده از v4 API برای جستجو
                 from app.core.weaviate_utils import get_weaviate_collection_name
                 collection_name = get_weaviate_collection_name()
                 collection = client.collections.get(collection_name)
                 
-                logger.debug(f"⚡ Executing Enhanced Weaviate Hybrid Search (limit: {limit})...")
-                
-                # 🔥 STEP 2: Semantic Search with Server-Side Vectorization
-                # استفاده از near_text مستقیماً با متن query
+                # 🔥 بهینه‌سازی: نزدیک‌ترین results را بگیر
                 try:
-                    logger.debug(f"🎯 استفاده از near_text با Server-Side Vectorization...")
-
                     response = collection.query.near_text(
-                        query=query,  # <--- ارسال مستقیم متن query
+                        query=query,
                         limit=limit,
                         return_metadata=['distance', 'certainty']
                     )
 
                     objects = response.objects if response.objects else []
-                    logger.debug(f"✅ Semantic Search: {len(objects)} گره Markdown یافت شد (Server-Side Vectorization)")
+                    logger.debug(f"✅ Semantic Search: {len(objects)} results found")
 
                 except Exception as e:
-                    logger.debug(f"❌ خطا در جستجوی MarkdownNode: {str(e)}")
-                    objects = []
-
-                # Handle case where objects is None
-                if objects is None:
-                    logger.debug("⚠️  Weaviate returned None objects")
+                    logger.debug(f"❌ خطا در جستجو: {str(e)}")
                     objects = []
                 
-                logger.debug(f"📊 Raw results from Weaviate: {len(objects)} objects")
-
                 relevant_docs = []
-                seen_node_ids = set()  # برای جلوگیری از duplicate
+                seen_node_ids = set()
                 
                 for i, obj in enumerate(objects):
-                    # در v4 با near_text، certainty در metadata قرار دارد
+                    # Score از metadata
                     if hasattr(obj.metadata, 'certainty') and obj.metadata.certainty is not None:
                         score = obj.metadata.certainty
                     else:
-                        score = 0.5  # fallback
+                        score = 0.5
                     
-                    # در v4، properties در obj.properties قرار دارند
+                    # Properties
                     title = obj.properties.get("title", "")
                     node_id = obj.properties.get("node_id", "")
                     article_id = obj.properties.get("article_id", "")
                     path = obj.properties.get("path", "")
                     
-                    # جلوگیری از duplicate nodes
+                    # جلوگیری از duplicate
                     if node_id in seen_node_ids:
-                        logger.debug(f"⏭️ Skipping duplicate node: {node_id}")
                         continue
                     seen_node_ids.add(node_id)
 
-                    logger.debug(f"   📄 Node {i+1}: '{title[:30]}...' (Path: {path}, Score: {score:.3f})")
+                    # 🔥 بهینه‌سازی: محتوای محدودتر - فقط 1000 کاراکتر
+                    node_content = obj.properties.get("content", "")[:1000]  # محدود به 1000
+                    full_content = obj.properties.get("full_content", "")[:800]  # محدود به 800
 
-                    # 🔥 STEP 3: محتوای غنی‌تر - 2000 کاراکتر به جای 1000
-                    full_content = obj.properties.get("full_content", "")[:2000]  # 2x more content
-                    node_content = obj.properties.get("content", "")[:1500]  # 1.5x more
-
-                    # Create a more informative content by combining path, title and content
-                    combined_content = f"Path: {path}\nTitle: {title}\nContent: {node_content}"
+                    # محتوای ترکیبی محدود
+                    combined_content = f"Title: {title}\nContent: {node_content}"
                     if full_content:
-                        combined_content += f"\n\nFull Article Context: {full_content[:1000]}..."
+                        combined_content += f"\n\nFull Article: {full_content}..."
 
                     relevant_docs.append({
                         "id": article_id,
                         "node_id": node_id,
-                        "title": title,  # 🎯 فقط title chunk (بدون path)
+                        "title": title,
                         "content": combined_content,
                         "path": path,
                         "score": score,
                         "source": "weaviate",
-                        "raw_content": node_content,  # محتوای خام برای reranking
-                        "full_article_content": full_content  # 🔥 محتوای کامل برای استخراج article title
+                        "raw_content": node_content,
+                        "full_article_content": full_content
                     })
 
-                logger.debug(f"✅ Weaviate search completed: {len(relevant_docs)} unique documents found")
-                logger.debug(f"🎯 Query: '{query[:50]}{'...' if len(query) > 50 else ''}'")
+                logger.debug(f"✅ Weaviate search completed: {len(relevant_docs)} documents")
                 
-                # 🔥 STEP 4: Reranking - مرتب‌سازی مجدد بر اساس relevance
-                # استفاده از تنظیمات به جای hardcoded value
-                reranked_docs = await self._rerank_documents(query, relevant_docs, top_k=settings.reranker_top_k)
-                logger.debug(f"🎯 Reranked {len(reranked_docs)} documents by relevance")
-                
-                # 🔍 DEBUG: نمایش محتوای دقیق top 5 documents برای بررسی کیفیت retrieval
-                logger.debug("=" * 80)
-                logger.debug("📋 محتوای دقیق Top 5 Documents بازیابی‌شده:")
-                for i, doc in enumerate(reranked_docs[:5], 1):
-                    content_preview = doc.get('content', '')[:300].replace('\n', ' ')
-                    logger.debug(f"   📄 Doc {i} (Score: {doc.get('score', 0):.3f}):")
-                    logger.debug(f"      Title: {doc.get('title', 'N/A')[:80]}")
-                    logger.debug(f"      Path: {doc.get('path', 'N/A')}")
-                    logger.debug(f"      Content Preview: {content_preview}...")
-                    logger.debug(f"      Content Length: {len(doc.get('content', ''))} chars")
-                logger.debug("=" * 80)
+                # 🔥 بهینه‌سازی: reranking با top_k کمتر
+                reranked_docs = await self._rerank_documents(query, relevant_docs, top_k=min(5, limit))
+                logger.debug(f"🎯 Reranked {len(reranked_docs)} documents")
                 
                 return reranked_docs
-            # client به صورت خودکار بسته می‌شود توسط context manager
 
         except Exception as e:
             logger.debug(f"Weaviate search error: {e}")
@@ -1204,9 +1151,13 @@ class SimpleRAGService(RAGService):
         start_time = time.time()
         
         # 🎯 تحلیل نوع سوال برای confidence و prompt بهتر
-        from app.use_cases.query_analyzer import analyze_query_type
-        query_type_analysis = analyze_query_type(query)
-        query_type = query_type_analysis['query_type']
+        from app.utils.query_analyzer import query_analyzer
+        analysis_result = await query_analyzer.analyze(query)
+        query_type = analysis_result.query_type.value if analysis_result.query_type else "general"
+        query_type_analysis = {
+            'query_type': query_type,
+            'query_type_fa': analysis_result.query_type.value if analysis_result.query_type else "عمومی"
+        }
 
         logger.debug("=" * 60)
         logger.debug("🤖 SimpleRAGService: Starting STRICT RAG operation")
@@ -1243,7 +1194,7 @@ class SimpleRAGService(RAGService):
                 # 🔥 ENHANCED: استفاده از تنظیمات برای تعداد documents در context
                 top_docs = relevant_docs[:settings.context_documents_count]
                 
-                # 🔥 SMALL-TO-BIG RETRIEVAL (Phase 1): 
+                # 🔥 SMALL-TO-BIG RETRIEVAL (Phase 1):
                 # برای top documents، از full_article_content استفاده می‌کنیم
                 # این به LLM context کامل‌تر و غنی‌تری می‌دهد
                 context_parts = []
@@ -1264,18 +1215,18 @@ class SimpleRAGService(RAGService):
                         logger.info(f"   📄 Doc {i}: Using chunk content ({len(chunk_content)} chars)")
                     
                     doc_context = f"""
-=== منبع {i} ({content_type}) ===
-عنوان: {doc['title']}
-مسیر: {doc.get('path', 'N/A')}
-امتیاز ارتباط: {doc.get('score', 0):.2f}
-
-محتوا:
-{content_to_use}
-
----
-"""
+    === منبع {i} ({content_type}) ===
+    عنوان: {doc['title']}
+    مسیر: {doc.get('path', 'N/A')}
+    امتیاز ارتباط: {doc.get('score', 0):.2f}
+    
+    محتوا:
+    {content_to_use}
+    
+    ---
+    """
                     context_parts.append(doc_context)
-                
+                    
                 context_text = "\n".join(context_parts)
                 
                 logger.debug(f"📝 Enhanced context: {len(top_docs)} documents, {len(context_text)} characters")
@@ -1283,7 +1234,7 @@ class SimpleRAGService(RAGService):
                 
                 # Get conversation history from context
                 conversation_history = context.get("conversation_history", []) if context else []
-
+    
                 # 🔥 فراخوانی با پرامپت مخصوص Simple RAG
                 rag_response = await self._generate_openai_response(
                     query,
@@ -1308,10 +1259,10 @@ class SimpleRAGService(RAGService):
                     logger.debug(f"⚠️  Quality Issues: {', '.join(verification_result['issues'])}")
                 if verification_result['warnings']:
                     logger.debug(f"💡 Quality Warnings: {', '.join(verification_result['warnings'])}")
-
+    
                 total_rag_time = time.time() - start_time
                 logger.debug(f"⏱️  Total RAG time: {total_rag_time:.3f}s")
-
+    
                 # 🔥 ENHANCED: Groundedness Check - بررسی پشتیبانی پاسخ توسط منابع
                 formatted_sources_for_groundedness = self._format_sources_markdown(relevant_docs)
                 # 🔥 NEW: ارسال top_score برای تصمیم‌گیری بهتر
@@ -1322,7 +1273,7 @@ class SimpleRAGService(RAGService):
                     sources=formatted_sources_for_groundedness,
                     top_score=top_score
                 )
-
+    
                 # 🎯 محاسبه پیشرفته confidence با groundedness
                 confidence_analysis = self._calculate_advanced_confidence(
                     query=query,

@@ -95,21 +95,20 @@ class ChatUseCases:
                 context_text = "\n".join(context_parts)
                 
                 # 4. Generate response from LLM
-                from app.infrastructure.langchain_utils import langchain_service
+                from app.infrastructure.langchain_orchestrator import orchestrator
                 prompt_name = "simple_rag_response" if rag_type == "simple" else "rag_response"
                 logger.info(f"Using prompt: {prompt_name} for rag_type: {rag_type}")
                 
-                async for chunk in langchain_service.generate_rag_response_stream(
-                    query, 
-                    context_text,
+                # Process the request with the new orchestrator
+                result = await orchestrator.process_request(
+                    query=query,
+                    context=context_text,
                     conversation_history=conversation_history,
                     custom_model=custom_model,
-                    custom_temperature=custom_temperature,
-                    query_type=query_type_analysis['query_type'],
-                    prompt_name=prompt_name
-                ):
-                    full_response += chunk
-                    yield {"type": "chunk", "content": chunk}
+                    custom_temperature=custom_temperature
+                )
+                full_response = result.content
+                yield {"type": "chunk", "content": full_response}
             else:
                 full_response = "متأسفانه اطلاعات مرتبط یافت نشد."
                 yield {"type": "chunk", "content": full_response}
@@ -224,21 +223,20 @@ class ChatUseCases:
             }
 
             # 3. Generate conversational response using LLM
-            from app.infrastructure.langchain_utils import langchain_service
-            full_response = ""
+            from app.infrastructure.langchain_orchestrator import orchestrator
             
-            # ما از تابع استریم مکالمه‌ای استفاده می‌کنیم
-            async for chunk in langchain_service.generate_conversational_response_stream(
+            # Process with the new orchestrator
+            result = await orchestrator.process_request(
                 query=content,
-                conversation_history=conversation_history, # ارسال تاریخچه برای حفظ حافظه
+                conversation_history=conversation_history,
                 custom_model=model,
-                custom_temperature=0.7 # دمای بالاتر برای خلاقیت بیشتر در مکالمه
-            ):
-                full_response += chunk
-                yield {
-                    "type": "chunk",
-                    "content": chunk
-                }
+                custom_temperature=0.7
+            )
+            full_response = result.content
+            yield {
+                "type": "chunk",
+                "content": full_response
+            }
 
             # 4. Save AI's final response to the database
             ai_message = Message(
@@ -355,20 +353,19 @@ class ChatUseCases:
             }
 
             # 3. Generate conversational response using LLM
-            from app.infrastructure.langchain_utils import langchain_service
-            full_response = ""
+            from app.infrastructure.langchain_orchestrator import orchestrator
             
-            async for chunk in langchain_service.generate_conversational_response_stream(
+            result = await orchestrator.process_request(
                 query=content,
-                conversation_history=conversation_history, # ارسال تاریخچه برای حفظ حافظه
+                conversation_history=conversation_history,
                 custom_model=settings.chat_model_loaded,
                 custom_temperature=0.7
-            ):
-                full_response += chunk
-                yield {
-                    "type": "chunk",
-                    "content": chunk
-                }
+            )
+            full_response = result.content
+            yield {
+                "type": "chunk",
+                "content": full_response
+            }
 
             # 4. Save AI's final response to the database
             ai_message = Message(

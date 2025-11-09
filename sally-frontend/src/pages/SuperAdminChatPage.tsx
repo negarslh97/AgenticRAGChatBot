@@ -141,18 +141,6 @@ const SkeletonLoader = () => (
   </div>
 )
 
-// 🔥 Thinking Indicator Component (Legacy - keeping for compatibility)
-const ThinkingIndicator = () => (
-  <div className="flex items-center space-x-2 space-x-reverse p-3 bg-white border-t border-gray-200">
-    <div className="flex items-center gap-2">
-      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-      <span className="text-gray-500 text-sm mr-2">در حال فکر کردن...</span>
-    </div>
-  </div>
-)
-
 const SuperAdminChatPage = () => {
     const { user } = useAuth()
     const [isSidebarOpen, setIsSidebarOpen] = useState(false) // ✅ Default: closed on mobile

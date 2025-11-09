@@ -7,11 +7,9 @@ import StatCard from '../components/StatCard'
 import {
   Users,
   BookOpen,
-  Activity,
   Settings,
   Crown,
   Database,
-  Zap,
   MessageSquare
 } from 'lucide-react'
 
