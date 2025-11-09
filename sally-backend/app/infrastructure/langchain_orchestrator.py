@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import time
 import re
+import os
 from functools import wraps
 
 from .ai_exceptions import AIException, ErrorType, AISeverity
@@ -61,6 +62,7 @@ class RequestContext:
     max_tokens: Optional[int] = None
     streaming: bool = False
     agentic_mode: bool = False
+    custom_prompt: Optional[str] = None  # 🔥 پشتیبانی از پرامپت سفارشی
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
@@ -112,11 +114,11 @@ class ResponseResult:
 
 class ResponseGenerator:
     """Handles response generation for different query types."""
-
-# در متد __init__ کلاس ResponseGenerator
+    
     def __init__(self, model_factory: ModelFactory, security_manager: SecurityManager):
         self.model_factory = model_factory
         self.security_manager = security_manager
+        self._prompt_cache: Dict[str, str] = {}  # 🔥 کش پرامپت‌ها
         
         # ایجاد یک شیء CircuitBreakerConfig
         cb_config = CircuitBreakerConfig(
@@ -127,6 +129,29 @@ class ResponseGenerator:
         
         # پاس دادن شیء پیکربندی به CircuitBreaker
         self._circuit_breaker = CircuitBreaker(cb_config)
+    
+    def _load_prompt_from_file(self, prompt_name: str) -> Optional[str]:
+        """بارگذاری پرامپت از فایل."""
+        if prompt_name in self._prompt_cache:
+            return self._prompt_cache[prompt_name]
+        
+        # مسیر فایل‌های پرامپت
+        prompt_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
+        prompt_file = os.path.join(prompt_dir, f"{prompt_name}.txt")
+        
+        try:
+            if os.path.exists(prompt_file):
+                with open(prompt_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    self._prompt_cache[prompt_name] = content
+                    logger.debug(f"Loaded prompt: {prompt_name}")
+                    return content
+            else:
+                logger.warning(f"Prompt file not found: {prompt_file}")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to load prompt {prompt_name}: {e}")
+            return None
     
     @circuit_breaker_protect(failure_threshold=3, recovery_timeout=30)
     async def generate_response(
@@ -527,12 +552,12 @@ class LangChainOrchestrator:
         
         logger.info("LangChain Orchestrator initialized with modern architecture")
     
-    @cache_result(ttl_seconds=300)
     async def process_request(
-        self, 
+        self,
         query: str,
         context: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
+        custom_prompt: Optional[str] = None,  # 🔥 پشتیبانی از پرامپت سفارشی
         **kwargs
     ) -> ResponseResult:
         """Process a user request end-to-end."""
@@ -544,13 +569,29 @@ class LangChainOrchestrator:
                 query=query,
                 context=context,
                 conversation_history=conversation_history,
+                custom_prompt=custom_prompt,
                 **kwargs
             )
             
-            # Analyze query
+            # If custom_prompt is provided, use direct model approach
+            if custom_prompt:
+                logger.info(f"Using custom prompt: {custom_prompt}")
+                
+                # Load the custom prompt
+                custom_prompt_content = self.response_generator._load_prompt_from_file(custom_prompt)
+                if not custom_prompt_content:
+                    logger.warning(f"Failed to load custom prompt: {custom_prompt}")
+                    # Fall back to default prompt if custom prompt loading fails
+                    custom_prompt = None
+                else:
+                    # Override the prompt building with custom prompt
+                    request_context.custom_prompt = custom_prompt
+                    return await self._process_with_custom_prompt(request_context, start_time)
+            
+            # Standard processing for non-custom prompts
             analysis = self.query_analyzer.analyze_query(
-                query, 
-                len(context) if context else 0, 
+                query,
+                len(context) if context else 0,
                 len(conversation_history) if conversation_history else 0
             )
             
@@ -560,7 +601,7 @@ class LangChainOrchestrator:
             
             # Generate response
             result = await self.response_generator.generate_response(
-                request_context, 
+                request_context,
                 self.memory_service
             )
             
@@ -572,6 +613,72 @@ class LangChainOrchestrator:
             
         except Exception as e:
             logger.error(f"Request processing failed: {e}")
+            return ResponseResult(
+                content="متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید.",
+                error=str(e),
+                processing_time=time.time() - start_time
+            )
+    
+    async def _process_with_custom_prompt(self, request_context: RequestContext, start_time: float) -> ResponseResult:
+        """Process request using custom prompt file."""
+        try:
+            # Load the custom prompt
+            custom_prompt_name = request_context.custom_prompt
+            custom_prompt_content = self.response_generator._load_prompt_from_file(custom_prompt_name)
+            
+            if not custom_prompt_content:
+                # Fallback to standard processing
+                return await self.response_generator.generate_response(
+                    request_context,
+                    self.memory_service
+                )
+            
+            # Get model
+            model_name = self.response_generator._select_model(request_context)
+            model = self.model_factory.get_model(
+                model_name,
+                temperature=request_context.custom_temperature or self.response_generator._get_temperature(request_context),
+                max_tokens=request_context.max_tokens,
+                streaming=False
+            )
+            
+            # Build the final prompt with context and history
+            # Replace placeholders in the custom prompt
+            history_text = self.memory_service.format_history_for_prompt(request_context.conversation_history)
+            final_prompt = custom_prompt_content
+            
+            # Replace common placeholders
+            if "{query}" in final_prompt:
+                final_prompt = final_prompt.replace("{query}", request_context.query)
+            
+            if "{context}" in final_prompt and request_context.context:
+                final_prompt = final_prompt.replace("{context}", request_context.context)
+            
+            if "{history}" in final_prompt and history_text:
+                final_prompt = final_prompt.replace("{history}", history_text)
+            
+            # Generate response using the model
+            result_content = await model.generate(final_prompt)
+            
+            # Clean up thinking blocks
+            result_content = re.sub(r'<thinking>.*?</thinking>', '', result_content, flags=re.DOTALL).strip()
+            
+            # Create result
+            result = ResponseResult(
+                content=result_content,
+                processing_time=time.time() - start_time,
+                model_used=model_name,
+                metadata={
+                    "custom_prompt": custom_prompt_name,
+                    "prompt_type": "custom_file"
+                }
+            )
+            
+            logger.info(f"Custom prompt request processed in {result.processing_time:.2f}s")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Custom prompt processing failed: {e}")
             return ResponseResult(
                 content="متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید.",
                 error=str(e),

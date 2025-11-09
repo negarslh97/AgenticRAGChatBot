@@ -158,5 +158,64 @@ async def cleanup_connections(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/models")
+async def get_available_models():
+    """
+    دریافت لیست مدل‌های موجود (عمومی)
+    
+    Returns:
+        - models: لیست مدل‌های AI موجود با مشخصات کامل
+        - categories: دسته‌بندی مدل‌ها
+        - default_model: مدل پیش‌فرض
+    """
+    try:
+        from app.infrastructure.model_factory import model_factory
+        
+        # Get all models from factory
+        models_info = model_factory.list_models()
+        
+        # Enhance with frontend-compatible format
+        enhanced_models = []
+        for model in models_info:
+            config = model.get('config', {})
+            enhanced_model = {
+                "id": model['name'],
+                "name": model['name'].split('/')[-1].replace('-', ' ').title(),
+                "provider": model['provider'].title(),
+                "description": config.get('metadata', {}).get('description', 'مدل AI'),
+                "category": config.get('metadata', {}).get('category', 'other'),
+                "speed": config.get('metadata', {}).get('speed_ch_per_s', 'N/A'),
+                "empty_chunks": config.get('metadata', {}).get('empty_chunks', 'N/A'),
+                "max_tokens": model['max_tokens'],
+                "temperature": model['temperature'],
+                "supports_streaming": model['streaming'],
+                "supports_json": model['json']
+            }
+            enhanced_models.append(enhanced_model)
+        
+        # Categorize models for frontend
+        categories = {
+            "fastest": [m for m in enhanced_models if m['category'] == 'fastest'],
+            "free": [m for m in enhanced_models if m['category'] == 'free'],
+            "openai": [m for m in enhanced_models if m['category'] == 'openai'],
+            "heavy": [m for m in enhanced_models if m['category'] == 'heavy'],
+            "ollama": [m for m in enhanced_models if m['category'] == 'ollama'],
+            "other": [m for m in enhanced_models if m['category'] not in ['fastest', 'free', 'openai', 'heavy', 'ollama']]
+        }
+        
+        return {
+            "status": "success",
+            "data": {
+                "models": enhanced_models,
+                "categories": categories,
+                "default_model": "google/gemini-2.5-flash",
+                "total_count": len(enhanced_models)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting available models: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 

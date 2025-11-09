@@ -708,77 +708,234 @@ def _register_default_models():
     try:
         models_to_add = []
         
-        # Check for configured models from settings
-        if settings.chat_model_loaded:
-            chat_model_config = ModelConfig(
-                name=settings.chat_model_loaded,
-                provider=ModelProvider.OPENROUTER,  # Default to OpenRouter for flexibility
-                model_type=ModelType.CHAT,
-                max_tokens=4096,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded
-            )
-            models_to_add.append(chat_model_config)
+        # 🤖 Complete model list synchronized with frontend SuperAdminChatPage.tsx
+        # 🏆 Best RAG models (based on real tests - ordered by speed)
         
-        if settings.rag_model_loaded:
-            rag_model_config = ModelConfig(
-                name=settings.rag_model_loaded,
+        # 🥇 Fastest models (264 ch/s, 0% empty chunks)
+        fastest_models = [
+            ModelConfig(
+                name="google/gemini-2.5-flash",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.2,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "fastest",
+                    "speed_ch_per_s": 264,
+                    "empty_chunks": "0%",
+                    "description": "✅ سریع‌ترین - 264 ch/s، رایگان"
+                }
+            ),
+            ModelConfig(
+                name="qwen/qwen3-235b-a22b:free",
                 provider=ModelProvider.OPENROUTER,
                 model_type=ModelType.CHAT,
                 max_tokens=8192,
                 temperature=0.7,
                 api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded
-            )
-            models_to_add.append(rag_model_config)
-        
-        if settings.metadata_model_loaded:
-            metadata_model_config = ModelConfig(
-                name=settings.metadata_model_loaded,
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "fastest",
+                    "speed_ch_per_s": 264,
+                    "empty_chunks": "0%",
+                    "description": "✅ سریع‌ترین - 264 ch/s، رایگان"
+                }
+            ),
+            ModelConfig(
+                name="minimax/minimax-m2:free",
                 provider=ModelProvider.OPENROUTER,
                 model_type=ModelType.CHAT,
-                max_tokens=2048,
-                temperature=0.3,  # Lower temperature for metadata tasks
+                max_tokens=8192,
+                temperature=0.7,
                 api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "fastest",
+                    "description": "مدل سریع MINIMAX"
+                }
             )
-            models_to_add.append(metadata_model_config)
+        ]
         
-        # Add OpenRouter free models if no models configured
-        if not models_to_add:
-            logger.info("No models configured in settings, adding default OpenRouter models")
-            
-            # Add default OpenRouter models - each with unique names
-            default_models = [
-                ModelConfig(
-                    name="google/gemini-2.5-flash",
-                    provider=ModelProvider.OPENROUTER,
-                    model_type=ModelType.CHAT,
-                    max_tokens=8192,
-                    temperature=0.2,
-                    api_key=settings.openai_api_key_loaded,
-                    base_url=settings.openai_base_url_loaded
-                ),
-                ModelConfig(
-                    name="moonshotai/kimi-linear-48b-a3b-instruct",
-                    provider=ModelProvider.OPENROUTER,
-                    model_type=ModelType.CHAT,
-                    max_tokens=8192,
-                    temperature=0.7,
-                    api_key=settings.openai_api_key_loaded,
-                    base_url=settings.openai_base_url_loaded
-                )
-            ]
-            models_to_add.extend(default_models)
+        # 🥈 Excellent free models
+        free_models = [
+            ModelConfig(
+                name="tngtech/deepseek-r1t2-chimera:free",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "free",
+                    "speed_ch_per_s": 117,
+                    "empty_chunks": "0%",
+                    "description": "✅ 117 ch/s، 0% empty، رایگان"
+                }
+            )
+        ]
+        
+        # 🥉 Official OpenAI models (use Embedder API)
+        openai_models = [
+            ModelConfig(
+                name="gpt-4o-mini",
+                provider=ModelProvider.OPENAI,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.embedder_api_key_loaded,
+                base_url=settings.embedder_openai_base_url_loaded,
+                metadata={
+                    "category": "openai",
+                    "speed_ch_per_s": 89,
+                    "description": "✅ 89 ch/s، پایدار، کیفیت بالا"
+                }
+            ),
+            ModelConfig(
+                name="gpt-4o",
+                provider=ModelProvider.OPENAI,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.embedder_api_key_loaded,
+                base_url=settings.embedder_openai_base_url_loaded,
+                metadata={
+                    "category": "openai",
+                    "description": "قدرتمندترین OpenAI"
+                }
+            ),
+            ModelConfig(
+                name="gpt-4-turbo",
+                provider=ModelProvider.OPENAI,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.embedder_api_key_loaded,
+                base_url=settings.embedder_openai_base_url_loaded,
+                metadata={
+                    "category": "openai",
+                    "description": "نسخه توربو GPT-4"
+                }
+            )
+        ]
+        
+        # ⚠️ Models with many chunks (work but not optimized)
+        heavy_models = [
+            ModelConfig(
+                name="x-ai/grok-4-fast",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "heavy",
+                    "speed_ch_per_s": 143,
+                    "empty_chunks": "70%",
+                    "description": "143 ch/s، اما 70% empty chunks"
+                }
+            ),
+            ModelConfig(
+                name="x-ai/grok-3-mini-beta",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "heavy",
+                    "speed_ch_per_s": 149,
+                    "empty_chunks": "65%",
+                    "description": "149 ch/s، اما 65% empty chunks"
+                }
+            )
+        ]
+        
+        # Other models
+        other_models = [
+            ModelConfig(
+                name="deepseek/deepseek-r1-0528",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "other",
+                    "description": "مدل قدرتمند DeepSeek"
+                }
+            ),
+            ModelConfig(
+                name="qwen/qwen3-235b-a22b-2507",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.openai_api_key_loaded,
+                base_url=settings.openai_base_url_loaded,
+                metadata={
+                    "category": "other",
+                    "description": "مدل Alibaba"
+                }
+            )
+        ]
+        
+        # Ollama Local Models (using OPENROUTER as fallback since LOCAL is not implemented)
+        ollama_models = [
+            ModelConfig(
+                name="ollama:gpt-oss:20b",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=4096,
+                temperature=0.7,
+                base_url=settings.ollama_url_loaded,  # Ollama API
+                metadata={
+                    "category": "ollama",
+                    "description": "مدل محلی OpenAI"
+                }
+            ),
+            ModelConfig(
+                name="ollama:gemma3n:e4b",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=4096,
+                temperature=0.7,
+                base_url=settings.ollama_url_loaded,  # Ollama API
+                metadata={
+                    "category": "ollama",
+                    "description": "مدل محلی قدرتمند Google"
+                }
+            ),
+            ModelConfig(
+                name="ollama:llama3.1:8b-instruct-q4_0",
+                provider=ModelProvider.OPENROUTER,
+                model_type=ModelType.CHAT,
+                max_tokens=4096,
+                temperature=0.7,
+                base_url=settings.ollama_url_loaded,  # Ollama API
+                metadata={
+                    "category": "ollama",
+                    "description": "مدل محلی Meta"
+                }
+            )
+        ]
+        
+        # Combine all models
+        all_models = (fastest_models + free_models + openai_models +
+                     heavy_models + other_models + ollama_models)
         
         # Add all models to factory
-        for model_config in models_to_add:
+        for model_config in all_models:
             success = model_factory.add_model(model_config)
             if not success:
                 logger.warning(f"Failed to add model {model_config.name}")
         
-        logger.info(f"✅ Registered {len(models_to_add)} models from settings/defaults")
+        logger.info(f"✅ Registered {len(all_models)} models synchronized with frontend")
         
     except Exception as e:
         logger.error(f"❌ Failed to register default models: {e}")

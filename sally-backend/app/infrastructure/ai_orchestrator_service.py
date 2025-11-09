@@ -233,11 +233,22 @@ class AIOrchestratorService:
             )
             processing_metadata["selected_model"] = optimal_model
             
-            # مرحله ۵: تولید پاسخ - ResponseGenerator
+            # مرحله ۵: تولید پاسخ - ResponseGenerator با منطق پرامپت جدید
             logger.info("✍️ مرحله ۵: تولید پاسخ - ResponseGenerator")
             request_context = request.to_request_context()
             request_context.context = context
             request_context.streaming = False
+            
+            # تعیین پرامپت بر اساس منطق جدید
+            if not analysis_result.needs_rag:
+                prompt_name = "basic_response"
+            elif hasattr(analysis_result, 'complexity') and analysis_result.complexity.value == "complex":
+                prompt_name = "agentic_rag_response"
+            else:
+                prompt_name = "simple_rag_response"
+            
+            request_context.custom_prompt = prompt_name
+            logger.info(f"📝 استفاده از پرامپت: {prompt_name} (needs_rag: {analysis_result.needs_rag})")
             
             # Non-streaming response
             response_result = await self._generate_response(request_context, analysis_result)
@@ -245,6 +256,13 @@ class AIOrchestratorService:
             # مرحله ۶: امنیت خروجی - پاک‌سازی output
             logger.info("🛡️ مرحله ۶: امنیت خروجی - پاک‌سازی output")
             sanitized_response = self.security_manager.sanitize_output(response_result.content)
+            
+            # اضافه کردن اطلاعات RAG به metadata
+            processing_metadata.update({
+                "rag_context_used": context is not None,
+                "prompt_used": prompt_name,
+                "context_sources": len(analysis_result.get('sources', [])) if 'sources' in analysis_result else 0
+            })
             
             return ProcessingResult(
                 success=True,
@@ -321,11 +339,22 @@ class AIOrchestratorService:
             )
             processing_metadata["selected_model"] = optimal_model
             
-            # مرحله ۵: تولید پاسخ
+            # مرحله ۵: تولید پاسخ streaming با منطق پرامپت جدید
             logger.info("✍️ مرحله ۵: تولید پاسخ streaming")
             request_context = request.to_request_context()
             request_context.context = context
             request_context.streaming = True
+            
+            # تعیین پرامپت بر اساس منطق جدید (برای streaming)
+            if not analysis_result.needs_rag:
+                prompt_name = "basic_response"
+            elif hasattr(analysis_result, 'complexity') and analysis_result.complexity.value == "complex":
+                prompt_name = "agentic_rag_response"
+            else:
+                prompt_name = "simple_rag_response"
+            
+            request_context.custom_prompt = prompt_name
+            logger.info(f"📝 استفاده از پرامپت: {prompt_name} (streaming)")
             
             async for chunk in self._generate_streaming_response(request_context):
                 yield chunk
@@ -338,27 +367,88 @@ class AIOrchestratorService:
             yield "خطای غیرمنتظره‌ای رخ داد. لطفاً بعداً دوباره تلاش کنید."
     
     async def _retrieve_context(self, request: ProcessingRequest, analysis_result) -> Optional[str]:
-        """مرحله ۳: بازیابی context از knowledge base"""
+        """مرحله ۳: بازیابی context از knowledge base با RAG واقعی"""
         try:
-            # استفاده از knowledge base repository (با circuit breaker protection)
-            with self.weaviate_manager.get_client() as weaviate_client:
-                # جستجوی ساده در collections
-                # TODO: پیاده‌سازی کامل RAG retrieval
-                logger.info(f"🔍 Searching for context with keywords: {analysis_result.keywords}")
-                return f"Retrieved context for query: {request.query}"
+            from .knowledge_base_repository import knowledge_base_repository
+            from app.domain.entities import ArticleVisibility
+            
+            logger.info(f"🔍 بازیابی context برای کوئری: {request.query[:100]}...")
+            
+            # جستجوی پیشرفته در knowledge base
+            search_results = await knowledge_base_repository.search_articles(
+                query=request.query,
+                visibility_filter=[ArticleVisibility.PUBLIC],  # فقط مقالات عمومی
+                limit=5  # بهترین ۵ نتیجه
+            )
+            
+            if not search_results:
+                logger.info("❌ هیچ نتیجه مرتبطی یافت نشد")
+                return None
+            
+            # تبدیل نتایج به context قابل استفاده
+            context_parts = []
+            sources = []
+            
+            for i, result in enumerate(search_results, 1):
+                # آماده‌سازی محتوا برای استفاده در RAG
+                source_info = f"[{i}] {result['title']}"
+                content_snippet = result['summary']
+                
+                context_parts.append(f"{source_info}: {content_snippet}")
+                sources.append({
+                    "title": result['title'],
+                    "id": result['id'],
+                    "score": result.get('score', 0)
+                })
+            
+            # ساخت context نهایی با منابع
+            context = f"""
+لطفاً بر اساس اطلاعات زیر پاسخ دهید:
+
+## اطلاعات مرتبط:
+{chr(10).join(context_parts)}
+
+## منابع:
+{chr(10).join([f"- {src['title']} (امتیاز: {src['score']:.2f})" for src in sources])}
+"""
+            
+            logger.info(f"✅ {len(search_results)} منبع مرتبط برای RAG پیدا شد")
+            # اصلاح f-string nesting
+            scores = [f"{s.get('score', 0):.2f}" for s in search_results]
+            logger.info(f"📊 امتیازات: {scores}")
+            
+            return context
+            
         except Exception as e:
             logger.warning(f"⚠️ Failed to retrieve context: {e}")
+            logger.error(f"خطای جزئیات: {str(e)}", exc_info=True)
             return None
     
     async def _generate_response(self, request_context: RequestContext, analysis_result) -> ResponseResult:
-        """مرحله ۵: تولید response با استفاده از orchestrator موجود"""
+        """مرحله ۵: تولید response با استفاده از orchestrator جدید با پشتیبانی از custom_prompt"""
         try:
-            from .langchain_orchestrator import ResponseGenerator
+            from .langchain_orchestrator import orchestrator
             
-            response_generator = ResponseGenerator(self.model_factory, self.security_manager)
-            result = await response_generator.generate_response(request_context, self.memory_service)
+            # پردازش با orchestrator جدید که از custom_prompt پشتیبانی می‌کند
+            result = await orchestrator.process_request(
+                query=request_context.query,
+                context=request_context.context,
+                conversation_history=request_context.conversation_history,
+                custom_prompt=request_context.custom_prompt,
+                custom_model=request_context.custom_model,
+                custom_temperature=request_context.custom_temperature,
+                agentic_mode=request_context.agentic_mode,
+                streaming=False
+            )
             
-            return result
+            # تبدیل ResponseResult از orchestrator به فرمت مورد نیاز
+            return ResponseResult(
+                content=result.content,
+                metadata=result.metadata,
+                processing_time=result.processing_time,
+                model_used=result.metadata.get('model_used'),
+                cache_hit=result.cache_hit
+            )
             
         except Exception as e:
             logger.error(f"❌ Error in response generation: {e}")
@@ -369,30 +459,20 @@ class AIOrchestratorService:
             )
     
     async def _generate_streaming_response(self, request_context: RequestContext) -> AsyncGenerator[str, None]:
-        """مرحله ۵: تولید streaming response"""
+        """مرحله ۵: تولید streaming response با orchestrator جدید"""
         try:
-            from .langchain_orchestrator import ResponseGenerator
+            from .langchain_orchestrator import orchestrator
             
-            # Select model based on request context
-            model_name = self.model_factory.get_optimal_model(
-                "rag" if request_context.context else "chat",
-                context_length=len(request_context.context) if request_context.context else 0
-            )
-            
-            # Create model instance with streaming enabled
-            model = self.model_factory.get_model(
-                model_name,
-                temperature=request_context.custom_temperature or 0.3,
-                max_tokens=request_context.max_tokens,
+            # پردازش streaming با orchestrator جدید
+            async for chunk in orchestrator.process_request(
+                query=request_context.query,
+                context=request_context.context,
+                conversation_history=request_context.conversation_history,
+                custom_prompt=request_context.custom_prompt,
+                custom_model=request_context.custom_model,
+                custom_temperature=request_context.custom_temperature,
+                agentic_mode=request_context.agentic_mode,
                 streaming=True
-            )
-            
-            # Generate streaming response
-            response_generator = ResponseGenerator(self.model_factory, self.security_manager)
-            async for chunk in response_generator._generate_streaming_response(
-                model,
-                request_context,
-                self.memory_service
             ):
                 # Sanitize each chunk before yielding
                 sanitized_chunk = self.security_manager.sanitize_output(chunk)

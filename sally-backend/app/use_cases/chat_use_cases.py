@@ -96,14 +96,26 @@ class ChatUseCases:
                 
                 # 4. Generate response from LLM
                 from app.infrastructure.langchain_orchestrator import orchestrator
-                prompt_name = "simple_rag_response" if rag_type == "simple" else "rag_response"
-                logger.info(f"Using prompt: {prompt_name} for rag_type: {rag_type}")
                 
-                # Process the request with the new orchestrator
+                # تعیین پرامپت بر اساس نوع مکالمه
+                # ۱. مکالمات عامیانه (conversational) → basic_response
+                # ۲. مکالمات agentic → agentic_rag_response
+                # ۳. مکالمات simple → simple_rag_response
+                if not query_analysis.get('needs_rag', True):
+                    prompt_name = "basic_response"
+                elif rag_type == "agentic":
+                    prompt_name = "agentic_rag_response"
+                else:
+                    prompt_name = "simple_rag_response"
+                
+                logger.info(f"Using prompt: {prompt_name} for rag_type: {rag_type}, needs_rag: {query_analysis.get('needs_rag', True)}")
+                
+                # Process the request with custom prompt
                 result = await orchestrator.process_request(
                     query=query,
                     context=context_text,
                     conversation_history=conversation_history,
+                    custom_prompt=prompt_name,  # 🔥 پرامپت سفارشی
                     custom_model=custom_model,
                     custom_temperature=custom_temperature
                 )
@@ -225,10 +237,11 @@ class ChatUseCases:
             # 3. Generate conversational response using LLM
             from app.infrastructure.langchain_orchestrator import orchestrator
             
-            # Process with the new orchestrator
+            # Process with basic_response prompt for conversational queries
             result = await orchestrator.process_request(
                 query=content,
                 conversation_history=conversation_history,
+                custom_prompt="basic_response",  # 🔥 استفاده از پرامپت محاوره‌ای
                 custom_model=model,
                 custom_temperature=0.7
             )
@@ -358,6 +371,7 @@ class ChatUseCases:
             result = await orchestrator.process_request(
                 query=content,
                 conversation_history=conversation_history,
+                custom_prompt="basic_response",  # 🔥 استفاده از پرامپت محاوره‌ای
                 custom_model=settings.chat_model_loaded,
                 custom_temperature=0.7
             )

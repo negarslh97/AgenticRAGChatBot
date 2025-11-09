@@ -449,4 +449,66 @@ export const chatService = {
 
     return { abort: () => controller.abort() }
   },
+
+  async getAvailableModels(): Promise<{
+    models: Array<{
+      id: string
+      name: string
+      provider: string
+      description: string
+      category: string
+      speed?: string
+      empty_chunks?: string
+      max_tokens: number
+      temperature: number
+      supports_streaming: boolean
+      supports_json: boolean
+    }>
+    categories: {
+      fastest: any[]
+      free: any[]
+      openai: any[]
+      heavy: any[]
+      ollama: any[]
+      other: any[]
+    }
+    default_model: string
+    total_count: number
+  }> {
+    try {
+      const response = await api.get("/api/system/models")
+      return response.data.data
+    } catch (error: any) {
+      console.error("Failed to get available models:", error)
+      // Fallback to hardcoded models if API fails
+      return {
+        models: [
+          { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google', description: '✅ سریع‌ترین - 264 ch/s، رایگان', category: 'fastest', max_tokens: 8192, temperature: 0.2, supports_streaming: true, supports_json: true },
+          { id: 'qwen/qwen3-235b-a22b:free', name: 'Qwen 3', provider: 'Alibaba', description: '✅ سریع‌ترین - 264 ch/s، رایگان', category: 'fastest', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'minimax/minimax-m2:free', name: 'MINIMAX M2', provider: 'minimax', description: 'مدل سریع MINIMAX', category: 'fastest', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'deepseek/deepseek-chat-v3.1:free', name: 'DeepSeek V3.1 (Free)', provider: 'DeepSeek', description: '✅ 117 ch/s، 0% empty، رایگان', category: 'free', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI', description: '✅ 89 ch/s، پایدار، کیفیت بالا', category: 'openai', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', description: 'قدرتمندترین OpenAI', category: 'openai', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI', description: 'نسخه توربو GPT-4', category: 'openai', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'x-ai/grok-4-fast', name: 'Grok 4 Fast ⚠️', provider: 'xAI', description: '143 ch/s، اما 70% empty chunks', category: 'heavy', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'x-ai/grok-3-mini-beta', name: 'Grok 3 Mini Beta ⚠️', provider: 'xAI', description: '149 ch/s، اما 65% empty chunks', category: 'heavy', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'deepseek/deepseek-r1-0528', name: 'DeepSeek R1', provider: 'DeepSeek', description: 'مدل قدرتمند DeepSeek', category: 'other', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'qwen/qwen3-235b-a22b-2507', name: 'Qwen 3', provider: 'Qwen', description: 'مدل Alibaba', category: 'other', max_tokens: 8192, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'ollama:gpt-oss:20b', name: 'GPT-OSS 20B', provider: 'Ollama', description: 'مدل محلی OpenAI', category: 'ollama', max_tokens: 4096, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'ollama:gemma3n:e4b', name: 'Gemma 3N E4B', provider: 'Ollama', description: 'مدل محلی قدرتمند Google', category: 'ollama', max_tokens: 4096, temperature: 0.7, supports_streaming: true, supports_json: true },
+          { id: 'ollama:llama3.1:8b-instruct-q4_0', name: 'Llama 3.1 8B', provider: 'Ollama', description: 'مدل محلی Meta', category: 'ollama', max_tokens: 4096, temperature: 0.7, supports_streaming: true, supports_json: true }
+        ],
+        categories: {
+          fastest: [],
+          free: [],
+          openai: [],
+          heavy: [],
+          ollama: [],
+          other: []
+        },
+        default_model: 'google/gemini-2.5-flash',
+        total_count: 14
+      }
+    }
+  },
 }

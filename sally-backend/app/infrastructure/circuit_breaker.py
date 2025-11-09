@@ -512,4 +512,4 @@ def circuit_breaker_protect(
     return decorator
 
 # Global circuit breaker instance for general use
-default_circuit_breaker = CircuitBreaker(CircuitBreakerConfig())
+default_circuit_breaker = CircuitBreaker(CircuitBreakerConfig(name="default_circuit_breaker"))
