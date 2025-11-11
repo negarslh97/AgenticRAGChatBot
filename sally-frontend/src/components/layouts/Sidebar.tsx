@@ -36,6 +36,13 @@ const Sidebar: React.FC = () => {
 
   const isSubItemActive = (href: string) => location.pathname === href
 
+  // 🔧 Feature Flags - برای مخفی کردن موقت برخی قابلیت‌ها
+  const FEATURE_FLAGS = {
+    SHOW_REINDEX: false, // مخفی کردن reindex
+    SHOW_ACTIVITY_LOGS: false, // مخفی کردن لاگ فعالیت‌ها
+    SHOW_SETTINGS: false // مخفی کردن تنظیمات
+  }
+
   const navigationItems = [
     {
       name: 'داشبورد',
@@ -69,22 +76,25 @@ const Sidebar: React.FC = () => {
           name: 'مدیریت مقالات',
           href: '/super-admin/knowledge-base'
         },
-        {
+        // 🔧 Re-indexing - به صورت موقت مخفی شده
+        ...(FEATURE_FLAGS.SHOW_REINDEX ? [{
           name: '🔄 Re-indexing',
           href: '/super-admin/knowledge-base/reindex'
-        }
+        }] : [])
       ]
     },
-    {
+    // 🔧 لاگ‌های فعالیت - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_ACTIVITY_LOGS ? [{
       name: 'لاگ‌های فعالیت',
       href: '/super-admin/logs',
       icon: Activity
-    },
-    {
+    }] : []),
+    // 🔧 تنظیمات سیستم - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_SETTINGS ? [{
       name: 'تنظیمات سیستم',
       href: '/super-admin/settings',
       icon: Settings
-    }
+    }] : [])
   ]
 
   const getInitials = (fullName: string) => {

@@ -31,7 +31,12 @@ import {
   Settings,
   Cpu,
   Thermometer,
-  Sparkles
+  Sparkles,
+  Copy,
+  Check,
+  RotateCcw,
+  AlertCircle,
+  HelpCircle
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
@@ -93,34 +98,104 @@ interface Conversation {
 type RAGType = 'simple' | 'agentic' | 'detailed'
 type AdminRAGType = 'simple' | 'agentic'
 
-// 🤖 لیست مدل‌های موجود
-const AVAILABLE_MODELS = [
-  // 🏆 بهترین مدل‌ها برای RAG (براساس تست‌های واقعی - مرتب شده براساس سرعت)
-  
-  // 🥇 سریع‌ترین (264 ch/s، 0% empty chunks)
-  { id: 'google/gemini-2.5-flash', name: '🏆 Gemini 2.5 Flash', provider: 'Google', description: '✅ سریع‌ترین - 264 ch/s، رایگان' },
-  { id: 'qwen/qwen3-235b-a22b:free', name: 'Qwen 3', provider: 'Alibaba', description: '✅ سریع‌ترین - 264 ch/s، رایگان' },
-  { id:'minimax/minimax-m2:free', name: 'MINIMAX M2', provider: 'minimax', description: ''},
-  // 🥈 مدل‌های رایگان عالی
-  { id: 'deepseek/deepseek-chat-v3.1:free', name: '⭐ DeepSeek V3.1 (Free)', provider: 'DeepSeek', description: '✅ 117 ch/s، 0% empty، رایگان' },
-  
-  // 🥉 OpenAI رسمی (از Embedder API استفاده می‌کند)
-  { id: 'gpt-4o-mini', name: '⭐ GPT-4o Mini', provider: 'OpenAI', description: '✅ 89 ch/s، پایدار، کیفیت بالا' },
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', description: 'قدرتمندترین OpenAI' },
-  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI', description: 'نسخه توربو GPT-4' },
-  
-  // ⚠️ مدل‌های با chunks زیاد (کار می‌کنند اما بهینه نیستند)
-  { id: 'x-ai/grok-4-fast', name: 'Grok 4 Fast ⚠️', provider: 'xAI', description: '143 ch/s، اما 70% empty chunks' },
-  { id: 'x-ai/grok-3-mini-beta', name: 'Grok 3 Mini Beta ⚠️', provider: 'xAI', description: '149 ch/s، اما 65% empty chunks' },
-  
-  // سایر مدل‌ها
-  { id: 'deepseek/deepseek-r1-0528', name: 'DeepSeek R1', provider: 'DeepSeek', description: 'مدل قدرتمند DeepSeek' },
-  { id: 'qwen/qwen3-235b-a22b-2507', name: 'Qwen 3', provider: 'Qwen', description: 'مدل Alibaba' },
-  
-  // Ollama Local Models
-  { id: 'ollama:gpt-oss:20b', name: 'GPT-OSS 20B', provider: 'Ollama', description: 'مدل محلی OpenAI' },
-  { id: 'ollama:gemma3n:e4b', name: 'Gemma 3N E4B', provider: 'Ollama', description: 'مدل محلی قدرتمند Google' },
-  { id: 'ollama:llama3.1:8b-instruct-q4_0', name: 'Llama 3.1 8B', provider: 'Ollama', description: 'مدل محلی Meta' },
+// 🤖 Interface for model data
+interface ModelInfo {
+    id: string
+    name: string
+    provider: string
+    description: string
+    detailed_description?: string  // 🔥 توضیحات تفصیلی مدل
+    category?: string
+    speed?: string
+    empty_chunks?: string
+}
+
+// 🔥 Fallback models list (used if API fails)
+const FALLBACK_MODELS: ModelInfo[] = [
+    {
+        id: 'google/gemini-2.5-flash',
+        name: '🏆 Gemini 2.5 Flash',
+        provider: 'Google',
+        description: '✅ سریع‌ترین - 264 ch/s، رایگان',
+        detailed_description: 'سریع‌ترین مدل گوگل با سرعت 264 کاراکتر در ثانیه و رایگان.'
+    },
+    {
+        id: 'qwen/qwen3-235b-a22b-2507',
+        name: 'Qwen 3',
+        provider: 'Alibaba',
+        description: '✅ سریع‌ترین - 264 ch/s',
+        detailed_description: 'مدل قدرتمند علی‌بابا با 235 میلیارد پارامتر و عملکرد عالی در فارسی.'
+    },
+    {
+        id: 'minimax/minimax-m2:free',
+        name: 'MINIMAX M2',
+        provider: 'minimax',
+        description: 'مدل جدید و قدرتمند Minimax',
+        detailed_description: 'مدل جدید Minimax با تکنولوژی پیشرفته و عملکرد بالا در پردازش زبان طبیعی.'
+    },
+    {
+        id: 'tngtech/deepseek-r1t2-chimera:free',
+        name: '⭐ DeepSeek R1T2 Chimera (Free)',
+        provider: 'DeepSeek',
+        description: '✅ 117 ch/s، 0% empty، رایگان',
+        detailed_description: 'مدل رایگان DeepSeek با سرعت 117 ch/s و بدون قطعات خالی.'
+    },
+    {
+        id: 'gpt-4o-mini',
+        name: '⭐ GPT-4o Mini',
+        provider: 'OpenAI',
+        description: '✅ 89 ch/s، پایدار، کیفیت بالا',
+        detailed_description: 'نسخه بهینه‌شده GPT-4 با تعادل عالی بین سرعت و کیفیت. با سرعت 89 کاراکتر در ثانیه و پایداری بالا، تعادل مناسبی بین سرعت و کیفیت ارائه می‌دهد.'
+    },
+    {
+        id: 'gpt-4o',
+        name: 'GPT-4o',
+        provider: 'OpenAI',
+        description: 'قدرتمندترین OpenAI',
+        detailed_description: 'قدرتمندترین مدل OpenAI با قابلیت‌های چندحالته و بالاترین کیفیت.'
+    },
+    {
+        id: 'gpt-5-mini',
+        name: 'GPT-5 Mini',
+        provider: 'OpenAI',
+        description: '✅ 89 ch/s، پایدار، کیفیت بالا',
+        detailed_description: 'نسخه بهینه‌شده GPT-5 با تعادل عالی بین سرعت و کیفیت. با سرعت 89 کاراکتر در ثانیه و پایداری بالا، تعادل مناسبی بین سرعت و کیفیت ارائه می‌دهد.'
+    },
+    {
+        id: 'gpt-5',
+        name: 'GPT-5',
+        provider: 'OpenAI',
+        description: '✅ 89 ch/s، پایدار، کیفیت بالا',
+        detailed_description: 'نسخه بهینه‌شده GPT-5 با تعادل عالی بین سرعت و کیفیت. با سرعت 89 کاراکتر در ثانیه و پایداری بالا، تعادل مناسبی بین سرعت و کیفیت ارائه می‌دهد.'
+    },
+    {
+        id: 'x-ai/grok-4-fast',
+        name: 'Grok 4 Fast ⚠️',
+        provider: 'xAI',
+        description: '143 ch/s، اما 70% empty chunks',
+        detailed_description: 'سریع اما با 70% قطعات خالی که ممکن است بر کیفیت تأثیر بگذارد.'
+    },
+    {
+        id: 'ollama:gpt-oss:20b',
+        name: 'GPT-OSS 20B',
+        provider: 'Ollama',
+        description: 'مدل محلی OpenAI',
+        detailed_description: 'مدل متن‌باز محلی با 20 میلیارد پارامتر و حریم خصوصی کامل.'
+    },
+    {
+        id: 'ollama:gemma3n:e4b',
+        name: 'Gemma 3N E4B',
+        provider: 'Ollama',
+        description: 'مدل محلی قدرتمند Google',
+        detailed_description: 'نسخه بهینه‌شده Gemma گوگل برای اجرای محلی با مصرف منابع کم.'
+    },
+    {
+        id: 'ollama:llama3.1:8b-instruct-q4_0',
+        name: 'Llama 3.1 8B',
+        provider: 'Ollama',
+        description: 'مدل محلی Meta',
+        detailed_description: 'جدیدترین مدل متن‌باز Meta با 8 میلیارد پارامتر و عملکرد بالا.'
+    },
 ]
 
 // 🔥 Elegant Skeleton Loader Component
@@ -142,6 +217,12 @@ const SkeletonLoader = () => (
 )
 
 const SuperAdminChatPage = () => {
+    // 🔧 Feature Flags - برای مخفی کردن موقت برخی قابلیت‌ها
+    const FEATURE_FLAGS = {
+        SHOW_SETTINGS: true, // نمایش تنظیمات مدل و RAG
+        SHOW_VOICE_INPUT: false // مخفی کردن ویس
+    }
+
     const { user } = useAuth()
     const [isSidebarOpen, setIsSidebarOpen] = useState(false) // ✅ Default: closed on mobile
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false) // 🔥 New: Sidebar collapsed state
@@ -151,16 +232,34 @@ const SuperAdminChatPage = () => {
     const [isLoading, setIsLoading] = useState(false)
     const [isInitialLoading, setIsInitialLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
-    const [ragType, setRagType] = useState<AdminRAGType>('simple')
+    const [modelSearchQuery, setModelSearchQuery] = useState('') // 🔍 Separate search for models
+    const [ragType, setRagType] = useState<AdminRAGType>(() => {
+        const saved = localStorage.getItem('superAdmin_ragType')
+        return (saved as AdminRAGType) || 'simple'
+    })
     const [selectedArticle, setSelectedArticle] = useState<{id: string, title: string, content: string} | null>(null)
     const [showSettingsModal, setShowSettingsModal] = useState(false)
-    const [selectedModel, setSelectedModel] = useState<string>('google/gemini-2.5-flash')  // 🏆 سریع‌ترین و بهترین مدل برای RAG
-    const [temperature, setTemperature] = useState<number>(0.7)
+    const [selectedModel, setSelectedModel] = useState<string>(() => {
+        const saved = localStorage.getItem('superAdmin_selectedModel')
+        return saved || 'google/gemini-2.5-flash'
+    })
+    const [availableModels, setAvailableModels] = useState<ModelInfo[]>(FALLBACK_MODELS)  // 🔥 Load models from API
+    const [temperature, setTemperature] = useState<number>(() => {
+        const saved = localStorage.getItem('superAdmin_temperature')
+        return saved ? parseFloat(saved) : 0.7
+    })
     const [isThinking, setIsThinking] = useState(false)  // 🔥 State for "thinking" indicator
     const [typewriterMessages, setTypewriterMessages] = useState<{[key: string]: string}>({})  // 🔥 Typewriter effect state
+    const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)  // 🔥 Copy feedback state
+    const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)  // 🔥 Delete confirmation state
+    const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)  // 🔥 Keyboard shortcuts modal
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
     const initializationRef = useRef(false)
+    const settingsModalRef = useRef<HTMLDivElement>(null)  // 🔥 Ref for settings modal focus
+    const textareaRef = useRef<HTMLTextAreaElement>(null)  // 🔥 Ref for textarea auto-resize
+    const conversationIdRef = useRef<string | undefined>(undefined)  // 🔥 Store conversation_id from init event
+    const refreshInProgressRef = useRef<Set<string>>(new Set())  // 🔥 Track refresh operations to prevent duplicates
 
     // Smart scroll state - using useRef for better performance
     const userHasScrolledUp = useRef(false)
@@ -172,6 +271,68 @@ const SuperAdminChatPage = () => {
         articleId: string;
         userQuery: string;
     }>({ isOpen: false, articleId: '', userQuery: '' })
+
+    // 🔥 Define functions before useEffect to avoid hoisting issues
+    const toggleSidebar = useCallback(() => {
+        setIsSidebarOpen(prev => !prev)
+    }, [])
+
+    const createNewConversation = useCallback(() => {
+        const newConv: Conversation = {
+            id: `new-${Date.now()}`,
+            title: 'گفتگوی جدید',
+            messages: [],
+            rag_type: ragType
+        }
+        setConversations(prev => [newConv, ...prev])
+        setSelectedConversation(newConv)
+    }, [ragType])
+
+    // 🔥 Save settings to localStorage whenever they change
+    useEffect(() => {
+        localStorage.setItem('superAdmin_ragType', ragType)
+    }, [ragType])
+
+    useEffect(() => {
+        localStorage.setItem('superAdmin_selectedModel', selectedModel)
+    }, [selectedModel])
+
+    useEffect(() => {
+        localStorage.setItem('superAdmin_temperature', temperature.toString())
+    }, [temperature])
+
+    // 🔥 Keyboard shortcuts handler
+    useEffect(() => {
+        const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+            // Don't trigger shortcuts when typing in inputs
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+                return
+            }
+
+            // Ctrl/Cmd + B: Toggle sidebar
+            if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+                e.preventDefault()
+                toggleSidebar()
+            }
+
+            // Ctrl/Cmd + N: New conversation
+            if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+                e.preventDefault()
+                createNewConversation()
+            }
+
+            // Ctrl/Cmd + ,: Open settings (only if settings are enabled)
+            if (FEATURE_FLAGS.SHOW_SETTINGS && (e.ctrlKey || e.metaKey) && e.key === ',') {
+                e.preventDefault()
+                setShowSettingsModal(true)
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+        // FEATURE_FLAGS.SHOW_SETTINGS is a constant, no need to include in dependencies
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [toggleSidebar, createNewConversation, setShowSettingsModal])
 
     // Auto-open sidebar on desktop
     useEffect(() => {
@@ -188,6 +349,36 @@ const SuperAdminChatPage = () => {
         return () => window.removeEventListener('resize', handleResize)
     }, [])
 
+    // 🔥 Focus management for settings modal
+    useEffect(() => {
+        if (showSettingsModal && FEATURE_FLAGS.SHOW_SETTINGS && settingsModalRef.current) {
+            const firstInput = settingsModalRef.current.querySelector('button, input, select') as HTMLElement
+            if (firstInput) {
+                setTimeout(() => firstInput.focus(), 100)
+            }
+        }
+    }, [showSettingsModal, FEATURE_FLAGS.SHOW_SETTINGS])
+
+    // 🔥 Auto-resize textarea based on content
+    useEffect(() => {
+        if (textareaRef.current) {
+            const textarea = textareaRef.current
+            // Reset height to auto to get accurate scrollHeight
+            textarea.style.height = 'auto'
+            // Calculate new height (min: 40px, max: 200px)
+            const scrollHeight = Math.min(textarea.scrollHeight, 200) // max-height: 200px
+            const newHeight = scrollHeight > 40 ? scrollHeight : 40 // min-height: 40px
+            textarea.style.height = `${newHeight}px`
+            
+            // Show scrollbar only if content exceeds max-height
+            if (textarea.scrollHeight > 200) {
+                textarea.style.overflowY = 'auto'
+            } else {
+                textarea.style.overflowY = 'hidden'
+            }
+        }
+    }, [newMessage])
+
     // Development mode: API might not be available
     const isDevelopment = process.env.NODE_ENV === 'development'
 
@@ -199,25 +390,6 @@ const SuperAdminChatPage = () => {
                     behavior: 'smooth'
                 })
             }
-        }, [])
-        
-        // 🔥 Typewriter Effect Function
-        const startTypewriter = useCallback((messageId: string, fullText: string) => {
-            let currentIndex = 0
-            const speed = 30 // milliseconds per character
-            
-            const type = () => {
-                if (currentIndex < fullText.length) {
-                    setTypewriterMessages(prev => ({
-                        ...prev,
-                        [messageId]: fullText.substring(0, currentIndex + 1)
-                    }))
-                    currentIndex++
-                    setTimeout(type, speed)
-                }
-            }
-            
-            type()
         }, [])
         
         // 🔥 Typewriter Cursor Component
@@ -253,10 +425,6 @@ const SuperAdminChatPage = () => {
         }
     }, [selectedConversation?.messages, scrollToBottom])
     
-    const toggleSidebar = () => {
-        setIsSidebarOpen(!isSidebarOpen)
-    }
-
     // 🔥 Toggle sidebar collapse/expand
     const toggleSidebarCollapse = () => {
         setIsSidebarCollapsed(!isSidebarCollapsed)
@@ -277,7 +445,9 @@ const SuperAdminChatPage = () => {
                 messages: [],
                 created_at: conv.created_at,
                 updated_at: conv.updated_at,
-                rag_type: conv.type === 'Agentic' ? 'agentic' : 'simple' // Map backend type to rag_type
+                rag_type: conv.type === 'Agentic' ? 'agentic' : 'simple', // Map backend type to rag_type
+                model_name: conv.model_name,
+                temperature: conv.temperature
             }))
 
             setConversations(formattedConversations)
@@ -292,14 +462,83 @@ const SuperAdminChatPage = () => {
         }
     }, [user?.id, isDevelopment])
 
+    // 🔥 Load available models from API
+    const loadAvailableModels = useCallback(async () => {
+        try {
+            const modelData = await chatService.getAvailableModels()
+            
+            // Convert API models to our format and merge with fallback data
+            const formattedModels: ModelInfo[] = modelData.models.map(model => {
+                // Find matching fallback model to get detailed_description, speed, and empty_chunks
+                const fallbackModel = FALLBACK_MODELS.find(fm => fm.id === model.id)
+                
+                // 🔥 Detect provider based on model ID if provider is incorrect
+                let provider = model.provider
+                if (model.id.startsWith('ollama:')) {
+                    provider = 'Ollama'
+                } else if (model.id.startsWith('google/') || model.id.includes('gemini')) {
+                    provider = 'OpenRouter'
+                } else if (model.id.startsWith('deepseek/') || model.id.includes('deepseek')) {
+                    provider = 'OpenRouter'
+                } else if (model.id.startsWith('x-ai/') || model.id.includes('grok')) {
+                    provider = 'OpenRouter'
+                } else if (model.id.startsWith('qwen/') || model.id.includes('qwen')) {
+                    provider = 'OpenRouter'
+                } else if (model.id.startsWith('minimax/') || model.id.includes('minimax')) {
+                    provider = 'OpenRouter'
+                } else if (model.id.startsWith('gpt-') || model.id.includes('gpt')) {
+                    provider = 'OpenAI'
+                }
+                
+                return {
+                    id: model.id,
+                    name: model.name,
+                    provider: provider, // Use detected provider
+                    description: model.description,
+                    detailed_description: (model as any).detailed_description || fallbackModel?.detailed_description || model.description, // Use fallback detailed_description if available
+                    category: model.category,
+                    speed: model.speed || fallbackModel?.speed, // Use fallback speed if API doesn't provide it
+                    empty_chunks: model.empty_chunks || fallbackModel?.empty_chunks // Use fallback empty_chunks if API doesn't provide it
+                }
+            })
+            
+            setAvailableModels(formattedModels)
+            
+            // Set default model if current selection is not available
+            const defaultModel = modelData.default_model || 'google/gemini-2.5-flash'
+            if (!formattedModels.find(m => m.id === selectedModel)) {
+                setSelectedModel(defaultModel)
+            }
+        } catch (error: any) {
+            console.error('Failed to load models from API, using fallback:', error)
+            // Keep fallback models
+            setAvailableModels(FALLBACK_MODELS)
+        }
+    }, [selectedModel])
+
     useEffect(() => {
         if (user?.id) {
             loadConversations()
+            loadAvailableModels()  // 🔥 Load models from API
         }
-    }, [user?.id, loadConversations])
+    }, [user?.id, loadConversations, loadAvailableModels])
 
     const handleSendMessage = async () => {
-        if (newMessage.trim() === '' || !selectedConversation) return
+        if (newMessage.trim() === '') return
+
+        // 🔥 Auto-create conversation if none selected
+        let currentConversation = selectedConversation
+        if (!currentConversation) {
+            const newConv: Conversation = {
+                id: `new-${Date.now()}`,
+                title: newMessage.trim().slice(0, 30) + (newMessage.trim().length > 30 ? '...' : ''),
+                messages: [],
+                rag_type: ragType
+            }
+            setConversations(prev => [newConv, ...prev])
+            setSelectedConversation(newConv)
+            currentConversation = newConv
+        }
 
         setIsLoading(true)
         setIsThinking(true)  // 🔥 Start thinking state
@@ -315,11 +554,11 @@ const SuperAdminChatPage = () => {
             }
 
             const tempConversation = {
-                ...selectedConversation,
-                messages: [...selectedConversation.messages, userMessage],
-                title: selectedConversation.messages.length === 0
+                ...currentConversation,
+                messages: [...currentConversation.messages, userMessage],
+                title: currentConversation.messages.length === 0
                     ? messageContent.slice(0, 30) + (messageContent.length > 30 ? '...' : '')
-                    : selectedConversation.title,
+                    : currentConversation.title,
                 rag_type: ragType
             }
 
@@ -341,7 +580,15 @@ const SuperAdminChatPage = () => {
 
             addAssistantPlaceholder();
 
-            const currentConvId = selectedConversation.id.startsWith('new-') ? undefined : selectedConversation.id;
+            const currentConvId = currentConversation.id.startsWith('new-') ? undefined : currentConversation.id;
+            const currentConvTempId = currentConversation.id; // 🔥 Store temp ID for callback use
+            conversationIdRef.current = undefined; // 🔥 Reset for this message
+            
+            // 🔥 Initialize typewriterMessages for the new assistant message
+            setTypewriterMessages(prev => ({
+                ...prev,
+                [assistantTempId]: ''
+            }));
 
             await chatService.sendAdminMessageStream(
                             currentConvId,
@@ -352,15 +599,18 @@ const SuperAdminChatPage = () => {
             
                                 if (evt.type === 'init') {
                                     // Set conversation ID if it was a new chat
-                                    if (!currentConvId && evt.conversation_id) {
-                                        setConversations(prev =>
-                                            prev.map(conv =>
-                                                conv.id === selectedConversation.id
-                                                    ? { ...conv, id: evt.conversation_id }
-                                                    : conv
-                                            )
-                                        );
-                                        setSelectedConversation(prev => prev ? ({ ...prev, id: evt.conversation_id }) : prev);
+                                    if (evt.conversation_id) {
+                                        conversationIdRef.current = evt.conversation_id; // 🔥 Store for later use
+                                        if (!currentConvId) {
+                                            setConversations(prev =>
+                                                prev.map(conv =>
+                                                    conv.id === currentConvTempId
+                                                        ? { ...conv, id: evt.conversation_id }
+                                                        : conv
+                                                )
+                                            );
+                                            setSelectedConversation(prev => prev ? ({ ...prev, id: evt.conversation_id }) : prev);
+                                        }
                                     }
                                 }
             
@@ -389,18 +639,22 @@ const SuperAdminChatPage = () => {
                                         const currentMessage = updated.messages.find(m => m.id === assistantTempId);
                                         
                                         if (currentMessage) {
-                                            // Start typewriter effect for new messages
+                                            // Accumulate content from chunks
                                             const newContent = (currentMessage.content || '') + (evt.content || '');
                                             
-                                            // Initialize typewriter if this is the first chunk
-                                            if (!currentMessage.content && evt.content) {
-                                                setTypewriterMessages(prev => ({
-                                                    ...prev,
-                                                    [assistantTempId]: ''
-                                                }));
-                                                startTypewriter(assistantTempId, newContent);
-                                            }
+                                            // 🔥 Real-time streaming: Update typewriterMessages directly for immediate display
+                                            setTypewriterMessages(prevTypewriter => {
+                                                // Get current content from typewriterMessages or from message content
+                                                const currentTypewriterContent = prevTypewriter[assistantTempId] || '';
+                                                // Append new chunk content
+                                                const updatedContent = currentTypewriterContent + (evt.content || '');
+                                                return {
+                                                    ...prevTypewriter,
+                                                    [assistantTempId]: updatedContent
+                                                };
+                                            });
                                             
+                                            // Update message content
                                             updated.messages = updated.messages.map(m =>
                                                 m.id === assistantTempId
                                                     ? { ...m, content: newContent }
@@ -409,18 +663,29 @@ const SuperAdminChatPage = () => {
                                         }
                                         return updated;
                                     });
+                                    
+                                    // Auto-scroll to bottom during streaming
+                                    setTimeout(() => scrollToBottom(), 50);
                                 }
             
                                 if (evt.type === 'complete') {
                                     setSelectedConversation(prev => {
                                         if (!prev) return prev;
                                         const updated = { ...prev };
+                                        const finalContent = evt.full_response || updated.messages.find(m => m.id === assistantTempId)?.content || '';
+                                        
+                                        // 🔥 Update typewriterMessages with final content
+                                        setTypewriterMessages(prev => ({
+                                            ...prev,
+                                            [assistantTempId]: finalContent
+                                        }));
+                                        
                                         updated.messages = updated.messages.map(m =>
                                             m.id === assistantTempId
                                                 ? {
                                                     ...m,
                                                     id: evt.message_id || assistantTempId,
-                                                    content: evt.full_response || m.content,
+                                                    content: finalContent,
                                                     complexity_fa: evt.complexity_fa,
                                                     model: evt.model,
                                                     metadata: {
@@ -436,21 +701,32 @@ const SuperAdminChatPage = () => {
                                     setIsLoading(false);
                                     
                                     // 🔥 Refresh conversations list after completion
-                                    const finalConvId = evt.conversation_id || currentConvId;
+                                    // Use conversation_id from complete event, or from init event (stored in ref), or currentConvId
+                                    const finalConvId = evt.conversation_id || conversationIdRef.current || currentConvId;
                                     console.log('🔍 DEBUG: Starting conversation refresh...', {
                                         finalConvId,
                                         evt_conversation_id: evt.conversation_id,
+                                        conversationIdRef_current: conversationIdRef.current,
                                         currentConvId,
                                         evt_rag_type: evt.rag_type
                                     });
                                     
                                     if (finalConvId) {
+                                        // 🔥 Prevent duplicate refresh calls using ref
+                                        if (refreshInProgressRef.current.has(finalConvId)) {
+                                            console.log('⏭️ Refresh already in progress for:', finalConvId);
+                                            return;
+                                        }
+                                        
+                                        refreshInProgressRef.current.add(finalConvId);
+                                        
                                         setTimeout(async () => {
                                             try {
                                                 console.log('📡 Fetching conversation from server:', finalConvId);
                                                 const updatedConv = await chatService.getConversation(finalConvId);
                                                 console.log('📥 Server response:', updatedConv);
                                                 
+                                                // 🔥 Update both conversations list and selectedConversation in a single batch
                                                 setConversations(prev => {
                                                     console.log('📝 Current conversations before update:', prev.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
                                                     
@@ -484,20 +760,26 @@ const SuperAdminChatPage = () => {
                                                     }
                                                 });
                                                 
+                                                // Update selectedConversation
                                                 setSelectedConversation(prev => {
                                                     if (!prev) return prev;
-                                                    const updated = {
-                                                        ...prev,
-                                                        title: updatedConv.title || prev.title,
-                                                        rag_type: updatedConv.rag_type || evt.rag_type
-                                                    };
-                                                    console.log('🎯 Updated selectedConversation:', {
-                                                        old_title: prev.title,
-                                                        new_title: updated.title,
-                                                        old_rag_type: prev.rag_type,
-                                                        new_rag_type: updated.rag_type
-                                                    });
-                                                    return updated;
+                                                    // Only update if this is the current conversation
+                                                    if (prev.id === finalConvId || prev.id === currentConvTempId) {
+                                                        const updated = {
+                                                            ...prev,
+                                                            id: finalConvId, // Ensure we use the final ID
+                                                            title: updatedConv.title || prev.title,
+                                                            rag_type: updatedConv.rag_type || evt.rag_type
+                                                        };
+                                                        console.log('🎯 Updated selectedConversation:', {
+                                                            old_title: prev.title,
+                                                            new_title: updated.title,
+                                                            old_rag_type: prev.rag_type,
+                                                            new_rag_type: updated.rag_type
+                                                        });
+                                                        return updated;
+                                                    }
+                                                    return prev;
                                                 });
                                                 
                                                 console.log('✅ Conversation updated successfully:', {
@@ -505,8 +787,13 @@ const SuperAdminChatPage = () => {
                                                     title: updatedConv.title,
                                                     rag_type: updatedConv.rag_type || evt.rag_type
                                                 });
+                                                
+                                                // Remove from in-progress set after completion
+                                                refreshInProgressRef.current.delete(finalConvId);
                                             } catch (error) {
                                                 console.error('❌ Failed to refresh conversation:', error);
+                                                // Remove from in-progress set on error
+                                                refreshInProgressRef.current.delete(finalConvId);
                                             }
                                         }, 500);
                                     } else {
@@ -549,29 +836,39 @@ const SuperAdminChatPage = () => {
         }
     }
 
-    const createNewConversation = () => {
-        const newConv: Conversation = {
-            id: `new-${Date.now()}`,
-            title: 'گفتگوی جدید',
-            messages: [],
-            rag_type: ragType
-        }
-        setConversations(prev => [newConv, ...prev])
-        setSelectedConversation(newConv)
-    }
-
     const deleteConversation = async (convId: string) => {
+        // 🔥 Show confirmation first
+        if (deleteConfirmId !== convId) {
+            setDeleteConfirmId(convId)
+            return
+        }
+
+        // Reset confirmation state
+        setDeleteConfirmId(null)
+
         if (convId.startsWith('new-')) {
             // Just remove from local state if it's a new conversation
             setConversations(prev => prev.filter(c => c.id !== convId))
             if (selectedConversation?.id === convId) {
                 setSelectedConversation(null)
             }
+            toast.success('گفتگو حذف شد')
             return
         }
 
         try {
-            await chatService.deleteConversation(convId)
+            // Try to delete from API, but if it fails (405), just delete locally
+            try {
+                await chatService.deleteConversation(convId)
+            } catch (apiError: any) {
+                // If API doesn't support DELETE (405 Method Not Allowed), just delete locally
+                if (apiError.response?.status === 405) {
+                    console.warn('Delete conversation endpoint not available, deleting locally only')
+                } else {
+                    throw apiError // Re-throw other errors
+                }
+            }
+            
             setConversations(prev => prev.filter(c => c.id !== convId))
             if (selectedConversation?.id === convId) {
                 setSelectedConversation(null)
@@ -581,6 +878,46 @@ const SuperAdminChatPage = () => {
             console.error('Failed to delete conversation:', error)
             toast.error('خطا در حذف گفتگو')
         }
+    }
+
+    // 🔥 Copy message to clipboard
+    const copyMessage = async (content: string, messageId: string) => {
+        try {
+            await navigator.clipboard.writeText(content)
+            setCopiedMessageId(messageId)
+            toast.success('پیام کپی شد')
+            setTimeout(() => setCopiedMessageId(null), 2000)
+        } catch (error) {
+            console.error('Failed to copy message:', error)
+            toast.error('خطا در کپی پیام')
+        }
+    }
+
+    // 🔥 Retry failed message
+    const retryMessage = async (messageId: string) => {
+        if (!selectedConversation) return
+        
+        const message = selectedConversation.messages.find(m => m.id === messageId)
+        if (!message || message.role !== 'user') return
+
+        // Find the previous user message
+        const messageIndex = selectedConversation.messages.findIndex(m => m.id === messageId)
+        const userMessage = messageIndex >= 0 ? selectedConversation.messages[messageIndex] : null
+        
+        if (!userMessage || userMessage.role !== 'user') return
+
+        // Remove the failed assistant message if exists
+        const failedAssistantIndex = messageIndex + 1
+        if (failedAssistantIndex < selectedConversation.messages.length) {
+            const updatedMessages = selectedConversation.messages.filter((_, idx) => idx !== failedAssistantIndex)
+            setSelectedConversation({ ...selectedConversation, messages: updatedMessages })
+        }
+
+        // Resend the message
+        setNewMessage(userMessage.content)
+        setTimeout(() => {
+            handleSendMessage()
+        }, 100)
     }
 
     const loadConversationMessages = async (conversationId: string) => {
@@ -635,6 +972,22 @@ const SuperAdminChatPage = () => {
 
     const handleConversationClick = async (conversation: Conversation) => {
         setSelectedConversation(conversation)
+        
+        // 🔥 Load conversation details to get model_name and temperature
+        try {
+            const convDetails = await chatService.getConversation(conversation.id)
+            if (convDetails.model_name) {
+                setSelectedModel(convDetails.model_name)
+            }
+            if (convDetails.temperature !== undefined) {
+                setTemperature(convDetails.temperature)
+            }
+            if (convDetails.rag_type) {
+                setRagType(convDetails.rag_type as AdminRAGType)
+            }
+        } catch (error) {
+            console.error('Failed to load conversation details:', error)
+        }
         
         // Load messages if not already loaded
         if (conversation.messages.length === 0) {
@@ -708,28 +1061,107 @@ const SuperAdminChatPage = () => {
                 />
             )}
             
-            {/* ⚙️ Settings Modal */}
-            {showSettingsModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSettingsModal(false)}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                {/* Header */}
+            {/* 🔥 Keyboard Shortcuts Modal */}
+            {showKeyboardShortcuts && (
+                <div 
+                    className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" 
+                    onClick={() => setShowKeyboardShortcuts(false)}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="shortcuts-modal-title"
+                >
+                    <div 
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-y-auto" 
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white p-6 rounded-t-2xl">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <Settings className="w-6 h-6" />
-                                    <h2 className="text-xl font-bold">تنظیمات پیشرفته چت</h2>
+                                    <HelpCircle className="w-6 h-6" />
+                                    <h2 id="shortcuts-modal-title" className="text-xl font-bold">راهنمای کیبورد شورتکات</h2>
+                                </div>
+                                <button
+                                    onClick={() => setShowKeyboardShortcuts(false)}
+                                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                                    aria-label="بستن راهنما"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <span className="text-sm text-gray-700">ارسال پیام</span>
+                                    <kbd className="px-2 py-1 bg-white border border-gray-300 rounded text-xs font-mono">Enter</kbd>
+                                </div>
+                                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <span className="text-sm text-gray-700">خط جدید</span>
+                                    <kbd className="px-2 py-1 bg-white border border-gray-300 rounded text-xs font-mono">Shift + Enter</kbd>
+                                </div>
+                                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <span className="text-sm text-gray-700">باز/بستن سایدبار</span>
+                                    <kbd className="px-2 py-1 bg-white border border-gray-300 rounded text-xs font-mono">Ctrl + B</kbd>
+                                </div>
+                                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <span className="text-sm text-gray-700">گفتگوی جدید</span>
+                                    <kbd className="px-2 py-1 bg-white border border-gray-300 rounded text-xs font-mono">Ctrl + N</kbd>
+                                </div>
+                                {/* 🔧 Settings shortcut - به صورت موقت مخفی شده */}
+                                {FEATURE_FLAGS.SHOW_SETTINGS && (
+                                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                        <span className="text-sm text-gray-700">باز کردن تنظیمات</span>
+                                        <kbd className="px-2 py-1 bg-white border border-gray-300 rounded text-xs font-mono">Ctrl + ,</kbd>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-4 rounded-b-2xl">
+                            <Button
+                                onClick={() => setShowKeyboardShortcuts(false)}
+                                className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                            >
+                                بستن
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* 🔧 ⚙️ Settings Modal - به صورت موقت مخفی شده */}
+            {FEATURE_FLAGS.SHOW_SETTINGS && showSettingsModal && (
+                <div 
+                    className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" 
+                    onClick={() => setShowSettingsModal(false)}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="settings-modal-title"
+                >
+                    <div 
+                        ref={settingsModalRef}
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto overflow-x-hidden flex flex-col" 
+                        onClick={(e) => e.stopPropagation()}
+                        tabIndex={-1}
+                    >
+                {/* Header */}
+                        <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white p-4 md:p-6 rounded-t-2xl z-10">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 md:gap-3">
+                                    <Settings className="w-5 h-5 md:w-6 md:h-6" />
+                                    <h2 id="settings-modal-title" className="text-lg md:text-xl font-bold">تنظیمات پیشرفته چت</h2>
                                 </div>
                                 <button
                                     onClick={() => setShowSettingsModal(false)}
-                                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                                    className="p-1.5 md:p-2 hover:bg-white/20 rounded-lg transition-colors"
+                                    aria-label="بستن تنظیمات"
                                 >
-                                    <X className="w-5 h-5" />
+                                    <X className="w-4 h-4 md:w-5 md:h-5" />
                                 </button>
                             </div>
                     </div>
 
                         {/* Content */}
-                        <div className="p-6 space-y-6">
+                        <div className="p-4 md:p-6 space-y-5 md:space-y-6 overflow-x-hidden flex-1">
                     {/* RAG Type Selection */}
                             <div>
                                 <label className="block text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
@@ -776,52 +1208,172 @@ const SuperAdminChatPage = () => {
                                 </div>
                             </div>
 
-                            {/* Model Selection */}
+                            {/* Model Selection - 🎨 Improved UI */}
                             <div>
                                 <label className="block text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
                                     <Cpu className="w-4 h-4 text-purple-600" />
                                     انتخاب مدل هوش مصنوعی
-                            </label>
-                                <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                                    {AVAILABLE_MODELS.map((model) => (
-                                        <button
-                                            key={model.id}
-                                            onClick={() => setSelectedModel(model.id)}
-                                            className={`p-3 rounded-lg border transition-all text-right ${
-                                                selectedModel === model.id
-                                                    ? 'border-purple-500 bg-gradient-to-r from-purple-50 to-blue-50 shadow-sm'
-                                                    : 'border-gray-200 hover:border-purple-300 hover:bg-gray-50'
-                                            }`}
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <span className={`font-bold text-sm ${
-                                                            selectedModel === model.id ? 'text-purple-900' : 'text-gray-800'
-                                                        }`}>
-                                                            {model.name}
-                                                        </span>
-                                                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                                            model.provider === 'Ollama' 
-                                                                ? 'bg-green-100 text-green-700'
-                                                                : model.provider === 'OpenAI'
-                                                                ? 'bg-blue-100 text-blue-700'
-                                                                : 'bg-gray-100 text-gray-700'
-                                                        }`}>
-                                                            {model.provider}
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-xs text-gray-600">{model.description}</p>
-                                                </div>
-                                                {selectedModel === model.id && (
-                                                    <div className="w-5 h-5 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
-                                                        <div className="w-2 h-2 bg-white rounded-full" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </button>
-                                    ))}
+                                </label>
+                                
+                                {/* Search Box */}
+                                <div className="mb-3">
+                                    <div className="relative">
+                                        <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                                        <input
+                                            type="text"
+                                            placeholder="جستجو در مدل‌ها..."
+                                            value={modelSearchQuery}
+                                            onChange={(e) => setModelSearchQuery(e.target.value)}
+                                            className="w-full pr-10 pl-4 py-2.5 md:py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                                        />
+                                    </div>
                                 </div>
+
+                                {/* Models Grid */}
+                                <div className="grid grid-cols-1 gap-2.5 md:gap-3 max-h-[280px] md:max-h-[300px] overflow-y-auto overflow-x-hidden p-0.5 md:p-1 scrollbar-thin scrollbar-thumb-purple-200 scrollbar-track-gray-100">
+                                    {availableModels
+                                        .filter(model => 
+                                            !modelSearchQuery || 
+                                            model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                                            model.provider.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                                            model.description.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                                            (model.detailed_description && model.detailed_description.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                                        )
+                                        .map((model) => {
+                                            const isSelected = selectedModel === model.id
+                                            const getProviderColor = (provider: string) => {
+                                                const providerLower = provider.toLowerCase().trim()
+                                                switch(providerLower) {
+                                                    case 'ollama': return 'bg-orange-100 text-orange-800 border-orange-300'
+                                                    case 'openai': return 'bg-blue-100 text-blue-800 border-blue-300'
+                                                    case 'openrouter': return 'bg-violet-100 text-violet-800 border-violet-300'
+                                                    default: return 'bg-slate-100 text-slate-700 border-slate-300'
+                                                }
+                                            }
+                                            
+                                            return (
+                                                <button
+                                                    key={model.id}
+                                                    onClick={() => setSelectedModel(model.id)}
+                                                    className={`group relative p-3 md:p-4 rounded-lg md:rounded-xl border-2 transition-all duration-200 text-right w-full ${
+                                                        isSelected
+                                                            ? 'border-purple-500 bg-gradient-to-br from-purple-50 via-blue-50 to-purple-50 shadow-md shadow-purple-200/40 ring-2 ring-purple-200 ring-offset-1'
+                                                            : 'border-gray-200 bg-white hover:border-purple-300 hover:bg-gradient-to-br hover:from-gray-50 hover:to-purple-50/30 hover:shadow-sm'
+                                                    }`}
+                                                >
+                                                    {/* Selected Indicator */}
+                                                    {isSelected && (
+                                                        <div className="absolute top-2.5 left-2.5 flex flex-col items-center gap-1 z-10">
+                                                            <div className="w-5 h-5 md:w-6 md:h-6 bg-gradient-to-br from-purple-600 to-blue-600 rounded-full flex items-center justify-center shadow-sm">
+                                                                <Check className="w-3 h-3 md:w-4 md:h-4 text-white" />
+                                                            </div>
+                                                            <span className={`text-[9px] md:text-[10px] font-medium px-1.5 py-0.5 rounded-md whitespace-nowrap ${
+                                                                getProviderColor(model.provider)
+                                                            }`}>
+                                                                {model.provider}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <div className="flex items-start justify-between gap-2.5 md:gap-3 pr-0.5 md:pr-1">
+                                                        <div className="flex-1 min-w-0 overflow-hidden">
+                                                            {/* Model Name and Provider */}
+                                                            <div className="flex items-center gap-1.5 md:gap-2 mb-1.5 md:mb-2 flex-wrap">
+                                                                <div className="flex items-center gap-1.5 md:gap-2 flex-1 min-w-0">
+                                                                    <Bot className={`w-3.5 h-3.5 md:w-4 md:h-4 flex-shrink-0 ${
+                                                                        isSelected ? 'text-purple-600' : 'text-gray-400'
+                                                                    }`} />
+                                                                    <span className={`font-bold text-sm md:text-base break-words leading-tight ${
+                                                                        isSelected ? 'text-purple-900' : 'text-gray-900'
+                                                                    }`}>
+                                                                        {model.name}
+                                                                    </span>
+                                                                </div>
+                                                                {!isSelected && (
+                                                                    <span className={`text-[10px] md:text-xs px-2 md:px-2.5 py-0.5 md:py-1 rounded-full font-medium border flex-shrink-0 ${
+                                                                        getProviderColor(model.provider)
+                                                                    }`}>
+                                                                        {model.provider}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            
+                                                            {/* Description */}
+                                                            {/* {model.description && (
+                                                                <p className={`text-[11px] md:text-xs mb-1.5 md:mb-2 break-words leading-relaxed ${
+                                                                    isSelected ? 'text-gray-700' : 'text-gray-600'
+                                                                }`}>
+                                                                    {model.description}
+                                                                </p>
+                                                            )} */}
+                                                            
+                                                            {/* Detailed Description */}
+                                                            {model.detailed_description && (
+                                                                <div className={`mt-2 pt-2 border-t border-gray-200 ${isSelected ? 'border-purple-200' : ''}`}>
+                                                                    <div className="flex items-start gap-1.5 md:gap-2">
+                                                                        <Sparkles className={`w-3 h-3 md:w-3.5 md:h-3.5 mt-0.5 flex-shrink-0 ${
+                                                                            isSelected ? 'text-purple-500' : 'text-gray-400'
+                                                                        }`} />
+                                                                        <p className={`text-[10px] md:text-xs break-words leading-relaxed flex-1 ${
+                                                                            isSelected ? 'text-gray-600' : 'text-gray-500'
+                                                                        }`}>
+                                                                            {model.detailed_description}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            
+                                                            {/* Speed and Empty Chunks Info */}
+                                                            {((model.speed && model.speed !== 'N/A' && model.speed.trim() !== '') || 
+                                                              (model.empty_chunks && model.empty_chunks !== 'N/A' && model.empty_chunks.trim() !== '')) && (
+                                                                <div className="flex items-center gap-2 md:gap-3 mt-1.5 md:mt-2 flex-wrap">
+                                                                    {model.speed && model.speed !== 'N/A' && model.speed.trim() !== '' && (
+                                                                        <div className="flex items-center gap-1">
+                                                                            <Zap className="w-2.5 h-2.5 md:w-3 md:h-3 text-yellow-500" />
+                                                                            <span className="text-[10px] md:text-xs text-gray-600">{model.speed}</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {model.empty_chunks && model.empty_chunks !== 'N/A' && model.empty_chunks.trim() !== '' && (
+                                                                        <div className="flex items-center gap-1">
+                                                                            <AlertCircle className={`w-2.5 h-2.5 md:w-3 md:h-3 ${
+                                                                                model.empty_chunks.includes('0%') ? 'text-green-500' : 'text-orange-500'
+                                                                            }`} />
+                                                                            <span className={`text-[10px] md:text-xs ${
+                                                                                model.empty_chunks.includes('0%') ? 'text-green-600' : 'text-orange-600'
+                                                                            }`}>
+                                                                                {model.empty_chunks}
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        
+                                                        {/* Radio Button Indicator */}
+                                                        {!isSelected && (
+                                                            <div className="w-4 h-4 md:w-5 md:h-5 border-2 border-gray-300 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:border-purple-400 transition-colors">
+                                                                <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-transparent rounded-full group-hover:bg-purple-400 transition-colors" />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </button>
+                                            )
+                                        })}
+                                </div>
+                                
+                                {/* Empty State */}
+                                {availableModels.filter(model => 
+                                    !modelSearchQuery || 
+                                    model.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                                    model.provider.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                                    model.description.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+                                    (model.detailed_description && model.detailed_description.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                                ).length === 0 && (
+                                    <div className="text-center py-8 text-gray-500">
+                                        <AlertCircle className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                                        <p className="text-sm">مدلی یافت نشد</p>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Temperature Control */}
@@ -863,8 +1415,17 @@ const SuperAdminChatPage = () => {
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <span className="text-gray-600">مدل:</span>
-                                        <span className="font-bold text-purple-900">
-                                            {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || selectedModel}
+                                        <span className="font-bold text-purple-900" title={(() => {
+                                            const modelInfo = availableModels.find(m => m.id === selectedModel);
+                                            return modelInfo?.detailed_description || modelInfo?.description || selectedModel;
+                                        })()}>
+                                            {(() => {
+                                                const modelInfo = availableModels.find(m => m.id === selectedModel);
+                                                if (modelInfo) {
+                                                    return `${modelInfo.name} (${modelInfo.provider})`;
+                                                }
+                                                return selectedModel;
+                                            })()}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
@@ -876,11 +1437,11 @@ const SuperAdminChatPage = () => {
                         </div>
 
                         {/* Footer */}
-                        <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-4 rounded-b-2xl flex gap-3">
+                        <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-3 md:p-4 rounded-b-2xl flex gap-2 md:gap-3 z-10">
                             <Button
                                 onClick={() => setShowSettingsModal(false)}
                                 variant="secondary"
-                                className="flex-1"
+                                className="flex-1 text-sm md:text-base"
                             >
                                 بستن
                             </Button>
@@ -889,7 +1450,7 @@ const SuperAdminChatPage = () => {
                                     setShowSettingsModal(false)
                                     // تنظیمات ذخیره می‌شوند و در ارسال پیام بعدی استفاده می‌شوند
                                 }}
-                                className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                                className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-sm md:text-base"
                             >
                                 ✅ ذخیره تنظیمات
                             </Button>
@@ -961,48 +1522,57 @@ const SuperAdminChatPage = () => {
                             <Button
                                 onClick={createNewConversation}
                                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-md mb-3"
+                                aria-label="ایجاد گفتگوی جدید"
                             >
                                 <Plus className="w-4 h-4 mr-2" />
                                 گفتگوی جدید
                             </Button>
 
-                            {/* Settings Button */}
-                            <Button
-                                onClick={() => setShowSettingsModal(true)}
-                                variant="secondary"
-                                className="w-full mb-4 flex items-center justify-center gap-2"
-                            >
-                                <Settings className="w-4 h-4" />
-                                تنظیمات پیشرفته
-                            </Button>
+                            {/* 🔧 Settings Button - به صورت موقت مخفی شده */}
+                            {FEATURE_FLAGS.SHOW_SETTINGS && (
+                                <>
+                                    <Button
+                                        onClick={() => setShowSettingsModal(true)}
+                                        variant="secondary"
+                                        className="w-full mb-4 flex items-center justify-center gap-2"
+                                        aria-label="باز کردن تنظیمات پیشرفته"
+                                    >
+                                        <Settings className="w-4 h-4" />
+                                        تنظیمات پیشرفته
+                                    </Button>
 
-                            {/* Current Settings Display */}
-                            <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-                                <p className="text-xs text-gray-600 mb-2 font-medium flex items-center gap-1">
-                                    <Brain className="w-3 h-3" />
-                                    تنظیمات فعلی:
-                                </p>
-                                <div className="space-y-1 text-xs text-gray-700">
-                                    <div className="flex items-center justify-between">
-                                        <span>RAG:</span>
-                                        <span className={`font-bold ${
-                                            ragType === 'agentic' ? 'text-purple-700' : 'text-blue-700'
-                                        }`}>
-                                            {ragType === 'agentic' ? 'پیشرفته' : 'ساده'}
-                                        </span>
+                                    {/* Current Settings Display */}
+                                    <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+                                        <p className="text-xs text-gray-600 mb-2 font-medium flex items-center gap-1">
+                                            <Brain className="w-3 h-3" />
+                                            تنظیمات فعلی:
+                                        </p>
+                                        <div className="space-y-1 text-xs text-gray-700">
+                                            <div className="flex items-center justify-between">
+                                                <span>RAG:</span>
+                                                <span className={`font-bold ${
+                                                    ragType === 'agentic' ? 'text-purple-700' : 'text-blue-700'
+                                                }`}>
+                                                    {ragType === 'agentic' ? 'پیشرفته' : 'ساده'}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span>مدل:</span>
+                                                <span className="font-bold text-purple-700" title={(() => {
+                                                    const modelInfo = availableModels.find(m => m.id === selectedModel);
+                                                    return modelInfo?.detailed_description || modelInfo?.description || 'GPT-4o Mini';
+                                                })()}>
+                                                    {availableModels.find(m => m.id === selectedModel)?.name || 'GPT-4o Mini'}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span>Temperature:</span>
+                                                <span className="font-bold text-purple-700">{temperature.toFixed(1)}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center justify-between">
-                                        <span>مدل:</span>
-                                        <span className="font-bold text-purple-700">
-                                            {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || 'GPT-4o Mini'}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span>Temperature:</span>
-                                        <span className="font-bold text-purple-700">{temperature.toFixed(1)}</span>
-                                    </div>
-                                </div>
-                            </div>
+                                </>
+                            )}
 
                             {/* Search */}
                             <div className="relative">
@@ -1013,6 +1583,7 @@ const SuperAdminChatPage = () => {
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full pr-10 pl-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                    aria-label="جستجو در گفتگوها"
                                 />
                             </div>
                         </>
@@ -1083,9 +1654,17 @@ const SuperAdminChatPage = () => {
                                                 )}
                                                 {/* Model */}
                                                 {conversation.messages.length > 0 && conversation.messages[conversation.messages.length - 1].model && (
-                                                    <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded truncate max-w-[120px]">
-                                                        {AVAILABLE_MODELS.find(m => m.id === conversation.messages[conversation.messages.length - 1].model)?.name ||
-                                                         conversation.messages[conversation.messages.length - 1].model?.split('/').pop()}
+                                                    <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded truncate max-w-[120px]" title={(() => {
+                                                        const modelInfo = availableModels.find(m => m.id === conversation.messages[conversation.messages.length - 1].model);
+                                                        return modelInfo?.detailed_description || modelInfo?.description || conversation.messages[conversation.messages.length - 1].model;
+                                                    })()}>
+                                                        {(() => {
+                                                            const modelInfo = availableModels.find(m => m.id === conversation.messages[conversation.messages.length - 1].model);
+                                                            if (modelInfo) {
+                                                                return `${modelInfo.name} (${modelInfo.provider})`;
+                                                            }
+                                                            return conversation.messages[conversation.messages.length - 1].model?.split('/').pop() || 'مدل نامشخص';
+                                                        })()}
                                                     </span>
                                                 )}
                                             </div>
@@ -1095,17 +1674,49 @@ const SuperAdminChatPage = () => {
                                                 </p>
                                             )}
                                         </div>
-                                        <Button
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                deleteConversation(conversation.id)
-                                            }}
-                                            variant="ghost"
-                                            size="sm"
-                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500 p-1"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
+                                        <div className="flex items-center gap-1">
+                                            {deleteConfirmId === conversation.id ? (
+                                                <>
+                                                    <Button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            deleteConversation(conversation.id)
+                                                        }}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-red-600 hover:text-red-700 hover:bg-red-50 p-1"
+                                                        aria-label="تأیید حذف"
+                                                    >
+                                                        <Check className="w-4 h-4" />
+                                                    </Button>
+                                                    <Button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            setDeleteConfirmId(null)
+                                                        }}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-gray-600 hover:text-gray-700 p-1"
+                                                        aria-label="لغو حذف"
+                                                    >
+                                                        <X className="w-4 h-4" />
+                                                    </Button>
+                                                </>
+                                            ) : (
+                                                <Button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        deleteConversation(conversation.id)
+                                                    }}
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500 p-1"
+                                                    aria-label="حذف گفتگو"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </Button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             ))
@@ -1168,6 +1779,7 @@ const SuperAdminChatPage = () => {
                                 variant="ghost"
                                 size="sm"
                                 className="lg:hidden text-white hover:bg-white/20"
+                                aria-label="باز/بستن منوی گفتگوها"
                             >
                                 <Menu className="w-5 h-5" />
                             </Button>
@@ -1178,6 +1790,7 @@ const SuperAdminChatPage = () => {
                                 variant="ghost"
                                 size="sm"
                                 className="hidden lg:flex text-white hover:bg-white/20"
+                                aria-label={isSidebarOpen ? "بستن سایدبار" : "باز کردن سایدبار"}
                             >
                                 {isSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
                             </Button>
@@ -1207,24 +1820,30 @@ const SuperAdminChatPage = () => {
                                         {getRagTypeIcon(ragType)}
                                         <span>{getRagTypeLabel(ragType)}</span>
                                         <span className="hidden md:inline">•</span>
-                                        <span className="hidden md:inline">
-                                            {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || 'GPT-4o Mini'}
+                                        <span className="hidden md:inline" title={(() => {
+                                            const modelInfo = availableModels.find((m: ModelInfo) => m.id === selectedModel);
+                                            return modelInfo?.detailed_description || modelInfo?.description || 'GPT-4o Mini';
+                                        })()}>
+                                            {availableModels.find((m: ModelInfo) => m.id === selectedModel)?.name || 'GPT-4o Mini'}
                                         </span>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         
-                        {/* Settings Button */}
-                        <Button
-                            onClick={() => setShowSettingsModal(true)}
-                            variant="ghost"
-                            size="sm"
-                            className="text-white hover:bg-white/20 flex items-center gap-2"
-                        >
-                            <Settings className="w-4 h-4 md:w-5 md:h-5" />
-                            <span className="hidden md:inline text-sm">تنظیمات</span>
-                        </Button>
+                        {/* 🔧 Settings Button - به صورت موقت مخفی شده */}
+                        {FEATURE_FLAGS.SHOW_SETTINGS && (
+                            <Button
+                                onClick={() => setShowSettingsModal(true)}
+                                variant="ghost"
+                                size="sm"
+                                className="text-white hover:bg-white/20 flex items-center gap-2"
+                                aria-label="باز کردن تنظیمات"
+                            >
+                                <Settings className="w-4 h-4 md:w-5 md:h-5" />
+                                <span className="hidden md:inline text-sm">تنظیمات</span>
+                            </Button>
+                        )}
                     </div>
                 </div>
 
@@ -1313,13 +1932,37 @@ const SuperAdminChatPage = () => {
 
                                         {/* Message Content */}
                                         <div className={`flex-1 min-w-0 ${message.role === 'user' ? 'text-right' : ''}`}>
-                                            <div className={`rounded-2xl px-3 py-2 md:px-5 md:py-3 ${
-                                                message.role === 'user'
+                                            <div className={`group/message rounded-2xl px-3 py-2 md:px-5 md:py-3 relative ${message.role === 'user'
                                                     ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
                                                     : message.is_failed
                                                     ? 'bg-red-50 border border-red-200 text-red-900'
                                                     : 'bg-white border border-gray-200 text-gray-900'
                                             }`}>
+                                                {/* 🔥 Message Actions */}
+                                                <div className="absolute top-2 left-2 opacity-0 group-hover/message:opacity-100 transition-opacity flex gap-1">
+                                                    {message.role === 'assistant' && message.is_failed && (
+                                                        <button
+                                                            onClick={() => retryMessage(message.id)}
+                                                            className="p-1.5 bg-white hover:bg-gray-100 rounded-lg shadow-sm border border-gray-200 transition-colors"
+                                                            aria-label="تلاش مجدد"
+                                                            title="تلاش مجدد"
+                                                        >
+                                                            <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => copyMessage(message.content, message.id)}
+                                                        className="p-1.5 bg-white hover:bg-gray-100 rounded-lg shadow-sm border border-gray-200 transition-colors"
+                                                        aria-label="کپی پیام"
+                                                        title="کپی پیام"
+                                                    >
+                                                        {copiedMessageId === message.id ? (
+                                                            <Check className="w-3.5 h-3.5 text-green-600" />
+                                                        ) : (
+                                                            <Copy className="w-3.5 h-3.5 text-gray-600" />
+                                                        )}
+                                                    </button>
+                                                </div>
                                                 {message.role === 'assistant' ? (
                                                     <div className="text-xs md:text-sm leading-relaxed">
                                                         {/* 🔥 Use typewriter content if available, otherwise use full content */}
@@ -1343,6 +1986,36 @@ const SuperAdminChatPage = () => {
                                                     <p className="text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-words">{message.content}</p>
                                                 )}
                                                 
+                                                {/* 🔥 Error Message with Retry */}
+                                                {message.role === 'assistant' && message.is_failed && (
+                                                    <div className="mt-3 pt-3 border-t border-red-200 flex items-center gap-2 text-red-600">
+                                                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                                                        <div className="flex-1">
+                                                            <p className="text-sm font-medium">خطا در ارسال پاسخ</p>
+                                                            {message.failure_reason && (
+                                                                <p className="text-xs text-red-500 mt-1">{message.failure_reason}</p>
+                                                            )}
+                                                        </div>
+                                                        <button
+                                                            onClick={() => {
+                                                                // Find the user message before this failed assistant message
+                                                                const messageIndex = selectedConversation?.messages.findIndex(m => m.id === message.id) ?? -1
+                                                                if (messageIndex > 0) {
+                                                                    const userMsg = selectedConversation?.messages[messageIndex - 1]
+                                                                    if (userMsg && userMsg.role === 'user') {
+                                                                        retryMessage(userMsg.id)
+                                                                    }
+                                                                }
+                                                            }}
+                                                            className="flex items-center gap-1 px-3 py-1.5 bg-red-100 hover:bg-red-200 rounded-lg text-sm font-medium transition-colors"
+                                                            aria-label="تلاش مجدد"
+                                                        >
+                                                            <RotateCcw className="w-4 h-4" />
+                                                            تلاش مجدد
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                
                                                 {/* Metadata: Complexity & Model */}
                                                 {message.role === 'assistant' && (message.complexity_fa || message.model) && (
                                                     <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center gap-2 text-xs">
@@ -1357,10 +2030,19 @@ const SuperAdminChatPage = () => {
                                                             </div>
                                                         )}
                                                         {message.model && (
-                                                            <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-md">
+                                                            <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 rounded-md" title={(() => {
+                                                                const modelInfo = availableModels.find(m => m.id === message.model);
+                                                                return modelInfo?.detailed_description || modelInfo?.description || message.model;
+                                                            })()}>
                                                                 <Cpu className="w-3 h-3 text-blue-600" />
                                                                 <span className="text-blue-700 font-medium">
-                                                                    {AVAILABLE_MODELS.find(m => m.id === message.model)?.name || message.model}
+                                                                    {(() => {
+                                                                        const modelInfo = availableModels.find(m => m.id === message.model);
+                                                                        if (modelInfo) {
+                                                                            return `${modelInfo.name} (${modelInfo.provider})`;
+                                                                        }
+                                                                        return message.model;
+                                                                    })()}
                                                                 </span>
                                                             </div>
                                                         )}
@@ -1481,43 +2163,57 @@ const SuperAdminChatPage = () => {
                                                                         if (!evt) return;
                                                                         
                                                                         if (evt.type === 'chunk') {
-                                                                             setSelectedConversation(prev => {
-                                                                                 if (!prev) return prev;
-                                                                                 const updated = { ...prev };
-                                                                                 const currentMessage = updated.messages.find(m => m.id === assistantTempId);
-                                                                                 
-                                                                                 if (currentMessage) {
-                                                                                     const newContent = (currentMessage.content || '') + (evt.content || '');
-                                                                                     
-                                                                                     // Initialize typewriter for detailed explanation
-                                                                                     if (!currentMessage.content && evt.content) {
-                                                                                         setTypewriterMessages(prev => ({
-                                                                                             ...prev,
-                                                                                             [assistantTempId]: ''
-                                                                                         }));
-                                                                                         startTypewriter(assistantTempId, newContent);
-                                                                                     }
-                                                                                     
-                                                                                     updated.messages = updated.messages.map(m =>
-                                                                                         m.id === assistantTempId
-                                                                                             ? { ...m, content: newContent }
-                                                                                             : m
-                                                                                     );
-                                                                                 }
-                                                                                 return updated;
-                                                                             });
-                                                                         }
+                                                                            setIsThinking(false);
+                                                                            
+                                                                            setSelectedConversation(prev => {
+                                                                                if (!prev) return prev;
+                                                                                const updated = { ...prev };
+                                                                                const currentMessage = updated.messages.find(m => m.id === assistantTempId);
+                                                                                
+                                                                                if (currentMessage) {
+                                                                                    const newContent = (currentMessage.content || '') + (evt.content || '');
+                                                                                    
+                                                                                    // 🔥 Real-time streaming: Update typewriterMessages directly
+                                                                                    setTypewriterMessages(prev => {
+                                                                                        const currentTypewriterContent = prev[assistantTempId] || currentMessage.content || '';
+                                                                                        const updatedContent = currentTypewriterContent + (evt.content || '');
+                                                                                        return {
+                                                                                            ...prev,
+                                                                                            [assistantTempId]: updatedContent
+                                                                                        };
+                                                                                    });
+                                                                                    
+                                                                                    updated.messages = updated.messages.map(m =>
+                                                                                        m.id === assistantTempId
+                                                                                            ? { ...m, content: newContent }
+                                                                                            : m
+                                                                                    );
+                                                                                }
+                                                                                return updated;
+                                                                            });
+                                                                            
+                                                                            // Auto-scroll during streaming
+                                                                            setTimeout(() => scrollToBottom(), 50);
+                                                                        }
                                                                         
                                                                         if (evt.type === 'complete') {
                                                                             setSelectedConversation(prev => {
                                                                                 if (!prev) return prev;
                                                                                 const updated = { ...prev };
+                                                                                const finalContent = evt.full_response || updated.messages.find(m => m.id === assistantTempId)?.content || '';
+                                                                                
+                                                                                // 🔥 Update typewriterMessages with final content
+                                                                                setTypewriterMessages(prev => ({
+                                                                                    ...prev,
+                                                                                    [assistantTempId]: finalContent
+                                                                                }));
+                                                                                
                                                                                 updated.messages = updated.messages.map(m =>
                                                                                     m.id === assistantTempId
                                                                                         ? {
                                                                                             ...m,
                                                                                             id: evt.message_id || assistantTempId,
-                                                                                            content: evt.full_response || m.content,
+                                                                                            content: finalContent,
                                                                                             complexity_fa: evt.complexity_fa,
                                                                                             model: evt.model,
                                                                                             confidence: evt.confidence,
@@ -1661,6 +2357,7 @@ const SuperAdminChatPage = () => {
                                 id="go-to-bottom-btn"
                                 onClick={handleGoToBottom}
                                 title="برو به آخرین پیام"
+                                aria-label="برو به آخرین پیام"
                                 className={`fixed left-20 bg-white border border-gray-300 rounded-full w-10 h-10 flex items-center justify-center cursor-pointer shadow-lg hover:shadow-xl transition-all duration-200 z-10 pointer-events-auto ${
                                     showGoToBottomBtn ? 'block' : 'hidden'
                                 }`}
@@ -1675,14 +2372,14 @@ const SuperAdminChatPage = () => {
                     )}
                 </div>
 
-                {/* Input Area */}
-                {selectedConversation && (
-                    <div className="bg-white border-t border-gray-200 p-3 md:p-4">
+                {/* Input Area - 🔥 Always visible for better UX */}
+                <div className="bg-white border-t border-gray-200 p-3 md:p-4">
                         <div className="flex items-end gap-2">
                             <Button
                                 onClick={handleSendMessage}
                                 disabled={!newMessage.trim() || isLoading}
                                 className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 h-10 w-10 md:h-12 md:w-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                                aria-label="ارسال پیام"
                             >
                                 {isLoading ? (
                                     <div className="animate-spin rounded-full h-4 w-4 md:h-5 md:w-5 border-2 border-white border-t-transparent"></div>
@@ -1690,33 +2387,50 @@ const SuperAdminChatPage = () => {
                                     <Send className="h-4 w-4 md:h-5 md:w-5" />
                                 )}
                             </Button>
-                            <VoiceInput
-                                onTranscriptionComplete={(text) => {
-                                    setNewMessage(prev => prev ? `${prev}\n${text}` : text)
-                                }}
-                                disabled={isLoading}
-                            />
+                            {/* 🔧 Voice Input - به صورت موقت مخفی شده */}
+                            {FEATURE_FLAGS.SHOW_VOICE_INPUT && (
+                                <VoiceInput
+                                    onTranscriptionComplete={(text) => {
+                                        setNewMessage(prev => prev ? `${prev}\n${text}` : text)
+                                    }}
+                                    disabled={isLoading}
+                                />
+                            )}
                             <div className="flex-1">
                                 <Textarea
+                                    ref={textareaRef}
                                     value={newMessage}
-                                    onChange={(e) => setNewMessage(e.target.value)}
+                                    onChange={(e) => {
+                                        setNewMessage(e.target.value)
+                                    }}
                                     onKeyPress={handleKeyPress}
-                                    placeholder="پیام خود را بنویسید..."
-                                    className="resize-none min-h-[40px] max-h-[120px] text-sm md:text-base"
+                                    placeholder={selectedConversation ? "پیام خود را بنویسید..." : "برای شروع گفتگو، پیام خود را بنویسید..."}
+                                    className="resize-none min-h-[40px] max-h-[200px] overflow-y-hidden text-sm md:text-base leading-relaxed"
                                     rows={1}
                                     disabled={isLoading}
+                                    aria-label="ورودی پیام"
                                 />
                             </div>
                         </div>
                         <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-                            <span className="hidden md:inline">Enter برای ارسال، Shift+Enter برای خط جدید</span>
+                            <div className="flex items-center gap-2">
+                                <span className="hidden md:inline">Enter برای ارسال، Shift+Enter برای خط جدید</span>
+                                <button
+                                    onClick={() => setShowSettingsModal(true)}
+                                    className="flex items-center gap-1 text-purple-600 hover:text-purple-700 transition-colors"
+                                    aria-label="نمایش راهنمای کیبورد شورتکات"
+                                    title="راهنمای کیبورد شورتکات"
+                                >
+                                    <HelpCircle className="w-3.5 h-3.5" />
+                                    <span className="hidden lg:inline">راهنما</span>
+                                </button>
+                            </div>
                             <div className="flex items-center gap-1">
                                 {getRagTypeIcon(ragType)}
                                 <span className="mr-1">حالت فعال: {getRagTypeLabel(ragType)}</span>
                             </div>
                         </div>
                     </div>
-                )}
             </div>
 
             {/* Article Modal */}
@@ -1764,3 +2478,4 @@ const SuperAdminChatPage = () => {
 }
 
 export default SuperAdminChatPage
+

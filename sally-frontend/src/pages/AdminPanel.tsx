@@ -24,13 +24,19 @@ const AdminPanel: React.FC = () => {
   // useEffect must be called before any conditional returns
   useEffect(() => {
     fetchArticles()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch articles data
+  // Fetch articles data - Use appropriate endpoint based on user role
   const fetchArticles = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      // SuperAdmin uses super-admin endpoint, Admin uses admin endpoint
+      const endpoint = user?.role === "SuperAdmin" 
+        ? '/api/super-admin/kb/articles' 
+        : '/api/admin/kb/articles'
+      
+      const response = await fetch(`${apiUrl}${endpoint}`, {
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
         }
@@ -50,8 +56,15 @@ const AdminPanel: React.FC = () => {
   }
 
   const publishArticle = async (articleId: string, visibility: "public" | "customer" | "internal") => {
+    // Only SuperAdmin can publish articles
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای انتشار مقاله را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/${articleId}/publish`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/${articleId}/publish`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -76,8 +89,15 @@ const AdminPanel: React.FC = () => {
   }
 
   const updateArticleStatus = async (articleId: string, status: "draft" | "published" | "archived") => {
+    // Only SuperAdmin can change article status
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای تغییر وضعیت مقاله را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/${articleId}/status`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/${articleId}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -101,12 +121,19 @@ const AdminPanel: React.FC = () => {
   }
 
   const deleteArticle = async (articleId: string) => {
+    // Only SuperAdmin can delete articles
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای حذف مقاله را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     if (!window.confirm("آیا از حذف این مقاله مطمئن هستید؟")) {
       return
     }
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/${articleId}`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/${articleId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
@@ -125,11 +152,18 @@ const AdminPanel: React.FC = () => {
   }
 
   const handleUploadFile = async (file: File) => {
+    // Only SuperAdmin can upload files
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای آپلود فایل را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     try {
       const formData = new FormData()
       formData.append("file", file)
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/super-admin/kb/articles/upload`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/upload`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
@@ -201,12 +235,15 @@ const AdminPanel: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">منو</h2>
               
               <div className="space-y-2">
-                <button
-                  onClick={() => setShowUploadForm(!showUploadForm)}
-                  className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
-                >
-                  {showUploadForm ? "بستن آپلود فایل" : "آپلود فایل"}
-                </button>
+                {/* Only SuperAdmin can upload files */}
+                {user?.role === "SuperAdmin" && (
+                  <button
+                    onClick={() => setShowUploadForm(!showUploadForm)}
+                    className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
+                  >
+                    {showUploadForm ? "بستن آپلود فایل" : "آپلود فایل"}
+                  </button>
+                )}
 
                 <button
                   onClick={() => setShowCreateForm(!showCreateForm)}
@@ -334,48 +371,67 @@ const AdminPanel: React.FC = () => {
                         </div>
 
                         <div className="flex items-center space-x-2 ml-4">
-                          {article.status === "draft" && user?.role === "SuperAdmin" && (
+                          {/* Admin can only edit their own draft articles */}
+                          {article.status === "draft" && (
                             <button
-                              onClick={() => openPublishModal(article)}
-                              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
-                              title="انتشار مقاله"
+                              onClick={() => {
+                                // Navigate to edit page or open edit modal
+                                toast("قابلیت ویرایش به زودی اضافه خواهد شد", { icon: "ℹ️" })
+                              }}
+                              className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                              title="ویرایش مقاله"
                             >
-                              انتشار
+                              ویرایش
                             </button>
                           )}
                           
-                          {article.status === "published" && user?.role === "SuperAdmin" && (
-                            <button
-                              onClick={() => updateArticleStatus(article.id, "draft")}
-                              className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700"
-                              title="بازگشت به پیش‌نویس"
-                            >
-                              پیش‌نویس
-                            </button>
+                          {/* Only SuperAdmin can publish, archive, or delete articles */}
+                          {user?.role === "SuperAdmin" && (
+                            <>
+                              {article.status === "draft" && (
+                                <button
+                                  onClick={() => openPublishModal(article)}
+                                  className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                                  title="انتشار مقاله"
+                                >
+                                  انتشار
+                                </button>
+                              )}
+                              
+                              {article.status === "published" && (
+                                <button
+                                  onClick={() => updateArticleStatus(article.id, "draft")}
+                                  className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700"
+                                  title="بازگشت به پیش‌نویس"
+                                >
+                                  پیش‌نویس
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => updateArticleStatus(
+                                  article.id,
+                                  article.status === "archived" ? "draft" : "archived"
+                                )}
+                                className={`px-3 py-1 text-sm rounded ${
+                                  article.status === "archived"
+                                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                                    : "bg-gray-600 text-white hover:bg-gray-700"
+                                }`}
+                                title={article.status === "archived" ? "بازگرداندن" : "بایگانی"}
+                              >
+                                {article.status === "archived" ? "بازگرداندن" : "بایگانی"}
+                              </button>
+
+                              <button
+                                onClick={() => deleteArticle(article.id)}
+                                className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                                title="حذف مقاله"
+                              >
+                                حذف
+                              </button>
+                            </>
                           )}
-
-                          <button
-                            onClick={() => updateArticleStatus(
-                              article.id,
-                              article.status === "archived" ? "draft" : "archived"
-                            )}
-                            className={`px-3 py-1 text-sm rounded ${
-                              article.status === "archived"
-                                ? "bg-blue-600 text-white hover:bg-blue-700"
-                                : "bg-gray-600 text-white hover:bg-gray-700"
-                            }`}
-                            title={article.status === "archived" ? "بازگرداندن" : "بایگانی"}
-                          >
-                            {article.status === "archived" ? "بازگرداندن" : "بایگانی"}
-                          </button>
-
-                          <button
-                            onClick={() => deleteArticle(article.id)}
-                            className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
-                            title="حذف مقاله"
-                          >
-                            حذف
-                          </button>
                         </div>
                       </div>
                     </div>

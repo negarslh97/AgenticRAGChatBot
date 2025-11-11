@@ -188,12 +188,29 @@ class ChatUseCases:
         """
         پردازش پیام ادمین با پشتیبانی از استریمینگ (نسخه تمیز و Refactor شده).
         """
-        temperature = 0.2 if temperature > 0.3 else temperature
         logger.debug(f"Starting admin streaming chat (Model: {model or 'default'}, Temp: {temperature})")
 
         # 1. Get or create conversation
         if conversation_id:
             conversation = await Conversation.get(conversation_id)
+            if not conversation:
+                raise ValueError(f"Conversation {conversation_id} not found")
+            
+            # 🔥 Update conversation settings if model or temperature changed
+            updated = False
+            if model and conversation.model_name != model:
+                conversation.model_name = model
+                updated = True
+            if temperature is not None and conversation.temperature != temperature:
+                conversation.temperature = temperature
+                updated = True
+            if conversation.rag_type != rag_type:
+                conversation.rag_type = rag_type
+                updated = True
+            
+            if updated:
+                await conversation.save()
+                logger.debug(f"Updated conversation settings: model={model}, temperature={temperature}, rag_type={rag_type}")
         else:
             smart_title = query_analyzer.generate_conversation_title(content, max_length=60)
             conversation = Conversation(
@@ -243,7 +260,7 @@ class ChatUseCases:
                 conversation_history=conversation_history,
                 custom_prompt="basic_response",  # 🔥 استفاده از پرامپت محاوره‌ای
                 custom_model=model,
-                custom_temperature=0.7
+                custom_temperature=temperature  # 🔥 استفاده از temperature از پارامتر
             )
             full_response = result.content
             yield {
@@ -304,6 +321,54 @@ class ChatUseCases:
         ):
             yield event
 
+    @staticmethod
+    async def send_admin_message(
+        content: str,
+        admin: Admin,
+        conversation_id: Optional[str] = None,
+        rag_type: str = "simple",
+        model: Optional[str] = None,
+        temperature: Optional[float] = 0.7
+    ) -> Dict[str, Any]:
+        """
+        پردازش پیام ادمین بدون استریمینگ (non-streaming).
+        این متد از send_admin_message_stream استفاده می‌کند و نتیجه را جمع‌آوری می‌کند.
+        """
+        full_response = ""
+        sources = []
+        confidence = 0.5
+        message_id = ""
+        conversation_id_final = conversation_id
+        
+        async for event in ChatUseCases.send_admin_message_stream(
+            content=content,
+            admin=admin,
+            conversation_id=conversation_id,
+            rag_type=rag_type,
+            model=model,
+            temperature=temperature
+        ):
+            if event.get("type") == "init":
+                conversation_id_final = event.get("conversation_id", conversation_id)
+            elif event.get("type") == "sources":
+                sources = event.get("sources", [])
+                confidence = event.get("confidence", 0.5)
+            elif event.get("type") == "chunk":
+                full_response += event.get("content", "")
+            elif event.get("type") == "complete":
+                message_id = event.get("message_id", "")
+                full_response = event.get("full_response", full_response)
+                confidence = event.get("confidence", confidence)
+        
+        return {
+            "conversation_id": conversation_id_final or "",
+            "message": full_response,
+            "sources": sources,
+            "confidence": confidence,
+            "suggested_actions": [],
+            "message_id": message_id
+        }
+
     # ======================================================================================
     # ✅ متد send_message_stream نیز برای استفاده از متد مرکزی بازنویسی می‌شود
     # ======================================================================================
@@ -329,15 +394,34 @@ class ChatUseCases:
         # 1. Get or create conversation
         if conversation_id:
             conversation = await Conversation.get(conversation_id)
+            if not conversation:
+                raise ValueError(f"Conversation {conversation_id} not found")
+            
+            # 🔥 Update conversation settings if model or temperature changed
+            updated = False
+            if model and conversation.model_name != model:
+                conversation.model_name = model
+                updated = True
+            if temperature is not None and conversation.temperature != temperature:
+                conversation.temperature = temperature
+                updated = True
+            
+            if updated:
+                await conversation.save()
+                logger.debug(f"Updated conversation settings: model={model}, temperature={temperature}")
         else:
             title = content[:50] + "..."
             user_id = str(user.id) if user else None
             conversation = Conversation(
                 customer_id=user_id if user_type == "Customer" else None,
                 guest_session_id=guest_session_id if user_type == "guest" else None,
-                title=title, rag_type=rag_type
+                title=title,
+                rag_type=rag_type,
+                model_name=actual_model,
+                temperature=actual_temperature
             )
             await conversation.insert()
+            logger.debug(f"Created conversation: {conversation.id} - '{title}'")
         
         # 2. Load history and analyze query (با رفع باگ)
         conversation_history = await load_conversation_history(str(conversation.id))
@@ -440,6 +524,57 @@ class ChatUseCases:
             yield event
 
     @staticmethod
+    async def send_message(
+        content: str,
+        user: Optional[Union[Customer, Admin]] = None,
+        user_type: str = "guest",
+        conversation_id: Optional[str] = None,
+        guest_session_id: Optional[str] = None,
+        rag_type: str = "simple",
+        model: Optional[str] = None,
+        temperature: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        پردازش پیام کاربر عادی/مهمان بدون استریمینگ (non-streaming).
+        این متد از send_message_stream استفاده می‌کند و نتیجه را جمع‌آوری می‌کند.
+        """
+        full_response = ""
+        sources = []
+        confidence = 0.5
+        message_id = ""
+        conversation_id_final = conversation_id
+        
+        async for event in ChatUseCases.send_message_stream(
+            content=content,
+            user=user,
+            user_type=user_type,
+            conversation_id=conversation_id,
+            guest_session_id=guest_session_id,
+            model=model,
+            temperature=temperature
+        ):
+            if event.get("type") == "init":
+                conversation_id_final = event.get("conversation_id", conversation_id)
+            elif event.get("type") == "sources":
+                sources = event.get("sources", [])
+                confidence = event.get("confidence", 0.5)
+            elif event.get("type") == "chunk":
+                full_response += event.get("content", "")
+            elif event.get("type") == "complete":
+                message_id = event.get("message_id", "")
+                full_response = event.get("full_response", full_response)
+                confidence = event.get("confidence", confidence)
+        
+        return {
+            "conversation_id": conversation_id_final or "",
+            "message": full_response,
+            "sources": sources,
+            "confidence": confidence,
+            "suggested_actions": [],
+            "message_id": message_id
+        }
+
+    @staticmethod
     async def get_conversation_history(
         conversation_id: str,
         user_type: str = "guest",
@@ -516,7 +651,10 @@ class ChatUseCases:
                 "tags": conv.tags,
                 "created_at": conv.created_at.isoformat(),
                 "updated_at": conv.updated_at.isoformat(),
-                "type": "Agentic" if conv.rag_type == "agentic" else "Simple RAG"
+                "type": "Agentic" if conv.rag_type == "agentic" else "Simple RAG",
+                "rag_type": conv.rag_type,
+                "model_name": conv.model_name,
+                "temperature": conv.temperature
             }
             for conv in conversations
         ]
@@ -535,7 +673,10 @@ class ChatUseCases:
                 "tags": conv.tags,
                 "created_at": conv.created_at.isoformat(),
                 "updated_at": conv.updated_at.isoformat(),
-                "type": "Agentic" if conv.rag_type == "agentic" else "Simple RAG"
+                "type": "Agentic" if conv.rag_type == "agentic" else "Simple RAG",
+                "rag_type": conv.rag_type,
+                "model_name": conv.model_name,
+                "temperature": conv.temperature
             }
             for conv in conversations
         ]

@@ -32,16 +32,40 @@ const AdminArticleForm: React.FC<AdminArticleFormProps> = ({ onArticleCreated })
       return
     }
 
+    // Admin can only create draft articles
+    const isAdmin = user.role === "Admin"
+    if (isAdmin && formData.status !== "draft") {
+      toast.error("شما فقط می‌توانید مقالات پیش‌نویس ایجاد کنید")
+      return
+    }
+
     setLoading(true)
     try {
-      await knowledgeBaseService.createArticle({
-        title: formData.title,
-        content_markdown: formData.content_markdown,
-        summary: formData.summary || undefined,
-        tag_names: formData.tag_names.split(",").map(tag => tag.trim()).filter(Boolean),
-        status: formData.status as "draft" | "published" | "archived",
-        visibility: formData.status === "published" ? (formData.visibility as "public" | "customer" | "internal") : undefined
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      // SuperAdmin uses super-admin endpoint, Admin uses admin endpoint
+      const endpoint = isAdmin ? '/api/admin/kb/articles' : '/api/super-admin/kb/articles'
+      
+      const response = await fetch(`${apiUrl}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          title: formData.title,
+          content_markdown: formData.content_markdown,
+          summary: formData.summary || undefined,
+          tag_names: formData.tag_names.split(",").map(tag => tag.trim()).filter(Boolean),
+          // Admin can only create drafts
+          status: isAdmin ? "draft" : (formData.status as "draft" | "published" | "archived"),
+          visibility: (formData.status === "published" && !isAdmin) ? (formData.visibility as "public" | "customer" | "internal") : undefined
+        })
       })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'خطا در ایجاد مقاله' }))
+        throw new Error(errorData.detail || 'خطا در ایجاد مقاله')
+      }
 
       toast.success("مقاله با موفقیت ایجاد شد!")
       

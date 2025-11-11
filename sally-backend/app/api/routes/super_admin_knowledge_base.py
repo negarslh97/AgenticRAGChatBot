@@ -33,11 +33,11 @@ router = APIRouter()
 
 
 async def generate_metadata_from_ai(title: str, content: str) -> dict:
-    """Generate metadata from AI for uploaded file content using LangChain."""
-    from app.infrastructure.langchain_utils import langchain_service
+    """Generate metadata from AI for uploaded file content using MetadataService."""
+    from app.services.metadata_service import metadata_service
 
     try:
-        return await langchain_service.generate_metadata(title, content)
+        return await metadata_service.generate_metadata(title, content)
     except Exception as e:
         # Return default metadata if AI fails
         return {
@@ -1252,10 +1252,15 @@ async def convert_text_to_markdown(
         print(f"🔄 شروع تبدیل متن به Markdown - عنوان: {title[:50]}...")
         print(f"📊 طول محتوا: {len(content)} کاراکتر")
 
-        # Use LangChain service to convert text to markdown
-        from app.infrastructure.langchain_utils import langchain_service
+        # Use LangChain orchestrator to convert text to markdown
+        from app.infrastructure.langchain_orchestrator import orchestrator
 
-        markdown_content = await langchain_service.convert_text_to_markdown(title, content)
+        query = f"Convert this text to well-formatted markdown: {title}"
+        result = await orchestrator.process_request(
+            query=query,
+            context=content
+        )
+        markdown_content = result.content
 
         print(f"✅ تبدیل به Markdown کامل شد - طول خروجی: {len(markdown_content)} کاراکتر")
 

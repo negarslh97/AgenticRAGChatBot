@@ -434,6 +434,10 @@ def get_circuit_breaker(name: str, config: Optional[CircuitBreakerConfig] = None
         if name not in _circuit_breakers:
             if config is None:
                 config = CircuitBreakerConfig(name=name)
+            else:
+                # Ensure config has the correct name
+                if config.name is None or config.name != name:
+                    config.name = name
             _circuit_breakers[name] = CircuitBreaker(config)
         
         return _circuit_breakers[name]
@@ -494,7 +498,12 @@ def circuit_breaker_protect(
     )
     
     def decorator(func: Callable):
-        cb = get_circuit_breaker(name or func.__name__, config)
+        # Determine the circuit breaker name
+        cb_name = name or func.__name__
+        # Update config name if not set
+        if config.name is None:
+            config.name = cb_name
+        cb = get_circuit_breaker(cb_name, config)
 
         if asyncio.iscoroutinefunction(func):
             @wraps(func)

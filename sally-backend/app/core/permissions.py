@@ -195,10 +195,16 @@ async def has_permission(admin: Admin, permission: str) -> bool:
     try:
         role = await admin.get_role()
         if not role or not role.is_active:
+            logger.warning(f"Permission check failed: Admin {admin.email} has no active role")
             return False
         
         permission_keys = {perm.permission_key for perm in role.permissions}
-        return permission in permission_keys
+        has_perm = permission in permission_keys
+        
+        if not has_perm:
+            logger.warning(f"Permission check failed: Admin {admin.email} (role: {role.name}) does not have permission '{permission}'. Available permissions: {permission_keys}")
+        
+        return has_perm
     except Exception as e:
         logger.error(f"Error checking permission: {e}")
         return False

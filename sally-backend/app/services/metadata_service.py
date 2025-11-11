@@ -4,8 +4,10 @@ Metadata Service for generating article metadata using AI.
 """
 
 from typing import Dict, Any, Optional
-from app.infrastructure.model_service import model_service
-from app.infrastructure.prompt_service import prompt_service
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+from app.services.model_service import model_service
+from app.services.prompt_service import prompt_service
 from app.core.logging_config import get_logger, PerformanceLogger
 
 logger = get_logger(__name__)

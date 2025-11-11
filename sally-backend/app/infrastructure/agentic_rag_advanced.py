@@ -118,8 +118,8 @@ class AdvancedAgenticRAG:
     سیستم RAG پیشرفته عامل‌محور با LangGraph
     """
     
-    def __init__(self, langchain_service, rag_service, weaviate_connector=None):
-        self.langchain_service = langchain_service
+    def __init__(self, orchestrator, rag_service, weaviate_connector=None):
+        self.orchestrator = orchestrator
         self.rag_service = rag_service
         self.weaviate_connector = weaviate_connector
         self.graph = None
@@ -295,9 +295,11 @@ class AdvancedAgenticRAG:
                 model_to_use = self._get_fast_model() if settings.use_hybrid_model_strategy else settings.chat_model_loaded
                 logger.info(f"🤖 Agentic RAG - Using FAST model: {model_to_use}")
                 
-                model = self.langchain_service._get_model(
+                from app.services.model_service import model_service
+                model = model_service.get_model(
                     model_to_use,
-                    max_tokens=10
+                    max_tokens=10,
+                    temperature=0.1
                 )
                 
                 chain = prompt | model | StrOutputParser()
@@ -344,9 +346,11 @@ class AdvancedAgenticRAG:
                 # 🔥 استفاده از Fast Model برای decomposition
                 fast_model = self._get_fast_model()
                 
-                model = self.langchain_service._get_model(
+                from app.services.model_service import model_service
+                model = model_service.get_model(
                     fast_model,
-                    max_tokens=200
+                    max_tokens=200,
+                    temperature=0.1
                 )
                 
                 chain = prompt | model | StrOutputParser()
@@ -538,9 +542,11 @@ class AdvancedAgenticRAG:
                 # 🔥 استفاده از Fast Model برای planning
                 fast_model = self._get_fast_model()
                 
-                model = self.langchain_service._get_model(
+                from app.services.model_service import model_service
+                model = model_service.get_model(
                     fast_model,
-                    max_tokens=150
+                    max_tokens=150,
+                    temperature=0.1
                 )
                 
                 chain = prompt | model | StrOutputParser()
@@ -1103,11 +1109,12 @@ class AdvancedAgenticRAG:
                 power_model = self._get_power_model()
                 logger.info(f"🎯 Using power model for synthesis: {power_model}")
                 
-                response = await self.langchain_service.generate_rag_response(
-                    query_text,
-                    context,
+                result = await self.orchestrator.process_request(
+                    query=query_text,
+                    context=context,
                     custom_model=power_model
                 )
+                response = result.content
                 
                 state["final_response"] = response
                 state["confidence_score"] = self._calculate_confidence(state)
@@ -1526,7 +1533,7 @@ class AdvancedAgenticRAG:
 advanced_agentic_rag = None
 
 
-def get_advanced_agentic_rag(langchain_service, rag_service, weaviate_connector=None):
+def get_advanced_agentic_rag(orchestrator, rag_service, weaviate_connector=None):
     """
     دریافت یا ایجاد instance
     """
@@ -1534,7 +1541,7 @@ def get_advanced_agentic_rag(langchain_service, rag_service, weaviate_connector=
     
     if advanced_agentic_rag is None:
         advanced_agentic_rag = AdvancedAgenticRAG(
-            langchain_service, 
+            orchestrator, 
             rag_service,
             weaviate_connector
         )

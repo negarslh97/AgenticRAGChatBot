@@ -151,6 +151,12 @@ const SuperAdminDashboard: React.FC = () => {
 
   // Removed handleLogout since logout button is now in navbar
 
+  // 🔧 Feature Flags - برای مخفی کردن موقت برخی قابلیت‌ها
+  const FEATURE_FLAGS = {
+    SHOW_ACTIVITY_LOGS: false, // مخفی کردن لاگ فعالیت‌ها
+    SHOW_SETTINGS: false // مخفی کردن تنظیمات
+  }
+
   const managementCards = [
     {
       title: 'مدیریت کاربران',
@@ -190,7 +196,8 @@ const SuperAdminDashboard: React.FC = () => {
         }
       ]
     },
-    {
+    // 🔧 فعالیت چت - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_ACTIVITY_LOGS ? [{
       title: 'فعالیت چت',
       stats: [
         { label: 'کل مکالمات', value: stats.chat.conversations },
@@ -205,7 +212,7 @@ const SuperAdminDashboard: React.FC = () => {
           onClick: () => navigate('/super-admin/logs')
         }
       ]
-    },
+    }] : []),
     {
       title: 'Weaviate Collections',
       stats: [
@@ -230,7 +237,8 @@ const SuperAdminDashboard: React.FC = () => {
         }
       ]
     },
-    {
+    // 🔧 تنظیمات سیستم - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_SETTINGS ? [{
       title: 'تنظیمات سیستم',
       description: 'پیکربندی پارامترهای اصلی برنامه و یکپارچه‌سازی‌ها',
       icon: Settings,
@@ -241,7 +249,7 @@ const SuperAdminDashboard: React.FC = () => {
           onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
         }
       ]
-    }
+    }] : [])
   ]
 
   if (loading) {

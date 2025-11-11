@@ -132,6 +132,12 @@ const AdminUserModal: React.FC<AdminUserModalProps> = ({
     if (!validateForm()) {
       return
     }
+
+    // 🔥 بررسی اینکه role_id انتخاب شده است
+    if (!formData.role_id || formData.role_id.trim() === '') {
+      toast.error('لطفاً نقش را انتخاب کنید')
+      return
+    }
     
     setLoading(true)
     
@@ -142,6 +148,8 @@ const AdminUserModal: React.FC<AdminUserModalProps> = ({
       }
 
       console.log('📝 Creating admin with data:', formData)
+      console.log('📝 Role ID:', formData.role_id)
+      console.log('📝 Available roles:', roles)
       
       const response = await fetch('/api/admin/admins', {
         method: 'POST',
@@ -157,6 +165,17 @@ const AdminUserModal: React.FC<AdminUserModalProps> = ({
       if (!response.ok) {
         const errorText = await response.text()
         console.error('❌ Error response:', errorText)
+        
+        // 🔥 نمایش پیام خطای بهتر
+        let errorMessage = 'خطا در ایجاد ادمین جدید'
+        try {
+          const errorJson = JSON.parse(errorText)
+          errorMessage = errorJson.detail || errorMessage
+        } catch {
+          errorMessage = errorText || errorMessage
+        }
+        
+        toast.error(errorMessage)
         throw new Error(`HTTP error! status: ${response.status} - ${errorText}`)
       }
 
@@ -179,7 +198,18 @@ const AdminUserModal: React.FC<AdminUserModalProps> = ({
       
     } catch (error) {
       console.error('❌ Error creating admin:', error)
-      toast.error(error instanceof Error ? error.message : 'خطا در ایجاد ادمین جدید')
+      // 🔥 نمایش پیام خطای بهتر
+      if (error instanceof Error) {
+        if (error.message.includes('403')) {
+          toast.error('شما دسترسی لازم برای ایجاد ادمین را ندارید')
+        } else if (error.message.includes('400')) {
+          toast.error('اطلاعات وارد شده معتبر نیست')
+        } else {
+          toast.error(error.message || 'خطا در ایجاد ادمین جدید')
+        }
+      } else {
+        toast.error('خطا در ایجاد ادمین جدید')
+      }
     } finally {
       setLoading(false)
     }

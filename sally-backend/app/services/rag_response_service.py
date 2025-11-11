@@ -5,8 +5,8 @@ RAG Response Service for generating AI responses based on retrieved context.
 
 from typing import Dict, Any, List, Optional, AsyncGenerator
 import re
-from app.infrastructure.model_service import model_service
-from app.infrastructure.prompt_service import prompt_service
+from app.services.model_service import model_service
+from app.services.prompt_service import prompt_service
 from app.infrastructure.conversation_memory_service import conversation_memory_service
 from app.core.logging_config import get_logger, PerformanceLogger
 

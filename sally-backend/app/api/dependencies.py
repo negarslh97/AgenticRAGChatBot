@@ -81,10 +81,12 @@ def get_current_admin_with_permission(required_permission: Permission) -> Callab
     """
     async def permission_checker(current_admin: Admin = Depends(get_current_admin)) -> Admin:
         """Check if admin has required permission."""
+        # Permission is a class with string attributes, so Permission.CREATE_adminS is already a string
+        # We just need to pass it directly to has_permission
         if not await has_permission(current_admin, required_permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission required: {required_permission.value}"
+                detail=f"Permission required: {required_permission}"
             )
         return current_admin
     

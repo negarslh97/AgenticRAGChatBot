@@ -6,7 +6,7 @@ import os
 import uuid
 from pathlib import Path
 import markdown
-from app.infrastructure.langchain_utils import langchain_service
+from app.services.metadata_service import metadata_service
 from app.services.knowledge_base_service import get_or_create_tags
 from app.utils.text_extraction import (
     extract_text_from_file,
@@ -20,9 +20,9 @@ router = APIRouter()
 
 
 async def generate_metadata_from_ai(title: str, content: str):
-    """Generate metadata from AI for uploaded file content using LangChain."""
+    """Generate metadata from AI for uploaded file content using MetadataService."""
     try:
-        return await langchain_service.generate_metadata(title, content)
+        return await metadata_service.generate_metadata(title, content)
     except Exception as e:
         # Return default metadata if AI fails
         return {

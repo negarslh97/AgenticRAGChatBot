@@ -15,7 +15,7 @@ class RAGService(ABC):
     def __init__(self):
         # Initialize OpenAI client
         self.client = None
-        # OpenAI client initialization moved to langchain_utils.py
+        # OpenAI client initialization moved to langchain_orchestrator.py
         # No direct client needed here as we use LangChain service
         
         # 🆕 تنظیمات Reranker API (Colab)
@@ -620,8 +620,6 @@ class RAGService(ABC):
                 logger.debug("⚠️ OpenAI API key not available for groundedness check")
                 return 0.5  # امتیاز پیش‌فرض پایین‌تر
 
-            from app.infrastructure.langchain_utils import langchain_service
-
             # ساخت prompt سخت‌گیرانه‌تر برای بررسی groundedness
             sources_text = "\n".join([f"- {src.get('title', 'N/A')}: {src.get('content', '')[:300]}" for src in sources[:5]])  # بیشتر منابع، محتوای بیشتر
 
@@ -658,9 +656,16 @@ class RAGService(ABC):
             """
 
             # فراخوانی LLM برای ارزیابی
-            groundedness_response = await langchain_service.generate_chat_response([
-                {"role": "user", "content": groundedness_prompt}
-            ])
+            from app.infrastructure.langchain_orchestrator import orchestrator
+            
+            # Extract query from prompt
+            query = groundedness_prompt
+            result = await orchestrator.process_request(
+                query=query,
+                context=None,
+                conversation_history=None
+            )
+            groundedness_response = result.content
 
             # استخراج امتیاز عددی از پاسخ
             import re
@@ -1314,30 +1319,36 @@ class SimpleRAGService(RAGService):
         }
     
     async def _generate_openai_response(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None, prompt_name: str = "rag_response") -> str:
-        """Generate response using LangChain."""
-        from app.infrastructure.langchain_utils import langchain_service
+        """Generate response using LangChain Orchestrator."""
+        from app.infrastructure.langchain_orchestrator import orchestrator
 
         try:
-            logger.debug(f"_generate_openai_response: Using LangChain with prompt '{prompt_name}' for query '{query[:50]}...'")
-            return await langchain_service.generate_rag_response(query, context, conversation_history, prompt_name=prompt_name)
+            logger.debug(f"_generate_openai_response: Using LangChain Orchestrator with prompt '{prompt_name}' for query '{query[:50]}...'")
+            result = await orchestrator.process_request(
+                query=query,
+                context=context,
+                conversation_history=conversation_history,
+                custom_prompt=prompt_name
+            )
+            return result.content
         except Exception as e:
             logger.debug(f"_generate_openai_response: LangChain error for query '{query[:50]}...': {str(e)}")
             # Fallback response
             raise Exception("AI service unavailable")
     
     async def _generate_direct_openai_response(self, query: str, user_context: Dict[str, Any]) -> str:
-        """Generate response using LangChain directly without RAG context."""
-        from app.infrastructure.langchain_utils import langchain_service
+        """Generate response using LangChain Orchestrator directly without RAG context."""
+        from app.infrastructure.langchain_orchestrator import orchestrator
 
         try:
-            logger.debug(f"_generate_direct_openai_response: Using LangChain chat model for query '{query[:50]}...'")
+            logger.debug(f"_generate_direct_openai_response: Using LangChain Orchestrator for query '{query[:50]}...'")
 
-            # Convert user_context to messages format if needed
-            messages = [
-                {"role": "user", "content": query}
-            ]
-
-            return await langchain_service.generate_chat_response(messages)
+            result = await orchestrator.process_request(
+                query=query,
+                context=None,
+                conversation_history=None
+            )
+            return result.content
         except Exception as e:
             logger.debug(f"_generate_direct_openai_response: LangChain error for query '{query[:50]}...': {e}")
             logger.debug(f"Error details: {str(e)}")
@@ -1356,11 +1367,11 @@ class AgenticRAGService(RAGService):
     def __init__(self):
         super().__init__()
         # 🔥 نمونه‌سازی از workflow پیشرفته
-        from app.infrastructure.langchain_utils import langchain_service
+        from app.infrastructure.langchain_orchestrator import orchestrator
         from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
         
         # ایجاد instance از advanced workflow
-        self.advanced_workflow = get_advanced_agentic_rag(langchain_service, self)
+        self.advanced_workflow = get_advanced_agentic_rag(orchestrator, self)
         logger.debug("✅ AgenticRAGService initialized with AdvancedAgenticRAG workflow.")
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1511,12 +1522,17 @@ class AgenticRAGService(RAGService):
         return actions if actions else ["view_related_articles"]
     
     async def _generate_openai_response_with_context(self, query: str, context: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
-        """Generate response using OpenAI API with context from knowledge base."""
-        from app.infrastructure.langchain_utils import langchain_service
+        """Generate response using LangChain Orchestrator with context."""
+        from app.infrastructure.langchain_orchestrator import orchestrator
 
         try:
-            logger.debug(f"_generate_openai_response_with_context: Using LangChain RAG model for query '{query[:50]}...'")
-            return await langchain_service.generate_rag_response(query, context, conversation_history)
+            logger.debug(f"_generate_openai_response_with_context: Using LangChain Orchestrator for query '{query[:50]}...'")
+            result = await orchestrator.process_request(
+                query=query,
+                context=context,
+                conversation_history=conversation_history
+            )
+            return result.content
         except Exception as e:
             logger.debug(f"_generate_openai_response_with_context: LangChain error for query '{query[:50]}...': {e}")
             logger.debug(f"Error details: {str(e)}")

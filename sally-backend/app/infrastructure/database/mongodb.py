@@ -25,6 +25,30 @@ async def close_mongo_client():
         _client.close()
         _client = None
 
+async def cleanup_old_indexes():
+    """Remove old indexes that are no longer needed."""
+    global _client
+    if _client is None:
+        return
+    
+    db = _client.get_default_database()
+    admins_collection = db["admins"]
+    
+    try:
+        # Get all indexes
+        indexes = await admins_collection.list_indexes().to_list(length=None)
+        
+        # Check if username_1 index exists and drop it
+        for index in indexes:
+            index_name = index.get("name", "")
+            if index_name == "username_1":
+                await admins_collection.drop_index("username_1")
+                print(f"✓ Dropped old index: username_1 from admins collection")
+    except Exception as e:
+        # If index doesn't exist or other error, just log and continue
+        print(f"⚠ Index cleanup note: {str(e)}")
+
+
 async def init_db():
     """Initialize database connection and models for the refactored system."""
     global _client
@@ -38,6 +62,9 @@ async def init_db():
             Category, Tag, KnowledgeBaseArticle, UnansweredQuestion, Feedback, ActivityLog
         ]
     )
+    
+    # Clean up old indexes that are no longer needed
+    await cleanup_old_indexes()
 
 
 async def create_default_SuperAdmin():

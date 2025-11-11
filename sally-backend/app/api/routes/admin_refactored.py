@@ -28,11 +28,11 @@ router = APIRouter()
 
 # --- تابع کمکی برای تولید متادیتای هوش مصنوعی ---
 async def _generate_metadata_from_ai(title: str, content: str) -> dict:
-    """تولید متادیتای مقاله با استفاده از LangChain"""
-    from app.infrastructure.langchain_utils import langchain_service
+    """تولید متادیتای مقاله با استفاده از MetadataService"""
+    from app.services.metadata_service import metadata_service
 
     try:
-        return await langchain_service.generate_metadata(title, content)
+        return await metadata_service.generate_metadata(title, content)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

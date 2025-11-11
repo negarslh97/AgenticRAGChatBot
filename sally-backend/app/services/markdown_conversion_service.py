@@ -4,8 +4,8 @@ Markdown Conversion Service for converting plain text to structured Markdown.
 """
 
 from typing import Dict, Any, Optional
-from app.infrastructure.model_service import model_service
-from app.infrastructure.prompt_service import prompt_service
+from app.services.model_service import model_service
+from app.services.prompt_service import prompt_service
 from app.core.logging_config import get_logger, PerformanceLogger
 
 logger = get_logger(__name__)
