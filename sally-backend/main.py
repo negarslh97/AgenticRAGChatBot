@@ -21,7 +21,7 @@ setup_logging(
     log_dir="logs",
     enable_json=False,  # Set to True for production
     enable_console=True,
-    enable_file=True
+    enable_file=False
 )
 logger = get_logger(__name__)
 
