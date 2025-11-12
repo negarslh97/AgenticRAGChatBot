@@ -818,6 +818,32 @@ def _register_default_models():
                     "category": "openai",
                     "description": "نسخه توربو GPT-4"
                 }
+            ),
+            ModelConfig(
+                name="gpt-5",
+                provider=ModelProvider.OPENAI,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.embedder_api_key_loaded,
+                base_url=settings.embedder_openai_base_url_loaded,
+                metadata={
+                    "category": "openai",
+                    "description": "جدیدترین و پیشرفته‌ترین مدل OpenAI"
+                }
+            ),
+            ModelConfig(
+                name="gpt-5-mini",
+                provider=ModelProvider.OPENAI,
+                model_type=ModelType.CHAT,
+                max_tokens=8192,
+                temperature=0.7,
+                api_key=settings.embedder_api_key_loaded,
+                base_url=settings.embedder_openai_base_url_loaded,
+                metadata={
+                    "category": "openai",
+                    "description": "جدیدترین و پیشرفته‌ترین مدل OpenAI"
+                }
             )
         ]
         

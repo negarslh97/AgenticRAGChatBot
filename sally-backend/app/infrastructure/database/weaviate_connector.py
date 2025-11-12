@@ -1098,12 +1098,19 @@ class WeaviateMongoDBConnector:
 
             for node in tree.get_all_nodes():
                 try:
+                    # 🔥 Contextual Retrieval: افزودن context به chunk قبل از embedding
+                    article_title = article.get('title', article.get('article_title', 'بدون عنوان'))
+                    contextual_content = markdown_parser.add_contextual_info_to_chunk(
+                        node.content, node, article_title, tree
+                    )
+
                     node_data = {
                         "node_id": node.id,
                         "article_id": str(article['_id']),
                         "title": node.title,
                         "level": node.level,
-                        "content": node.content,
+                        "content": contextual_content,  # استفاده از محتوای contextualized
+                        "raw_content": node.content,     # نگهداری محتوای اصلی برای نمایش
                         "parent_id": node.parent_id,
                         "path": node.path,
                         "order": node.order,

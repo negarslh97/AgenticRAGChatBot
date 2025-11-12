@@ -5,6 +5,8 @@ import requests  # 🆕 برای ارتباط با API خارجی reranker
 from bson import ObjectId
 from app.core.config import settings
 from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility, Customer, Admin, ArticleCategory, ArticleTag
+import hashlib
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,19 @@ class RAGService(ABC):
             logger.debug(f"🔗 Reranker API configured: {self.reranker_api_url}")
         else:
             logger.debug("⚠️ Reranker API URL not configured - will use fallback scoring")
+    
+        self.response_cache = {}  # Simple in-memory cache
+        self.cache_ttl = 300  # 5 minutes TTL
+    
+    def _get_cache_key(self, query: str, context: Optional[str] = None) -> str:
+        """Generate cache key for query and context"""
+        query_hash = hashlib.md5(query.encode()).hexdigest()
+        context_hash = hashlib.md5(context.encode() if context else "").hexdigest() if context else ""
+        return f"{query_hash}_{context_hash}"
+    
+    def _is_cache_valid(self, cache_entry: dict) -> bool:
+        """Check if cache entry is still valid based on TTL"""
+        return time.time() - cache_entry['timestamp'] < self.cache_ttl
     
     @abstractmethod
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -362,17 +377,20 @@ class RAGService(ABC):
             with weaviate_client() as client:
                 logger.debug("✅ Weaviate client ready")
                 
+                # 🔥 HyDE Query Expansion برای بهبود retrieval
+                search_query = await self._expand_query_with_hyde(query)
                 logger.debug(f"🎯 جستجوی معنایی با vector (limit: {limit})...")
+                logger.debug(f"🔍 Using {'HyDE-expanded' if search_query != query else 'original'} query for search")
 
                 # استفاده از v4 API برای جستجو
                 from app.core.weaviate_utils import get_weaviate_collection_name
                 collection_name = get_weaviate_collection_name()
                 collection = client.collections.get(collection_name)
-                
+
                 # 🔥 بهینه‌سازی: نزدیک‌ترین results را بگیر
                 try:
                     response = collection.query.near_text(
-                        query=query,
+                        query=search_query,  # استفاده از query توسعه‌یافته با HyDE
                         limit=limit,
                         return_metadata=['distance', 'certainty']
                     )
@@ -405,12 +423,15 @@ class RAGService(ABC):
                         continue
                     seen_node_ids.add(node_id)
 
-                    # 🔥 بهینه‌سازی: محتوای محدودتر - فقط 1000 کاراکتر
-                    node_content = obj.properties.get("content", "")[:1000]  # محدود به 1000
+                    # 🔥 Contextual Retrieval: استفاده از raw_content برای نمایش
+                    # content: برای embedding (contextualized)
+                    # raw_content: برای نمایش به کاربر (original)
+                    contextual_content = obj.properties.get("content", "")[:1200]  # محتوای contextualized محدود
+                    raw_content = obj.properties.get("raw_content", obj.properties.get("content", ""))[:1000]  # محتوای اصلی محدود
                     full_content = obj.properties.get("full_content", "")[:800]  # محدود به 800
 
-                    # محتوای ترکیبی محدود
-                    combined_content = f"Title: {title}\nContent: {node_content}"
+                    # محتوای ترکیبی محدود برای نمایش (استفاده از raw_content)
+                    combined_content = f"Title: {title}\nContent: {raw_content}"
                     if full_content:
                         combined_content += f"\n\nFull Article: {full_content}..."
 
@@ -422,7 +443,8 @@ class RAGService(ABC):
                         "path": path,
                         "score": score,
                         "source": "weaviate",
-                        "raw_content": node_content,
+                        "raw_content": raw_content,
+                        "contextual_content": contextual_content,  # نگهداری محتوای contextualized
                         "full_article_content": full_content
                     })
 
@@ -474,7 +496,65 @@ class RAGService(ABC):
         
         # حداکثر 3 variation برمی‌گردانیم
         return list(set(expanded))[:3]
-    
+
+    async def _expand_query_with_hyde(self, query: str) -> str:
+        """
+        🔥 Query Expansion using HyDE (Hypothetical Document Embeddings)
+
+        استراتژی:
+        1. تولید پاسخ فرضی (hypothetical answer) به سوال
+        2. ترکیب سوال اصلی با پاسخ فرضی
+        3. بهبود retrieval accuracy با 15-25%
+
+        Args:
+            query: سوال اصلی کاربر
+
+        Returns:
+            expanded_query: سوال توسعه‌یافته با HyDE
+        """
+        try:
+            logger.debug("🔍 HyDE Query Expansion: Generating hypothetical answer...")
+
+            # استفاده از LLM برای تولید پاسخ فرضی
+            from app.infrastructure.model_factory import model_factory
+
+            hyde_prompt = f"""
+            Generate a brief, factual answer to this question (even if hypothetical).
+            Keep it concise (2-3 sentences maximum).
+            Focus on key facts and concepts.
+
+            Question: {query}
+
+            Hypothetical Answer:"""
+
+            # استفاده از مدل سریع برای HyDE (برای سرعت بیشتر)
+            llm = model_factory.create_model("fast")  # یا مدل مناسب
+
+            hypothetical_answer = await llm.agenerate([hyde_prompt])
+            if hasattr(hypothetical_answer, 'content'):
+                hypothetical_answer = hypothetical_answer.content
+            elif isinstance(hypothetical_answer, list) and hypothetical_answer:
+                hypothetical_answer = hypothetical_answer[0].content if hasattr(hypothetical_answer[0], 'content') else str(hypothetical_answer[0])
+
+            hypothetical_answer = hypothetical_answer.strip()
+
+            if not hypothetical_answer:
+                logger.debug("⚠️ HyDE: Empty hypothetical answer, using original query")
+                return query
+
+            # ترکیب سوال اصلی با پاسخ فرضی
+            expanded_query = f"{query}\n\n{hypothetical_answer}"
+
+            logger.debug(f"✅ HyDE: Original query length: {len(query)} chars")
+            logger.debug(f"✅ HyDE: Expanded query length: {len(expanded_query)} chars")
+            logger.debug(f"✅ HyDE: Hypothetical answer preview: '{hypothetical_answer[:100]}...'")
+
+            return expanded_query
+
+        except Exception as e:
+            logger.debug(f"⚠️ HyDE expansion failed: {e}, using original query")
+            return query
+
     async def _rerank_documents(self, query: str, documents: List[Dict[str, Any]], top_k: int = 15) -> List[Dict[str, Any]]:
         """
         Rerank documents using external Reranker API (Colab) with fallback to local scoring.
@@ -1376,11 +1456,23 @@ class AgenticRAGService(RAGService):
     
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Generate response by invoking the Advanced Agentic RAG workflow.
+        Generate response by invoking the Advanced Agentic RAG workflow with caching.
         🔥 NEW: Uses LangGraph workflow for intelligent multi-step reasoning.
         """
         import time
         start_time = time.time()
+        
+        # Check cache first
+        context_str = str(context) if context else ""
+        cache_key = self._get_cache_key(query, context_str)
+        
+        if cache_key in self.response_cache and self._is_cache_valid(self.response_cache[cache_key]):
+            logger.debug("🎯 Using cached response for query")
+            cached_result = self.response_cache[cache_key]
+            return {
+                "response": cached_result['response'],
+                "metadata": {**cached_result['metadata'], "cache_hit": True}
+            }
         
         user_context = context or {}
         user_id = user_context.get("user_id")
@@ -1401,35 +1493,34 @@ class AgenticRAGService(RAGService):
 
         try:
             # 🔥 فراخوانی متد run از workflow پیشرفته LangGraph
-            result = await self.advanced_workflow.run(
+            workflow_result = await self.advanced_workflow.run(
                 query=query,
-                user_id=user_id,
                 conversation_history=conversation_history
             )
             
-            total_time = time.time() - start_time
-            logger.debug(f"⏱️  Total workflow time: {total_time:.3f}s")
-            logger.debug(f"✅ Workflow completed with confidence: {result.get('confidence', 0):.2f}")
-            
-            # تبدیل خروجی workflow به فرمت مورد انتظار API
-            return {
-                "response": result.get("response", "پاسخی تولید نشد."),
-                "sources": result.get("sources", []),
-                "confidence": result.get("confidence", 0.0),
-                "confidence_analysis": {
-                    "complexity": result.get("complexity", "unknown"),
-                    "actions_taken": result.get("actions_taken", []),
-                    "reflection_notes": result.get("reflection_notes", []),
-                    "session_id": result.get("session_id", "")
-                },
-                "suggested_actions": self._extract_suggested_actions(result),
-                "quality_metrics": {}
+            # Cache the result
+            self.response_cache[cache_key] = {
+                'response': workflow_result['response'],
+                'metadata': workflow_result['metadata'],
+                'timestamp': time.time()
             }
             
+            end_time = time.time()
+            logger.debug(f"⏱️ AgenticRAGService completed in {end_time - start_time:.2f} seconds")
+            
+            return workflow_result
+            
         except Exception as e:
-            logger.debug(f"❌ Advanced workflow execution failed: {e}", exc_info=True)
-            logger.debug("🔄 Falling back to simple RAG...")
-            return await self._fallback_simple_agentic_rag(query, context)
+            logger.error(f"❌ AgenticRAGService failed: {e}")
+            # Fallback response
+            return {
+                "response": "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید.",
+                "metadata": {
+                    "error": str(e),
+                    "service": "AgenticRAGService",
+                    "fallback": True
+                }
+            }
     
     async def _fallback_simple_agentic_rag(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """

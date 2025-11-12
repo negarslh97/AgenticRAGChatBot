@@ -12,8 +12,11 @@ hierarchical tree structure based on heading levels (#, ##, ###, etc.)
 
 import re
 import uuid
+import logging
 from typing import List, Dict, Any, Optional, Tuple
 from app.domain.entities import MarkdownNode, MarkdownTree
+
+logger = logging.getLogger(__name__)
 
 
 class MarkdownParser:
@@ -451,6 +454,112 @@ class MarkdownParser:
             toc_lines.append(f"{indent}- [{heading['title']}]({link})")
 
         return "\n".join(toc_lines)
+
+    def add_contextual_info_to_chunk(self, chunk_content: str, node: 'MarkdownNode',
+                                   article_title: str, tree: 'MarkdownTree') -> str:
+        """
+        🔥 Contextual Retrieval: افزودن اطلاعات زمینه‌ای به chunk قبل از embedding
+
+        استراتژی Anthropic برای بهبود retrieval accuracy تا 67%:
+        - افزودن عنوان مقاله
+        - افزودن مسیر سلسله مراتبی
+        - افزودن اطلاعات والدین
+        - استفاده از LLM برای contextualization هوشمند
+
+        Args:
+            chunk_content: محتوای اصلی chunk
+            node: گره مربوط به chunk
+            article_title: عنوان مقاله
+            tree: درخت کامل برای دسترسی به اطلاعات والدین
+
+        Returns:
+            contextualized_content: محتوای غنی‌سازی شده با context
+        """
+        try:
+            # استخراج اطلاعات پایه
+            section_path = node.path
+            section_title = node.title
+
+            # استخراج اطلاعات والدین
+            parent_info = []
+            current_node = node
+            while current_node.parent_id:
+                parent_node = tree.get_node_by_id(current_node.parent_id)
+                if parent_node:
+                    parent_info.append(f"بخش: {parent_node.title}")
+                    current_node = parent_node
+                else:
+                    break
+
+            # ساختار context اولیه
+            context_parts = [
+                f"[عنوان مقاله: {article_title}]",
+                f"[بخش فعلی: {section_title}]",
+                f"[مسیر: {section_path}]"
+            ]
+
+            # اضافه کردن اطلاعات والدین
+            if parent_info:
+                context_parts.extend([f"[والد: {info}]" for info in parent_info[::-1]])  # از بالاترین والد شروع کن
+
+            context_header = " | ".join(context_parts)
+
+            # 🔥 Contextualization پیشرفته با LLM (اختیاری - اگر فعال باشد)
+            contextualized_chunk = self._contextualize_with_llm(
+                chunk_content, context_header, article_title, section_title
+            )
+
+            # ترکیب نهایی
+            final_content = f"{context_header}\n\n{contextualized_chunk}"
+
+            return final_content
+
+        except Exception as e:
+            # در صورت خطا، از contextualization ساده استفاده کن
+            logger.warning(f"⚠️ Contextual retrieval failed: {e}, using simple context")
+            simple_context = f"[عنوان مقاله: {article_title}] [بخش: {section_title}]\n\n{chunk_content}"
+            return simple_context
+
+    def _contextualize_with_llm(self, chunk_content: str, context_header: str,
+                               article_title: str, section_title: str) -> str:
+        """
+        استفاده از LLM برای contextualization هوشمند chunk
+
+        این متد یک جمله زمینه‌ای کوتاه تولید می‌کند که به chunk اضافه می‌شود.
+        """
+        try:
+            # اگر contextualization فعال نیست، محتوای اصلی را برگردان
+            if not getattr(self, 'enable_llm_contextualization', False):
+                return chunk_content
+
+            # استفاده از LLM برای تولید context
+            from app.infrastructure.model_factory import model_factory
+
+            prompt = f"""
+            این یک بخش از مقاله "{article_title}" است.
+            بخش: "{section_title}"
+
+            محتوای بخش:
+            {chunk_content[:200]}...
+
+            یک جمله بسیار کوتاه (کمتر از ۲۰ کلمه) بنویس که زمینه این بخش را توضیح دهد.
+            جمله باید به صورت: "این بخش درباره [موضوع] است و [توضیح کوتاه]"
+
+            جمله زمینه‌ای کوتاه:
+            """
+
+            llm = model_factory.create_model("fast")
+            response = llm.generate(prompt)
+
+            if hasattr(response, 'content') and response.content.strip():
+                llm_context = response.content.strip()
+                return f"{llm_context}\n\n{chunk_content}"
+
+            return chunk_content
+
+        except Exception as e:
+            logger.debug(f"LLM contextualization failed: {e}")
+            return chunk_content
 
 
 # Global instance با تنظیمات بهینه برای Small-to-Big Retrieval

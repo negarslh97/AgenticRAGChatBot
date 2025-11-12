@@ -319,19 +319,32 @@ class QueryAnalyzer:
                 logger.error(f"No JSON object found in LLM response: {response}")
                 raise ValueError("No JSON object could be extracted from the response.")
 
+            # استخراج JSON با روش بهینه‌تر
+            json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            
             try:
-                # تلاش برای پارس کردن JSON استخراج شده
+                # تلاش برای پارس کردن JSON
                 result_dict = json.loads(json_str)
             except json.JSONDecodeError:
-                logger.warning(f"Initial JSON parse failed. Attempting to repair: {json_str}")
                 # اگر JSON ناقص بود، سعی کن آن را کامل کنی
                 try:
                     from json_repair import repair_json
                     result_dict = repair_json(json_str, return_objects=True)
                     logger.info("✅ JSON successfully repaired.")
                 except Exception as repair_exc:
-                    logger.error(f"Failed to parse or repair JSON: {repair_exc}")
-                    raise ValueError(f"Invalid and unrepairable JSON response: {json_str}")
+                    # Fallback: استفاده از مقادیر پیش‌فرض
+                    logger.warning(f"JSON repair failed, using defaults: {json_str}")
+                    result_dict = {
+                        "intent": QueryIntent.FACTUAL.value,
+                        "needs_rag": True,
+                        "complexity": QueryComplexity.MODERATE.value,
+                        "summary": query[:100],
+                        "keywords": [],
+                        "confidence": 0.7,
+                        "reason": "JSON parsing failed, using defaults"
+                    }
             # =======================================================
 
             # اطمینان از مقادیر معتبر

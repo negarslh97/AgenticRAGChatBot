@@ -156,17 +156,17 @@ const FALLBACK_MODELS: ModelInfo[] = [
     },
     {
         id: 'gpt-5-mini',
-        name: 'GPT-5 Mini',
+        name: '⭐ GPT-5 Mini',
         provider: 'OpenAI',
-        description: '✅ 89 ch/s، پایدار، کیفیت بالا',
-        detailed_description: 'نسخه بهینه‌شده GPT-5 با تعادل عالی بین سرعت و کیفیت. با سرعت 89 کاراکتر در ثانیه و پایداری بالا، تعادل مناسبی بین سرعت و کیفیت ارائه می‌دهد.'
+        description: 'جدیدترین و قدرتمندترین مدل OpenAI با تعادل عالی بین سرعت و کیفیت',
+        detailed_description: 'نسخه بهینه‌شده GPT-5 جدیدترین و پیشرفته‌ترین مدل OpenAI با قابلیت‌های فوق‌العاده و کیفیت بالا در پاسخگویی.'
     },
     {
         id: 'gpt-5',
-        name: 'GPT-5',
+        name: '🏆 GPT-5',
         provider: 'OpenAI',
-        description: '✅ 89 ch/s، پایدار، کیفیت بالا',
-        detailed_description: 'نسخه بهینه‌شده GPT-5 با تعادل عالی بین سرعت و کیفیت. با سرعت 89 کاراکتر در ثانیه و پایداری بالا، تعادل مناسبی بین سرعت و کیفیت ارائه می‌دهد.'
+        description: 'جدیدترین و پیشرفته‌ترین مدل OpenAI',
+        detailed_description: 'جدیدترین و پیشرفته‌ترین مدل OpenAI با بالاترین کیفیت، قابلیت‌های فوق‌العاده و تعامل طبیعی با کاربران.'
     },
     {
         id: 'x-ai/grok-4-fast',
@@ -703,18 +703,10 @@ const SuperAdminChatPage = () => {
                                     // 🔥 Refresh conversations list after completion
                                     // Use conversation_id from complete event, or from init event (stored in ref), or currentConvId
                                     const finalConvId = evt.conversation_id || conversationIdRef.current || currentConvId;
-                                    console.log('🔍 DEBUG: Starting conversation refresh...', {
-                                        finalConvId,
-                                        evt_conversation_id: evt.conversation_id,
-                                        conversationIdRef_current: conversationIdRef.current,
-                                        currentConvId,
-                                        evt_rag_type: evt.rag_type
-                                    });
                                     
                                     if (finalConvId) {
                                         // 🔥 Prevent duplicate refresh calls using ref
                                         if (refreshInProgressRef.current.has(finalConvId)) {
-                                            console.log('⏭️ Refresh already in progress for:', finalConvId);
                                             return;
                                         }
                                         
@@ -722,16 +714,11 @@ const SuperAdminChatPage = () => {
                                         
                                         setTimeout(async () => {
                                             try {
-                                                console.log('📡 Fetching conversation from server:', finalConvId);
                                                 const updatedConv = await chatService.getConversation(finalConvId);
-                                                console.log('📥 Server response:', updatedConv);
                                                 
                                                 // 🔥 Update both conversations list and selectedConversation in a single batch
-                                                setConversations(prev => {
-                                                    console.log('📝 Current conversations before update:', prev.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
-                                                    
+                                                setConversations((prev: Conversation[]) => {
                                                     const exists = prev.some(c => c.id === finalConvId);
-                                                    console.log('🔍 Conversation exists in list:', exists);
                                                     
                                                     if (exists) {
                                                         const updated = prev.map(c =>
@@ -744,19 +731,17 @@ const SuperAdminChatPage = () => {
                                                                 }
                                                                 : c
                                                         );
-                                                        console.log('📝 Updated conversations:', updated.map(c => ({ id: c.id, title: c.title, rag_type: c.rag_type })));
                                                         return updated;
                                                     } else {
-                                                        const newConversation = {
+                                                        return [...prev, {
                                                             id: finalConvId,
-                                                            title: updatedConv.title || messageContent.slice(0, 50),
-                                                            messages: [],
-                                                            created_at: updatedConv.created_at || new Date().toISOString(),
-                                                            updated_at: updatedConv.updated_at || new Date().toISOString(),
-                                                            rag_type: updatedConv.rag_type || evt.rag_type
-                                                        };
-                                                        console.log('➕ Adding new conversation:', newConversation);
-                                                        return [newConversation, ...prev];
+                                                            title: updatedConv.title || 'مکالمه جدید',
+                                                            rag_type: evt.rag_type,
+                                                            created_at: updatedConv.created_at,
+                                                            updated_at: updatedConv.updated_at,
+                                                            tags: updatedConv.tags || [],
+                                                            messages: [] // Add required messages property
+                                                        }];
                                                     }
                                                 });
                                                 
@@ -771,21 +756,9 @@ const SuperAdminChatPage = () => {
                                                             title: updatedConv.title || prev.title,
                                                             rag_type: updatedConv.rag_type || evt.rag_type
                                                         };
-                                                        console.log('🎯 Updated selectedConversation:', {
-                                                            old_title: prev.title,
-                                                            new_title: updated.title,
-                                                            old_rag_type: prev.rag_type,
-                                                            new_rag_type: updated.rag_type
-                                                        });
                                                         return updated;
                                                     }
                                                     return prev;
-                                                });
-                                                
-                                                console.log('✅ Conversation updated successfully:', {
-                                                    id: finalConvId,
-                                                    title: updatedConv.title,
-                                                    rag_type: updatedConv.rag_type || evt.rag_type
                                                 });
                                                 
                                                 // Remove from in-progress set after completion

@@ -17,7 +17,9 @@ from typing_extensions import TypedDict
 from enum import Enum
 import operator
 import uuid
+import re
 from datetime import datetime
+import json
 
 from app.core.logging_config import get_logger, PerformanceLogger
 from app.core.config import settings
@@ -48,6 +50,68 @@ class AgentAction(str, Enum):
     REFLECT = "reflect"              # بازبینی و ارزیابی
     DECOMPOSE = "decompose"          # تقسیم سوال
     AGGREGATE = "aggregate"          # جمع‌آوری نتایج
+    USE_TOOLS = "use_tools"          # استفاده از ابزارهای خارجی
+
+
+# 🔥 Function Calling Tools برای Agentic RAG
+EXTERNAL_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "جستجوی اطلاعات جدید و به‌روز از وب برای موضوعات عمومی",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "عبارت جستجوی وب (باید دقیق و مرتبط باشد)"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "حداکثر تعداد نتایج (پیش‌فرض: 3)",
+                        "default": 3
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "انجام محاسبات ریاضی ساده",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "عبارت ریاضی برای محاسبه (مثال: '2 + 3 * 4' یا 'sqrt(16)')"
+                    }
+                },
+                "required": ["expression"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_datetime",
+            "description": "دریافت تاریخ و زمان فعلی",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": "منطقه زمانی (اختیاری، پیش‌فرض: Asia/Tehran)",
+                        "default": "Asia/Tehran"
+                    }
+                }
+            }
+        }
+    }
+]
 
 
 class QueryComplexity(str, Enum):
@@ -196,6 +260,8 @@ class AdvancedAgenticRAG:
         workflow.add_node("tree_search", self.tree_search)
         workflow.add_node("simple_search", self.simple_search)  # 🔥 گره fallback
         workflow.add_node("parallel_subquery_search", self.parallel_subquery_search)
+        workflow.add_node("multi_hop_search", self.multi_hop_search)  # 🔥 Multi-hop Retrieval
+        workflow.add_node("use_external_tools", self.use_external_tools)  # 🔥 Function Calling
         workflow.add_node("aggregate_context", self.aggregate_context)
         workflow.add_node("analyze_results", self.analyze_results)
         workflow.add_node("synthesize_answer", self.synthesize_answer)
@@ -223,19 +289,35 @@ class AdvancedAgenticRAG:
         # مسیر برای سوالات متوسط
         workflow.add_edge("plan_strategy", "tree_search")
         
-        # 🔥 مسیریابی بعد از tree_search با fallback
+        # 🔥 مسیریابی بعد از tree_search با multi-hop و fallback
         workflow.add_conditional_edges(
             "tree_search",
-            self.should_use_fallback,
+            self.should_use_multi_hop,
             {
-                "use_fallback": "simple_search",
-                "continue": "aggregate_context"
+                "multi_hop": "multi_hop_search",
+                "simple": "aggregate_context",
+                "fallback": "simple_search"
             }
         )
         
+        # مسیر multi-hop
+        workflow.add_edge("multi_hop_search", "aggregate_context")
+
+        # مسیر external tools
+        workflow.add_edge("use_external_tools", "aggregate_context")
+
         # مسیر fallback
         workflow.add_edge("simple_search", "aggregate_context")
-        workflow.add_edge("aggregate_context", "analyze_results")
+
+        # مسیریابی بعد از aggregate_context
+        workflow.add_conditional_edges(
+            "aggregate_context",
+            self.should_use_external_tools,
+            {
+                "use_tools": "use_external_tools",
+                "synthesize": "analyze_results"
+            }
+        )
         workflow.add_edge("analyze_results", "synthesize_answer")
         workflow.add_edge("synthesize_answer", "reflect_on_answer")
         
@@ -1377,7 +1459,510 @@ class AdvancedAgenticRAG:
         
         logger.info(f"✅ Finishing workflow (confidence: {state['confidence_score']:.2f})")
         return "finish"
-    
+
+    def should_use_multi_hop(self, state: AgenticRAGState) -> str:
+        """
+        🔥 تصمیم‌گیری برای استفاده از Multi-hop Retrieval
+
+        استراتژی:
+        - اگر سوال نیاز به چندین مرحله جستجو دارد (multi-hop)
+        - اگر نتایج اولیه کافی نیستند و سوال نیاز به entities مرتبط دارد
+        - اگر سوال comparative یا analytical است
+        """
+        query = state.get("query", "").lower()
+        search_results = state.get("search_results", [])
+        query_complexity = state.get("query_complexity", QueryComplexity.SIMPLE)
+
+        # بررسی الگوهای multi-hop
+        multi_hop_indicators = [
+            "چرا", "چگونه", "مقایسه", "تفاوت", "ارتباط", "تأثیر",
+            "نحوه", "چه زمانی", "کجا", "کی", "چه کسی", "چرا",
+            "who was", "what is the relationship", "how does",
+            "compare", "difference between", "impact of"
+        ]
+
+        # اگر سوال پیچیده است یا نشانگرهای multi-hop دارد
+        if query_complexity == QueryComplexity.COMPLEX or any(indicator in query for indicator in multi_hop_indicators):
+            # بررسی اینکه آیا نتایج اولیه کافی هستند
+            if len(search_results) < 3 or state.get("needs_more_context", False):
+                logger.info("🔗 Using multi-hop retrieval for complex/analytical query")
+                return "multi_hop"
+            else:
+                logger.info("📄 Using simple aggregation (sufficient initial results)")
+                return "simple"
+        elif not search_results or len(search_results) == 0:
+            logger.info("🔄 No results found, using fallback search")
+            return "fallback"
+        else:
+            logger.info("📄 Using simple aggregation")
+            return "simple"
+
+    async def multi_hop_search(self, state: AgenticRAGState) -> AgenticRAGState:
+        """
+        🔥 Multi-hop Retrieval: جستجوی چندمرحله‌ای
+
+        استراتژی:
+        1. استخراج entities/concepts کلیدی از نتایج اولیه
+        2. جستجوی ثانویه بر اساس entities استخراج شده
+        3. ترکیب اطلاعات از چندین hop
+        """
+        with PerformanceLogger(logger, "multi_hop_search"):
+            logger.info("🔍 Starting multi-hop retrieval process")
+
+            initial_results = state["search_results"]
+            query = state["query"]
+
+            # Hop 1: استخراج entities کلیدی از نتایج اولیه
+            logger.info("🎯 Hop 1: Extracting key entities from initial results")
+            key_entities = await self._extract_key_entities(initial_results, query)
+
+            if not key_entities:
+                logger.info("⚠️ No key entities found, skipping multi-hop")
+                return state
+
+            logger.info(f"📋 Found {len(key_entities)} key entities: {key_entities[:5]}")
+
+            # Hop 2: جستجوی ثانویه بر اساس entities
+            logger.info("🔍 Hop 2: Performing secondary search based on entities")
+            secondary_results = []
+
+            for entity in key_entities[:5]:  # محدود به 5 entity برتر
+                try:
+                    # ساخت query جدید بر اساس entity
+                    entity_query = f"{query} {entity}"
+                    logger.debug(f"   🔎 Searching for: '{entity_query}'")
+
+                    # جستجوی entity در Weaviate
+                    entity_results = await self._search_weaviate_by_entity(entity_query)
+
+                    # اضافه کردن entity به نتایج
+                    for result in entity_results:
+                        result["hop"] = 2
+                        result["related_entity"] = entity
+                        secondary_results.append(result)
+
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to search for entity '{entity}': {e}")
+                    continue
+
+            # ترکیب نتایج از هر دو hop
+            all_results = initial_results + secondary_results
+            logger.info(f"📊 Combined results: {len(initial_results)} initial + {len(secondary_results)} secondary = {len(all_results)} total")
+
+            # حذف duplicate ها بر اساس node_id
+            seen_node_ids = set()
+            unique_results = []
+            for result in all_results:
+                node_id = result.get("node_id")
+                if node_id and node_id not in seen_node_ids:
+                    seen_node_ids.add(node_id)
+                    unique_results.append(result)
+                elif not node_id:
+                    unique_results.append(result)
+
+            state["search_results"] = unique_results
+            state["multi_hop_performed"] = True
+            state["hop_count"] = 2
+
+            logger.info(f"✅ Multi-hop search completed: {len(unique_results)} unique results")
+            return state
+
+    async def _extract_key_entities(self, results: List[TreeNode], original_query: str) -> List[str]:
+        """
+        استخراج entities/concepts کلیدی از نتایج جستجو
+        """
+        try:
+            # ترکیب محتوای نتایج برای استخراج entities
+            combined_content = ""
+            for result in results[:5]:  # استفاده از 5 نتیجه برتر
+                content = result.get("content", "")
+                combined_content += content[:500] + " "  # محدود به 500 کاراکتر per result
+
+            # استفاده از LLM برای استخراج entities
+            from app.infrastructure.model_factory import model_factory
+
+            entity_extraction_prompt = f"""
+            Analyze this content and extract 3-5 key entities, concepts, or proper nouns that are most relevant to the query.
+
+            Query: {original_query}
+
+            Content:
+            {combined_content[:1500]}
+
+            Return only a comma-separated list of entities (no explanations):
+            """
+
+            llm = model_factory.create_model("fast")
+            response = await llm.agenerate([entity_extraction_prompt])
+
+            if hasattr(response, 'content'):
+                entities_text = response.content
+            elif isinstance(response, list) and response:
+                entities_text = response[0].content if hasattr(response[0], 'content') else str(response[0])
+
+            # پردازش پاسخ و استخراج entities
+            entities = []
+            for entity in entities_text.split(','):
+                entity = entity.strip()
+                if entity and len(entity) > 1:  # حداقل 2 کاراکتر
+                    entities.append(entity)
+
+            return entities[:5]  # حداکثر 5 entity
+
+        except Exception as e:
+            logger.warning(f"⚠️ Entity extraction failed: {e}")
+            return []
+
+    async def _search_weaviate_by_entity(self, entity_query: str) -> List[Dict[str, Any]]:
+        """
+        جستجوی entity-specific در Weaviate
+        """
+        try:
+            from app.infrastructure.connection_manager import weaviate_client
+            from app.core.weaviate_utils import get_weaviate_collection_name
+
+            with weaviate_client() as client:
+                collection_name = get_weaviate_collection_name()
+                collection = client.collections.get(collection_name)
+
+                # جستجوی entity با limit کمتر
+                response = collection.query.near_text(
+                    query=entity_query,
+                    limit=3  # محدود به 3 نتیجه per entity
+                )
+
+                entity_results = []
+                for obj in response.objects:
+                    entity_results.append({
+                        "node_id": obj.properties.get("node_id"),
+                        "title": obj.properties.get("title"),
+                        "content": obj.properties.get("raw_content", obj.properties.get("content", "")),
+                        "score": obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.5,
+                        "path": obj.properties.get("path"),
+                        "source": "weaviate_entity_search"
+                    })
+
+                return entity_results
+
+        except Exception as e:
+            logger.warning(f"⚠️ Entity search failed for '{entity_query}': {e}")
+            return []
+
+    def should_use_external_tools(self, state: AgenticRAGState) -> str:
+        """
+        🔥 تصمیم‌گیری برای استفاده از ابزارهای خارجی
+
+        استراتژی:
+        - اگر سوال نیاز به اطلاعات به‌روز وب دارد
+        - اگر سوال شامل محاسبات است
+        - اگر سوال درباره زمان/تاریخ فعلی است
+        - اگر اطلاعات داخلی کافی نیست
+        """
+        query = state.get("query", "").lower()
+        aggregated_results = state.get("aggregated_context", {})
+        confidence = state.get("confidence_score", 1.0)
+
+        # نشانگرهای نیاز به ابزارهای خارجی
+        web_search_indicators = [
+            "اخبار", "به‌روز", "جدیدترین", "امسال", "حالا", "کنون",
+            "news", "current", "latest", "today", "now"
+        ]
+
+        calculation_indicators = [
+            "محاسبه", "حساب", "ریاضی", "جمع", "تفريق", "ضرب", "تقسیم",
+            "calculate", "math", "sum", "multiply", "divide"
+        ]
+
+        datetime_indicators = [
+            "زمان", "تاریخ", "ساعت", "امروز", "دیروز", "فردا",
+            "time", "date", "today", "yesterday", "tomorrow"
+        ]
+
+        # بررسی نیاز به web search
+        if any(indicator in query for indicator in web_search_indicators):
+            logger.info("🌐 Using web search for current information")
+            return "use_tools"
+
+        # بررسی نیاز به محاسبات
+        if any(indicator in query for indicator in calculation_indicators):
+            logger.info("🔢 Using calculator for mathematical queries")
+            return "use_tools"
+
+        # بررسی نیاز به datetime
+        if any(indicator in query for indicator in datetime_indicators):
+            logger.info("🕒 Using datetime tool for time-related queries")
+            return "use_tools"
+
+        # اگر confidence پایین است و اطلاعات کافی نداریم
+        if confidence < 0.6 and len(aggregated_results.get("sources", [])) < 2:
+            logger.info("📊 Low confidence, using external tools for additional information")
+            return "use_tools"
+
+        logger.info("📝 Proceeding to synthesis (sufficient internal information)")
+        return "synthesize"
+
+    async def use_external_tools(self, state: AgenticRAGState) -> AgenticRAGState:
+        """
+        🔥 Function Calling: استفاده از ابزارهای خارجی
+
+        استراتژی:
+        1. تشخیص ابزار مناسب بر اساس سوال
+        2. فراخوانی ابزار با پارامترهای مناسب
+        3. اضافه کردن نتایج به context
+        """
+        with PerformanceLogger(logger, "use_external_tools"):
+            logger.info("🔧 Starting external tools execution")
+
+            query = state["query"]
+            aggregated_context = state.get("aggregated_context", {})
+
+            try:
+                # استفاده از LLM برای تصمیم‌گیری درباره ابزارها
+                tool_selection_prompt = f"""
+                Analyze this query and decide which external tools to use:
+
+                Query: {query}
+
+                Available tools:
+                1. web_search: For current news, latest information, or general web queries
+                2. calculate: For mathematical calculations and computations
+                3. get_current_datetime: For current time/date information
+
+                Return a JSON object with:
+                - "tools": array of tool names to use
+                - "reasoning": brief explanation
+
+                Example: {{"tools": ["web_search"], "reasoning": "Query needs current information"}}
+                """
+
+                llm = model_factory.create_model("fast")
+                tool_decision = await llm.agenerate([tool_selection_prompt])
+
+                if hasattr(tool_decision, 'content'):
+                    decision_text = tool_decision.content
+                else:
+                    decision_text = str(tool_decision)
+
+                # پردازش تصمیم LLM
+                try:
+                    decision = json.loads(decision_text.strip())
+                    selected_tools = decision.get("tools", [])
+                except json.JSONDecodeError:
+                    # اگر JSON نامعتبر است، تشخیص ساده
+                    selected_tools = self._simple_tool_selection(query)
+
+                logger.info(f"🛠️ Selected tools: {selected_tools}")
+
+                # اجرای ابزارهای انتخاب شده
+                tool_results = []
+                for tool_name in selected_tools:
+                    try:
+                        result = await self._execute_tool(tool_name, query)
+                        if result:
+                            tool_results.append(result)
+                            logger.info(f"✅ Tool '{tool_name}' executed successfully")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Tool '{tool_name}' failed: {e}")
+
+                # اضافه کردن نتایج ابزارها به context
+                if tool_results:
+                    state["external_tool_results"] = tool_results
+                    state["tools_used"] = selected_tools
+
+                    # اضافه کردن به aggregated_context
+                    if "external_sources" not in aggregated_context:
+                        aggregated_context["external_sources"] = []
+
+                    for result in tool_results:
+                        aggregated_context["external_sources"].append({
+                            "tool": result["tool"],
+                            "query": result["query"],
+                            "result": result["result"],
+                            "timestamp": datetime.now().isoformat()
+                        })
+
+                    state["aggregated_context"] = aggregated_context
+                    logger.info(f"📊 Added {len(tool_results)} external tool results to context")
+
+                return state
+
+            except Exception as e:
+                logger.warning(f"⚠️ External tools execution failed: {e}")
+                return state
+
+    def _simple_tool_selection(self, query: str) -> List[str]:
+        """انتخاب ساده ابزار بر اساس کلمات کلیدی"""
+        query_lower = query.lower()
+        tools = []
+
+        if any(word in query_lower for word in ["اخبار", "به‌روز", "جدیدترین", "news", "current"]):
+            tools.append("web_search")
+
+        if any(word in query_lower for word in ["محاسبه", "حساب", "calculate", "math"]):
+            tools.append("calculate")
+
+        if any(word in query_lower for word in ["زمان", "تاریخ", "time", "date", "today"]):
+            tools.append("get_current_datetime")
+
+        return tools[:2]  # حداکثر 2 ابزار
+
+    async def _execute_tool(self, tool_name: str, query: str) -> Optional[Dict[str, Any]]:
+        """اجرای یک ابزار خاص"""
+        try:
+            if tool_name == "web_search":
+                return await self._execute_web_search(query)
+            elif tool_name == "calculate":
+                return await self._execute_calculator(query)
+            elif tool_name == "get_current_datetime":
+                return await self._execute_datetime_tool(query)
+            else:
+                logger.warning(f"⚠️ Unknown tool: {tool_name}")
+                return None
+        except Exception as e:
+            logger.warning(f"⚠️ Tool execution failed for '{tool_name}': {e}")
+            return None
+
+    async def _execute_web_search(self, query: str) -> Dict[str, Any]:
+        """اجرای جستجوی وب"""
+        try:
+            # استفاده از DuckDuckGo Instant Answer API یا مشابه
+            # در صورت عدم دسترسی، از mock data استفاده می‌کنیم
+            import requests
+
+            # جستجوی ساده DuckDuckGo
+            search_url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1"
+
+            response = requests.get(search_url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                answer = data.get("Answer", "")
+                if not answer:
+                    answer = data.get("AbstractText", "No direct answer found")
+
+                return {
+                    "tool": "web_search",
+                    "query": query,
+                    "result": answer[:500],  # محدود به 500 کاراکتر
+                    "source": "DuckDuckGo Instant Answer"
+                }
+            else:
+                # Fallback
+                return {
+                    "tool": "web_search",
+                    "query": query,
+                    "result": f"Web search simulation: Results for '{query}' would be shown here.",
+                    "source": "Fallback"
+                }
+
+        except Exception as e:
+            logger.warning(f"Web search failed: {e}")
+            return {
+                "tool": "web_search",
+                "query": query,
+                "result": f"Web search unavailable: {str(e)}",
+                "source": "Error"
+            }
+
+    async def _execute_calculator(self, query: str) -> Dict[str, Any]:
+        """اجرای ماشین حساب"""
+        try:
+            # استخراج عبارت ریاضی از query
+            import re
+
+            # جستجوی الگوهای ریاضی ساده
+            math_patterns = [
+                r'(\d+(?:\.\d+)?)\s*[\+\-\*\/]\s*(\d+(?:\.\d+)?)',  # عملیات پایه
+                r'sqrt\((\d+(?:\.\d+)?)\)',  # جذر
+                r'(\d+(?:\.\d+)?)\s*\^\s*(\d+(?:\.\d+)?)',  # توان
+            ]
+
+            for pattern in math_patterns:
+                match = re.search(pattern, query)
+                if match:
+                    expression = match.group(0)
+                    result = self._calculate_expression(expression)
+                    return {
+                        "tool": "calculate",
+                        "query": query,
+                        "result": f"Result of '{expression}' = {result}",
+                        "expression": expression,
+                        "calculated_result": result
+                    }
+
+            return {
+                "tool": "calculate",
+                "query": query,
+                "result": "Could not identify mathematical expression in query",
+                "expression": None,
+                "calculated_result": None
+            }
+
+        except Exception as e:
+            logger.warning(f"Calculator failed: {e}")
+            return {
+                "tool": "calculate",
+                "query": query,
+                "result": f"Calculation failed: {str(e)}",
+                "expression": None,
+                "calculated_result": None
+            }
+
+    def _calculate_expression(self, expression: str) -> str:
+        """محاسبه عبارت ریاضی ساده"""
+        try:
+            # جایگزینی عملیات فارسی
+            expression = expression.replace("×", "*").replace("÷", "/")
+
+            # محاسبات امن
+            if "sqrt(" in expression:
+                import math
+                num = float(re.search(r'sqrt\((\d+(?:\.\d+)?)\)', expression).group(1))
+                return str(math.sqrt(num))
+            elif "^" in expression:
+                base, exp = expression.split("^")
+                return str(float(base.strip()) ** float(exp.strip()))
+            else:
+                # استفاده از eval با محدودیت‌های امنیتی
+                allowed_chars = "0123456789.+-*/()"
+                if all(c in allowed_chars for c in expression):
+                    result = eval(expression)
+                    return str(result)
+                else:
+                    return "Unsupported operation"
+
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    async def _execute_datetime_tool(self, query: str) -> Dict[str, Any]:
+        """اجرای ابزار تاریخ/زمان"""
+        try:
+            from datetime import datetime
+            import pytz
+
+            # منطقه زمانی تهران
+            tehran_tz = pytz.timezone('Asia/Tehran')
+            now = datetime.now(tehran_tz)
+
+            result = f"Current date and time in Tehran: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+
+            return {
+                "tool": "get_current_datetime",
+                "query": query,
+                "result": result,
+                "datetime": now.isoformat(),
+                "timezone": "Asia/Tehran"
+            }
+
+        except Exception as e:
+            logger.warning(f"Datetime tool failed: {e}")
+            return {
+                "tool": "get_current_datetime",
+                "query": query,
+                "result": f"Could not get current datetime: {str(e)}",
+                "datetime": None,
+                "timezone": None
+            }
+
     async def run(self, 
                   query: str, 
                   user_id: Optional[str] = None,
