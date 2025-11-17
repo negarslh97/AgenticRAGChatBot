@@ -13,10 +13,13 @@ from fastapi.responses import JSONResponse
 import psutil
 import time
 import asyncio
+import json
+import os
 from typing import Dict, Any
 from app.domain.entities import Admin
 from app.core.permissions import get_current_admin
 from app.core.logging_config import get_logger
+from app.core.config import settings
 import logging
 
 router = APIRouter()
@@ -349,7 +352,7 @@ async def cleanup_connections(
 @router.get("/models")
 async def get_available_models():
     """
-    دریافت لیست مدل‌های موجود (عمومی)
+    دریافت لیست مدل‌های موجود از فایل کانفیگ متمرکز (عمومی)
     
     Returns:
         - models: لیست مدل‌های AI موجود با مشخصات کامل
@@ -357,46 +360,99 @@ async def get_available_models():
         - default_model: مدل پیش‌فرض
     """
     try:
-        from app.infrastructure.model_factory import model_factory
+        # مسیر فایل کانفیگ مدل‌ها
+        # __file__ is in app/api/routes/system_routes.py
+        # Need to go up 3 levels: routes -> api -> app -> root
+        current_dir = os.path.dirname(__file__)  # app/api/routes
+        api_dir = os.path.dirname(current_dir)   # app/api
+        app_dir = os.path.dirname(api_dir)       # app
+        root_dir = os.path.dirname(app_dir)      # root (sally-backend)
+        models_config_path = os.path.join(root_dir, "config", "models.json")
         
-        # Get all models from factory
-        models_info = model_factory.list_models()
+        models_config = None
         
-        # Enhance with frontend-compatible format
-        enhanced_models = []
-        for model in models_info:
-            config = model.get('config', {})
-            enhanced_model = {
-                "id": model['name'],
-                "name": model['name'].split('/')[-1].replace('-', ' ').title(),
-                "provider": model['provider'].title(),
-                "description": config.get('metadata', {}).get('description', 'مدل AI'),
-                "category": config.get('metadata', {}).get('category', 'other'),
-                "speed": config.get('metadata', {}).get('speed_ch_per_s', 'N/A'),
-                "empty_chunks": config.get('metadata', {}).get('empty_chunks', 'N/A'),
-                "max_tokens": model['max_tokens'],
-                "temperature": model['temperature'],
-                "supports_streaming": model['streaming'],
-                "supports_json": model['json']
+        if os.path.exists(models_config_path):
+            try:
+                with open(models_config_path, 'r', encoding='utf-8') as f:
+                    models_config = json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load models config file: {e}")
+        
+        # اگر فایل کانفیگ وجود نداشت یا خطا داشت، از model_factory استفاده کن
+        if not models_config or not models_config.get("models"):
+            logger.info("Models config file not found or empty, falling back to model_factory")
+            from app.infrastructure.model_factory import model_factory
+            
+            # Get all models from factory
+            models_info = model_factory.list_models()
+            
+            # Enhance with frontend-compatible format
+            enhanced_models = []
+            for model in models_info:
+                config = model.get('config', {})
+                enhanced_model = {
+                    "id": model['name'],
+                    "name": model['name'].split('/')[-1].replace('-', ' ').title(),
+                    "provider": model['provider'].title(),
+                    "description": config.get('metadata', {}).get('description', 'مدل AI'),
+                    "category": config.get('metadata', {}).get('category', 'other'),
+                    "speed": config.get('metadata', {}).get('speed_ch_per_s'),
+                    "empty_chunks": config.get('metadata', {}).get('empty_chunks'),
+                    "max_tokens": model['max_tokens'],
+                    "temperature": model['temperature'],
+                    "supports_streaming": model['streaming'],
+                    "supports_json": model['json']
+                }
+                enhanced_models.append(enhanced_model)
+            
+            # Categorize models for frontend
+            categories = {
+                "fastest": [m for m in enhanced_models if m.get('category') == 'fastest'],
+                "free": [m for m in enhanced_models if m.get('category') == 'free'],
+                "openai": [m for m in enhanced_models if m.get('category') == 'openai'],
+                "heavy": [m for m in enhanced_models if m.get('category') == 'heavy'],
+                "ollama": [m for m in enhanced_models if m.get('category') == 'ollama'],
+                "other": [m for m in enhanced_models if m.get('category') not in ['fastest', 'free', 'openai', 'heavy', 'ollama']]
             }
-            enhanced_models.append(enhanced_model)
-        
-        # Categorize models for frontend
-        categories = {
-            "fastest": [m for m in enhanced_models if m['category'] == 'fastest'],
-            "free": [m for m in enhanced_models if m['category'] == 'free'],
-            "openai": [m for m in enhanced_models if m['category'] == 'openai'],
-            "heavy": [m for m in enhanced_models if m['category'] == 'heavy'],
-            "ollama": [m for m in enhanced_models if m['category'] == 'ollama'],
-            "other": [m for m in enhanced_models if m['category'] not in ['fastest', 'free', 'openai', 'heavy', 'ollama']]
-        }
+            
+            default_model = getattr(settings, 'chat_model_loaded', 'google/gemini-2.5-flash')
+        else:
+            # استفاده از فایل کانفیگ
+            enhanced_models = []
+            for model_config in models_config.get("models", []):
+                enhanced_model = {
+                    "id": model_config.get("id"),
+                    "name": model_config.get("name"),
+                    "provider": model_config.get("provider"),
+                    "description": model_config.get("description"),
+                    "category": model_config.get("category", "other"),
+                    "speed": model_config.get("speed"),
+                    "empty_chunks": model_config.get("empty_chunks"),
+                    "max_tokens": model_config.get("max_tokens", 8192),
+                    "temperature": model_config.get("temperature", 0.7),
+                    "supports_streaming": model_config.get("supports_streaming", True),
+                    "supports_json": model_config.get("supports_json", True)
+                }
+                enhanced_models.append(enhanced_model)
+            
+            # گروه‌بندی مدل‌ها
+            categories = {
+                "fastest": [m for m in enhanced_models if m.get('category') == 'fastest'],
+                "free": [m for m in enhanced_models if m.get('category') == 'free'],
+                "openai": [m for m in enhanced_models if m.get('category') == 'openai'],
+                "heavy": [m for m in enhanced_models if m.get('category') == 'heavy'],
+                "ollama": [m for m in enhanced_models if m.get('category') == 'ollama'],
+                "other": [m for m in enhanced_models if m.get('category') not in ['fastest', 'free', 'openai', 'heavy', 'ollama']]
+            }
+            
+            default_model = models_config.get("default_models", {}).get("chat", "google/gemini-2.5-flash")
         
         return {
             "status": "success",
             "data": {
                 "models": enhanced_models,
                 "categories": categories,
-                "default_model": "google/gemini-2.5-flash",
+                "default_model": default_model,
                 "total_count": len(enhanced_models)
             }
         }
@@ -404,6 +460,31 @@ async def get_available_models():
     except Exception as e:
         logger.error(f"Error getting available models: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/models/config")
+async def get_models_config():
+    """
+    دریافت کانفیگ خام مدل‌ها از فایل JSON
+    """
+    try:
+        # __file__ is in app/api/routes/system_routes.py
+        # Need to go up 3 levels: routes -> api -> app -> root
+        current_dir = os.path.dirname(__file__)  # app/api/routes
+        api_dir = os.path.dirname(current_dir)   # app/api
+        app_dir = os.path.dirname(api_dir)       # app
+        root_dir = os.path.dirname(app_dir)      # root (sally-backend)
+        models_config_path = os.path.join(root_dir, "config", "models.json")
+        
+        if os.path.exists(models_config_path):
+            with open(models_config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        else:
+            raise HTTPException(status_code=404, detail="Models configuration file not found")
+            
+    except Exception as e:
+        logger.error(f"Failed to get raw models config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load models configuration: {str(e)}")
 
 
 

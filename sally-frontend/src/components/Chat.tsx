@@ -20,6 +20,7 @@ import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import ArticleHighlightModal from './ArticleHighlightModal';
 import ModelSelector from './ModelSelector';
+import { getDefaultModel } from '../config/models';
 
 // Define component-specific types
 interface Message {
@@ -66,7 +67,7 @@ const Chat: React.FC = () => {
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [selectedModel, setSelectedModel] = useState('google/gemini-2.5-flash'); // Default model
+  const [selectedModel, setSelectedModel] = useState(getDefaultModel('chat')); // Default model from config
   const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   

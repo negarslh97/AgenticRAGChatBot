@@ -47,6 +47,7 @@ import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
 import ArticleHighlightModal from '../components/ArticleHighlightModal'
 import BlackCatImage from '../assets/Black-Cat.png'
+import { MODELS_CONFIG, getDefaultModel, getModelById } from '../config/models'
 
 interface Message {
   id: string
@@ -110,94 +111,6 @@ interface ModelInfo {
     empty_chunks?: string
 }
 
-// 🔥 Fallback models list (used if API fails)
-const FALLBACK_MODELS: ModelInfo[] = [
-    {
-        id: 'google/gemini-2.5-flash',
-        name: '🏆 Gemini 2.5 Flash',
-        provider: 'Google',
-        description: '✅ سریع‌ترین - 264 ch/s، رایگان',
-        detailed_description: 'سریع‌ترین مدل گوگل با سرعت 264 کاراکتر در ثانیه و رایگان.'
-    },
-    {
-        id: 'qwen/qwen3-235b-a22b-2507',
-        name: 'Qwen 3',
-        provider: 'Alibaba',
-        description: '✅ سریع‌ترین - 264 ch/s',
-        detailed_description: 'مدل قدرتمند علی‌بابا با 235 میلیارد پارامتر و عملکرد عالی در فارسی.'
-    },
-    {
-        id: 'minimax/minimax-m2:free',
-        name: 'MINIMAX M2',
-        provider: 'minimax',
-        description: 'مدل جدید و قدرتمند Minimax',
-        detailed_description: 'مدل جدید Minimax با تکنولوژی پیشرفته و عملکرد بالا در پردازش زبان طبیعی.'
-    },
-    {
-        id: 'tngtech/deepseek-r1t2-chimera:free',
-        name: '⭐ DeepSeek R1T2 Chimera (Free)',
-        provider: 'DeepSeek',
-        description: '✅ 117 ch/s، 0% empty، رایگان',
-        detailed_description: 'مدل رایگان DeepSeek با سرعت 117 ch/s و بدون قطعات خالی.'
-    },
-    {
-        id: 'gpt-4o-mini',
-        name: '⭐ GPT-4o Mini',
-        provider: 'OpenAI',
-        description: '✅ 89 ch/s، پایدار، کیفیت بالا',
-        detailed_description: 'نسخه بهینه‌شده GPT-4 با تعادل عالی بین سرعت و کیفیت. با سرعت 89 کاراکتر در ثانیه و پایداری بالا، تعادل مناسبی بین سرعت و کیفیت ارائه می‌دهد.'
-    },
-    {
-        id: 'gpt-4o',
-        name: 'GPT-4o',
-        provider: 'OpenAI',
-        description: 'قدرتمندترین OpenAI',
-        detailed_description: 'قدرتمندترین مدل OpenAI با قابلیت‌های چندحالته و بالاترین کیفیت.'
-    },
-    {
-        id: 'gpt-5-mini',
-        name: '⭐ GPT-5 Mini',
-        provider: 'OpenAI',
-        description: 'جدیدترین و قدرتمندترین مدل OpenAI با تعادل عالی بین سرعت و کیفیت',
-        detailed_description: 'نسخه بهینه‌شده GPT-5 جدیدترین و پیشرفته‌ترین مدل OpenAI با قابلیت‌های فوق‌العاده و کیفیت بالا در پاسخگویی.'
-    },
-    {
-        id: 'gpt-5',
-        name: '🏆 GPT-5',
-        provider: 'OpenAI',
-        description: 'جدیدترین و پیشرفته‌ترین مدل OpenAI',
-        detailed_description: 'جدیدترین و پیشرفته‌ترین مدل OpenAI با بالاترین کیفیت، قابلیت‌های فوق‌العاده و تعامل طبیعی با کاربران.'
-    },
-    {
-        id: 'x-ai/grok-4-fast',
-        name: 'Grok 4 Fast ⚠️',
-        provider: 'xAI',
-        description: '143 ch/s، اما 70% empty chunks',
-        detailed_description: 'سریع اما با 70% قطعات خالی که ممکن است بر کیفیت تأثیر بگذارد.'
-    },
-    {
-        id: 'ollama:gpt-oss:20b',
-        name: 'GPT-OSS 20B',
-        provider: 'Ollama',
-        description: 'مدل محلی OpenAI',
-        detailed_description: 'مدل متن‌باز محلی با 20 میلیارد پارامتر و حریم خصوصی کامل.'
-    },
-    {
-        id: 'ollama:gemma3n:e4b',
-        name: 'Gemma 3N E4B',
-        provider: 'Ollama',
-        description: 'مدل محلی قدرتمند Google',
-        detailed_description: 'نسخه بهینه‌شده Gemma گوگل برای اجرای محلی با مصرف منابع کم.'
-    },
-    {
-        id: 'ollama:llama3.1:8b-instruct-q4_0',
-        name: 'Llama 3.1 8B',
-        provider: 'Ollama',
-        description: 'مدل محلی Meta',
-        detailed_description: 'جدیدترین مدل متن‌باز Meta با 8 میلیارد پارامتر و عملکرد بالا.'
-    },
-]
-
 // 🔥 Elegant Skeleton Loader Component
 const SkeletonLoader = () => (
   <div className="flex items-start space-x-2 space-x-reverse p-3">
@@ -241,9 +154,9 @@ const SuperAdminChatPage = () => {
     const [showSettingsModal, setShowSettingsModal] = useState(false)
     const [selectedModel, setSelectedModel] = useState<string>(() => {
         const saved = localStorage.getItem('superAdmin_selectedModel')
-        return saved || 'google/gemini-2.5-flash'
+        return saved || getDefaultModel('chat')
     })
-    const [availableModels, setAvailableModels] = useState<ModelInfo[]>(FALLBACK_MODELS)  // 🔥 Load models from API
+    const [availableModels, setAvailableModels] = useState<ModelInfo[]>([])  // 🔥 Load models from API
     const [temperature, setTemperature] = useState<number>(() => {
         const saved = localStorage.getItem('superAdmin_temperature')
         return saved ? parseFloat(saved) : 0.7
@@ -385,14 +298,14 @@ const SuperAdminChatPage = () => {
     const isDevelopment = process.env.NODE_ENV === 'development'
 
     const scrollToBottom = useCallback(() => {
-            // Only auto-scroll if user hasn't scrolled up
-            if (!userHasScrolledUp.current && messagesContainerRef.current) {
-                messagesContainerRef.current.scrollTo({
-                    top: messagesContainerRef.current.scrollHeight,
-                    behavior: 'smooth'
-                })
-            }
-        }, [])
+        // Only auto-scroll if user hasn't scrolled up
+        if (!userHasScrolledUp.current && messagesContainerRef.current) {
+            messagesContainerRef.current.scrollTo({
+                top: messagesContainerRef.current.scrollHeight,
+                behavior: 'smooth'
+            })
+        }
+    }, [userHasScrolledUp, messagesContainerRef])
         
         // 🔥 Typewriter Cursor Component
         const TypewriterCursor = () => (
@@ -510,10 +423,10 @@ const SuperAdminChatPage = () => {
         try {
             const modelData = await chatService.getAvailableModels()
             
-            // Convert API models to our format and merge with fallback data
+            // Convert API models to our format
             const formattedModels: ModelInfo[] = modelData.models.map(model => {
-                // Find matching fallback model to get detailed_description, speed, and empty_chunks
-                const fallbackModel = FALLBACK_MODELS.find(fm => fm.id === model.id)
+                // Get model info from config for additional details
+                const configModel = getModelById(model.id)
                 
                 // 🔥 Detect provider based on model ID if provider is incorrect
                 let provider = model.provider
@@ -536,26 +449,42 @@ const SuperAdminChatPage = () => {
                 return {
                     id: model.id,
                     name: model.name,
-                    provider: provider, // Use detected provider
+                    provider: provider,
                     description: model.description,
-                    detailed_description: (model as any).detailed_description || fallbackModel?.detailed_description || model.description, // Use fallback detailed_description if available
+                    detailed_description: model.description, // Use description as detailed_description
                     category: model.category,
-                    speed: model.speed || fallbackModel?.speed, // Use fallback speed if API doesn't provide it
-                    empty_chunks: model.empty_chunks || fallbackModel?.empty_chunks // Use fallback empty_chunks if API doesn't provide it
+                    speed: model.speed || configModel?.speed,
+                    empty_chunks: model.empty_chunks || configModel?.empty_chunks
                 }
             })
             
             setAvailableModels(formattedModels)
             
             // Set default model if current selection is not available
-            const defaultModel = modelData.default_model || 'google/gemini-2.5-flash'
+            const defaultModel = modelData.default_model || getDefaultModel('chat')
             if (!formattedModels.find(m => m.id === selectedModel)) {
                 setSelectedModel(defaultModel)
             }
         } catch (error: any) {
-            console.error('Failed to load models from API, using fallback:', error)
-            // Keep fallback models
-            setAvailableModels(FALLBACK_MODELS)
+            console.error('Failed to load models from API, using config fallback:', error)
+            // Fallback to config models
+            const configModels: ModelInfo[] = MODELS_CONFIG.models.map(model => ({
+                id: model.id,
+                name: model.name,
+                provider: model.provider,
+                description: model.description,
+                detailed_description: model.description,
+                category: model.category,
+                speed: model.speed,
+                empty_chunks: model.empty_chunks
+            }))
+            setAvailableModels(configModels)
+            
+            // Set default model from config
+            const defaultModel = getDefaultModel('chat')
+            if (!configModels.find(m => m.id === selectedModel)) {
+                setSelectedModel(defaultModel)
+            }
         }
     }, [selectedModel])
 

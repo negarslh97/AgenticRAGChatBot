@@ -1,11 +1,14 @@
 const { createProxyMiddleware } = require('http-proxy-middleware')
 
+// می‌توانید این متغیر را تغییر دهید تا بین حالت‌های مختلف سوئیچ کنید
+const API_TARGET = process.env.API_TARGET || 'localhost:8000'
+
 module.exports = function(app) {
   // Proxy API requests to the backend
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'http://192.168.10.221:8000',
+      target: `http://${API_TARGET}`,
       changeOrigin: true,
     })
   )
@@ -28,7 +31,7 @@ module.exports = function(app) {
         console.log('✅ Response from Whisper:', proxyRes.statusCode)
       },
       onError: (err, req, res) => {
-        console.error('❌ Proxy Error:', err.message)
+        console.error('❌ Whisper Proxy Error:', err.message)
       }
     })
   )
@@ -51,7 +54,7 @@ module.exports = function(app) {
         console.log('✅ Response from Vosk:', proxyRes.statusCode)
       },
       onError: (err, req, res) => {
-        console.error('❌ Model 2 Proxy Error:', err.message)
+        console.error('❌ Vosk Proxy Error:', err.message)
       }
     })
   )

@@ -7,6 +7,8 @@ Advanced model factory with strategy pattern and dynamic model selection.
 import asyncio
 import logging
 import copy
+import json
+import os
 from typing import Dict, Any, Optional, Type, List, Callable
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -414,6 +416,140 @@ class OpenRouterModel(BaseModelInterface):
         return self.config
 
 
+class LocalModel(BaseModelInterface):
+    """Local model implementation (Ollama)."""
+    
+    def __init__(self, config: ModelConfig):
+        self.config = config
+        self._capabilities = self._initialize_capabilities()
+        cb_config = CircuitBreakerConfig(
+            failure_threshold=3,
+            recovery_timeout=30,
+            name=f"local_{config.name}"
+        )
+        self._circuit_breaker = CircuitBreaker(cb_config)
+    
+    def _initialize_capabilities(self) -> ModelCapabilities:
+        """Initialize model capabilities based on model name."""
+        capabilities = ModelCapabilities()
+        
+        # Set capabilities based on model type
+        if self.config.model_type == ModelType.CHAT:
+            capabilities.supports_streaming = True
+            capabilities.supports_json = True
+            capabilities.supports_tools = False
+            capabilities.max_context_length = 4096  # Ollama typically has lower context
+            capabilities.cost_per_1k_tokens = {"input": 0.0, "output": 0.0}  # Free
+            capabilities.languages = ["en", "fa"]
+            capabilities.special_features = ["local", "offline"]
+        elif self.config.model_type == ModelType.EMBEDDING:
+            capabilities.supports_embeddings = True
+            capabilities.max_context_length = 8192
+            capabilities.cost_per_1k_tokens = {"input": 0.0}
+        
+        return capabilities
+    
+    @circuit_breaker_protect(failure_threshold=3, recovery_timeout=30)
+    async def generate(self, prompt: str, **kwargs) -> str:
+        """Generate response from local model."""
+        try:
+            from langchain_ollama import ChatOllama
+            
+            model = ChatOllama(
+                model=self.config.name.split(":")[-1],  # Extract model name from "ollama:model-name"
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                top_p=self.config.top_p,
+                streaming=False,
+                base_url=self.config.base_url,
+                timeout=self.config.timeout
+            )
+            
+            from langchain_core.messages import HumanMessage
+            from langchain_core.output_parsers import StrOutputParser
+            
+            messages = [HumanMessage(content=prompt)]
+            chain = model | StrOutputParser()
+            
+            result = await chain.ainvoke(messages)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Local model generation failed: {e}")
+            raise AIException(
+                message=f"Local model {self.config.name} failed: {str(e)}",
+                error_type=ErrorType.MODEL_UNAVAILABLE,
+                severity=AISeverity.HIGH,
+                model_name=self.config.name
+            )
+    
+    @circuit_breaker_protect(failure_threshold=3, recovery_timeout=30)
+    async def generate_stream(self, prompt: str, **kwargs):
+        """Generate streaming response from local model."""
+        try:
+            from langchain_ollama import ChatOllama
+            
+            model = ChatOllama(
+                model=self.config.name.split(":")[-1],  # Extract model name from "ollama:model-name"
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+                top_p=self.config.top_p,
+                streaming=True,
+                base_url=self.config.base_url,
+                timeout=self.config.timeout
+            )
+            
+            from langchain_core.messages import HumanMessage
+            
+            messages = [HumanMessage(content=prompt)]
+            chain = model
+            
+            async for chunk in chain.astream(messages):
+                if hasattr(chunk, 'content'):
+                    yield chunk.content
+                else:
+                    yield str(chunk)
+                    
+        except Exception as e:
+            logger.error(f"Local model streaming failed: {e}")
+            raise AIException(
+                message=f"Local model {self.config.name} streaming failed: {str(e)}",
+                error_type=ErrorType.MODEL_UNAVAILABLE,
+                severity=AISeverity.HIGH,
+                model_name=self.config.name
+            )
+    
+    @circuit_breaker_protect(failure_threshold=3, recovery_timeout=30)
+    async def embed(self, text: str) -> List[float]:
+        """Generate embeddings from local model."""
+        try:
+            from langchain_ollama import OllamaEmbeddings
+            
+            embeddings = OllamaEmbeddings(
+                model=self.config.name.split(":")[-1],  # Extract model name from "ollama:model-name"
+                base_url=self.config.base_url
+            )
+            
+            return await embeddings.aembed_query(text)
+            
+        except Exception as e:
+            logger.error(f"Local embedding generation failed: {e}")
+            raise AIException(
+                message=f"Local embedding {self.config.name} failed: {str(e)}",
+                error_type=ErrorType.MODEL_UNAVAILABLE,
+                severity=AISeverity.HIGH,
+                model_name=self.config.name
+            )
+    
+    def get_capabilities(self) -> ModelCapabilities:
+        """Get model capabilities."""
+        return self._capabilities
+    
+    def get_config(self) -> ModelConfig:
+        """Get model configuration."""
+        return self.config
+
+
 class ModelFactory:
     """Factory for creating and managing AI models."""
     
@@ -428,6 +564,7 @@ class ModelFactory:
         self._model_strategies: Dict[ModelProvider, Type[BaseModelInterface]] = {
             ModelProvider.OPENAI: OpenAIModel,
             ModelProvider.OPENROUTER: OpenRouterModel,
+            ModelProvider.LOCAL: LocalModel,
         }
     
     def register_provider(self, provider: ModelProvider, model_class: Type[BaseModelInterface]):
@@ -701,270 +838,121 @@ model_factory = ModelFactory()
 # Register default providers
 model_factory.register_provider(ModelProvider.OPENAI, OpenAIModel)
 model_factory.register_provider(ModelProvider.OPENROUTER, OpenRouterModel)
+model_factory.register_provider(ModelProvider.LOCAL, LocalModel)
 
-# Add default models based on settings
+# Add default models based on centralized config
 def _register_default_models():
-    """Register AI models based on settings configuration."""
+    """Register AI models based on centralized config file."""
     try:
         models_to_add = []
         
-        # 🤖 Complete model list synchronized with frontend SuperAdminChatPage.tsx
-        # 🏆 Best RAG models (based on real tests - ordered by speed)
+        # خواندن از فایل کانفیگ مرکزی
+        # __file__ is in app/infrastructure/model_factory.py
+        # Need to go up 2 levels: infrastructure -> app -> root
+        current_dir = os.path.dirname(__file__)  # app/infrastructure
+        app_dir = os.path.dirname(current_dir)   # app
+        root_dir = os.path.dirname(app_dir)      # root (sally-backend)
+        models_config_path = os.path.join(root_dir, "config", "models.json")
         
-        # 🥇 Fastest models (264 ch/s, 0% empty chunks)
-        fastest_models = [
-            ModelConfig(
-                name="google/gemini-2.5-flash",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.2,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "fastest",
-                    "speed_ch_per_s": 264,
-                    "empty_chunks": "0%",
-                    "description": "✅ سریع‌ترین - 264 ch/s، رایگان"
-                }
-            ),
-            ModelConfig(
-                name="qwen/qwen3-235b-a22b:free",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "fastest",
-                    "speed_ch_per_s": 264,
-                    "empty_chunks": "0%",
-                    "description": "✅ سریع‌ترین - 264 ch/s، رایگان"
-                }
-            ),
-            ModelConfig(
-                name="minimax/minimax-m2:free",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "fastest",
-                    "description": "مدل سریع MINIMAX"
-                }
-            )
-        ]
+        if not os.path.exists(models_config_path):
+            logger.error(f"❌ Models config file not found at: {models_config_path}")
+            raise FileNotFoundError(f"Models configuration file not found: {models_config_path}")
         
-        # 🥈 Excellent free models
-        free_models = [
-            ModelConfig(
-                name="tngtech/deepseek-r1t2-chimera:free",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "free",
-                    "speed_ch_per_s": 117,
-                    "empty_chunks": "0%",
-                    "description": "✅ 117 ch/s، 0% empty، رایگان"
-                }
-            )
-        ]
-        
-        # 🥉 Official OpenAI models (use Embedder API)
-        openai_models = [
-            ModelConfig(
-                name="gpt-4o-mini",
-                provider=ModelProvider.OPENAI,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.embedder_api_key_loaded,
-                base_url=settings.embedder_openai_base_url_loaded,
-                metadata={
-                    "category": "openai",
-                    "speed_ch_per_s": 89,
-                    "description": "✅ 89 ch/s، پایدار، کیفیت بالا"
-                }
-            ),
-            ModelConfig(
-                name="gpt-4o",
-                provider=ModelProvider.OPENAI,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.embedder_api_key_loaded,
-                base_url=settings.embedder_openai_base_url_loaded,
-                metadata={
-                    "category": "openai",
-                    "description": "قدرتمندترین OpenAI"
-                }
-            ),
-            ModelConfig(
-                name="gpt-4-turbo",
-                provider=ModelProvider.OPENAI,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.embedder_api_key_loaded,
-                base_url=settings.embedder_openai_base_url_loaded,
-                metadata={
-                    "category": "openai",
-                    "description": "نسخه توربو GPT-4"
-                }
-            ),
-            ModelConfig(
-                name="gpt-5",
-                provider=ModelProvider.OPENAI,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.embedder_api_key_loaded,
-                base_url=settings.embedder_openai_base_url_loaded,
-                metadata={
-                    "category": "openai",
-                    "description": "جدیدترین و پیشرفته‌ترین مدل OpenAI"
-                }
-            ),
-            ModelConfig(
-                name="gpt-5-mini",
-                provider=ModelProvider.OPENAI,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.embedder_api_key_loaded,
-                base_url=settings.embedder_openai_base_url_loaded,
-                metadata={
-                    "category": "openai",
-                    "description": "جدیدترین و پیشرفته‌ترین مدل OpenAI"
-                }
-            )
-        ]
-        
-        # ⚠️ Models with many chunks (work but not optimized)
-        heavy_models = [
-            ModelConfig(
-                name="x-ai/grok-4-fast",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "heavy",
-                    "speed_ch_per_s": 143,
-                    "empty_chunks": "70%",
-                    "description": "143 ch/s، اما 70% empty chunks"
-                }
-            ),
-            ModelConfig(
-                name="x-ai/grok-3-mini-beta",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "heavy",
-                    "speed_ch_per_s": 149,
-                    "empty_chunks": "65%",
-                    "description": "149 ch/s، اما 65% empty chunks"
-                }
-            )
-        ]
-        
-        # Other models
-        other_models = [
-            ModelConfig(
-                name="deepseek/deepseek-r1-0528",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "other",
-                    "description": "مدل قدرتمند DeepSeek"
-                }
-            ),
-            ModelConfig(
-                name="qwen/qwen3-235b-a22b-2507",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=8192,
-                temperature=0.7,
-                api_key=settings.openai_api_key_loaded,
-                base_url=settings.openai_base_url_loaded,
-                metadata={
-                    "category": "other",
-                    "description": "مدل Alibaba"
-                }
-            )
-        ]
-        
-        # Ollama Local Models (using OPENROUTER as fallback since LOCAL is not implemented)
-        ollama_models = [
-            ModelConfig(
-                name="ollama:gpt-oss:20b",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=4096,
-                temperature=0.7,
-                base_url=settings.ollama_url_loaded,  # Ollama API
-                metadata={
-                    "category": "ollama",
-                    "description": "مدل محلی OpenAI"
-                }
-            ),
-            ModelConfig(
-                name="ollama:gemma3n:e4b",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=4096,
-                temperature=0.7,
-                base_url=settings.ollama_url_loaded,  # Ollama API
-                metadata={
-                    "category": "ollama",
-                    "description": "مدل محلی قدرتمند Google"
-                }
-            ),
-            ModelConfig(
-                name="ollama:llama3.1:8b-instruct-q4_0",
-                provider=ModelProvider.OPENROUTER,
-                model_type=ModelType.CHAT,
-                max_tokens=4096,
-                temperature=0.7,
-                base_url=settings.ollama_url_loaded,  # Ollama API
-                metadata={
-                    "category": "ollama",
-                    "description": "مدل محلی Meta"
-                }
-            )
-        ]
-        
-        # Combine all models
-        all_models = (fastest_models + free_models + openai_models +
-                     heavy_models + other_models + ollama_models)
+        try:
+            with open(models_config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+                models_config = config_data.get("models", [])
+            
+            if not models_config:
+                logger.error("❌ No models found in config file")
+                raise ValueError("Models configuration file is empty or invalid")
+            
+            for model_config_data in models_config:
+                try:
+                    # تعیین provider بر اساس base_url و model_id (دقیق‌تر)
+                    model_id = model_config_data.get("id", "")
+                    base_url = model_config_data.get("base_url", "")
+                    
+                    # اولویت‌بندی تعیین provider:
+                    # 1. بر اساس base_url
+                    # 2. بر اساس model_id
+                    # 3. بر اساس api_key
+                    
+                    if "openai.com" in base_url:
+                        provider = ModelProvider.OPENAI
+                        api_key = settings.embedder_api_key_loaded
+                    elif "ollama" in model_id or base_url.startswith("http://192.168.10.222:11434"):
+                        provider = ModelProvider.LOCAL
+                        api_key = None
+                        base_url = base_url or settings.ollama_url_loaded if hasattr(settings, 'ollama_url_loaded') else base_url
+                    elif "openrouter.ai" in base_url or model_config_data.get("api_key") == "openrouter":
+                        provider = ModelProvider.OPENROUTER
+                        api_key = settings.openai_api_key_loaded
+                    else:
+                        # fallback به روش قبلی
+                        provider_mapping = {
+                            "openai": ModelProvider.OPENAI,
+                            "openrouter": ModelProvider.OPENROUTER,
+                            "ollama": ModelProvider.LOCAL
+                        }
+                        provider = provider_mapping.get(
+                            model_config_data.get("api_key", "openrouter"),
+                            ModelProvider.OPENROUTER
+                        )
+                        
+                        if model_config_data.get("api_key") == "openai":
+                            api_key = settings.embedder_api_key_loaded
+                        elif model_config_data.get("api_key") == "openrouter":
+                            api_key = settings.openai_api_key_loaded
+                        elif model_config_data.get("api_key") == "ollama":
+                            base_url = settings.ollama_url_loaded if hasattr(settings, 'ollama_url_loaded') else base_url
+                    
+                    model_config = ModelConfig(
+                        name=model_config_data["id"],
+                        provider=provider,
+                        model_type=ModelType.CHAT,
+                        max_tokens=model_config_data.get("max_tokens", 8192),
+                        temperature=model_config_data.get("temperature", 0.7),
+                        api_key=api_key,
+                        base_url=base_url,
+                        metadata={
+                            "category": model_config_data.get("category", "other"),
+                            "description": model_config_data.get("description", ""),
+                            "speed": model_config_data.get("speed"),
+                            "empty_chunks": model_config_data.get("empty_chunks"),
+                            "provider_name": model_config_data.get("provider", ""),
+                            "speed_ch_per_s": model_config_data.get("metadata", {}).get("speed_ch_per_s") if isinstance(model_config_data.get("metadata"), dict) else None
+                        }
+                    )
+                    
+                    models_to_add.append(model_config)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to parse model config {model_config_data.get('id', 'unknown')}: {e}")
+                    continue
+            
+            if not models_to_add:
+                logger.error("❌ No valid models could be loaded from config file")
+                raise ValueError("No valid models found in configuration")
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Invalid JSON in models config file: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Failed to load models from config file: {e}")
+            raise
         
         # Add all models to factory
-        for model_config in all_models:
+        for model_config in models_to_add:
             success = model_factory.add_model(model_config)
             if not success:
                 logger.warning(f"Failed to add model {model_config.name}")
         
-        logger.info(f"✅ Registered {len(all_models)} models synchronized with frontend")
+        logger.info(f"✅ Registered {len(models_to_add)} models from centralized config file")
         
     except Exception as e:
         logger.error(f"❌ Failed to register default models: {e}")
+        raise
 
 # Initialize default models
 _register_default_models()

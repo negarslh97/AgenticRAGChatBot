@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { chatService } from '../services/chatService'
 import { Bot, Zap, Crown, Cpu, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { MODELS_CONFIG, getGroupedModels, getModelById, getCategoryOrder } from '../config/models'
 
 interface Model {
   id: string
@@ -45,12 +46,21 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
     try {
       setLoading(true)
       setError(null)
-      const modelData = await chatService.getAvailableModels()
-      setModels(modelData.models)
+      // اول از API امتحان می‌کنیم
+      try {
+        const modelData = await chatService.getAvailableModels()
+        setModels(modelData.models)
+      } catch (apiError) {
+        console.warn('Failed to load models from API, using local config:', apiError)
+        // fallback به فایل کانفیگ
+        setModels(MODELS_CONFIG.models)
+      }
     } catch (err) {
       console.error('Failed to load models:', err)
       setError('خطا در بارگذاری مدل‌ها')
       toast.error('خطا در بارگذاری مدل‌ها')
+      // در صورت خطا، از config محلی استفاده کن
+      setModels(MODELS_CONFIG.models)
     } finally {
       setLoading(false)
     }
@@ -117,7 +127,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
     return acc
   }, {} as Record<string, Model[]>)
 
-  const categoryOrder = ['fastest', 'free', 'openai', 'heavy', 'ollama', 'other']
+  const categoryOrder = getCategoryOrder()
 
   return (
     <div className={`model-selector ${className}`}>
@@ -213,19 +223,23 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
         </SelectContent>
       </Select>
       
-      {selectedModel && !loading && !error && (
-        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-center gap-2 text-sm text-blue-800">
-            {getCategoryIcon(models.find(m => m.id === selectedModel)?.category || 'other')}
-            <span className="font-medium">
-              مدل انتخابی: {models.find(m => m.id === selectedModel)?.name}
-            </span>
+      {selectedModel && !loading && !error && (() => {
+        const selectedModelInfo = getModelById(selectedModel) || models.find(m => m.id === selectedModel)
+        if (!selectedModelInfo) return null
+        return (
+          <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center gap-2 text-sm text-blue-800">
+              {getCategoryIcon(selectedModelInfo.category || 'other')}
+              <span className="font-medium">
+                مدل انتخابی: {selectedModelInfo.name}
+              </span>
+            </div>
+            <p className="text-xs text-blue-600 mt-1">
+              {selectedModelInfo.description}
+            </p>
           </div>
-          <p className="text-xs text-blue-600 mt-1">
-            {models.find(m => m.id === selectedModel)?.description}
-          </p>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
