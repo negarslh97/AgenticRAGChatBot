@@ -194,7 +194,7 @@ class DatabaseHealthCheckRequest(BaseModel):
     connection_string: Optional[str] = Field(
         None,
         description="Database connection string",
-        example="mongodb://localhost:27017/SallyChatBot"
+        example="mongodb://192.168.10.222:27017/SallyChatBot"
     )
     timeout: Optional[int] = Field(
         30,

@@ -38,6 +38,11 @@ except ImportError:
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.tools import tool
+try:
+    from pydantic import BaseModel, Field
+except ImportError:
+    from pydantic.v1 import BaseModel, Field
 
 
 class AgentAction(str, Enum):
@@ -53,65 +58,108 @@ class AgentAction(str, Enum):
     USE_TOOLS = "use_tools"          # استفاده از ابزارهای خارجی
 
 
-# 🔥 Function Calling Tools برای Agentic RAG
-EXTERNAL_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": "جستجوی اطلاعات جدید و به‌روز از وب برای موضوعات عمومی",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "عبارت جستجوی وب (باید دقیق و مرتبط باشد)"
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "حداکثر تعداد نتایج (پیش‌فرض: 3)",
-                        "default": 3
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate",
-            "description": "انجام محاسبات ریاضی ساده",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "expression": {
-                        "type": "string",
-                        "description": "عبارت ریاضی برای محاسبه (مثال: '2 + 3 * 4' یا 'sqrt(16)')"
-                    }
-                },
-                "required": ["expression"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_datetime",
-            "description": "دریافت تاریخ و زمان فعلی",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "timezone": {
-                        "type": "string",
-                        "description": "منطقه زمانی (اختیاری، پیش‌فرض: Asia/Tehran)",
-                        "default": "Asia/Tehran"
-                    }
-                }
-            }
-        }
-    }
-]
+# 🔥 Input Schemas برای ابزارهای LangChain
+class WebSearchInput(BaseModel):
+    """ورودی ابزار جستجوی وب"""
+    query: str = Field(description="عبارت جستجوی وب (باید دقیق و مرتبط باشد)")
+    max_results: int = Field(default=3, description="حداکثر تعداد نتایج")
+
+
+class CalculatorInput(BaseModel):
+    """ورودی ابزار ماشین حساب"""
+    expression: str = Field(description="عبارت ریاضی برای محاسبه (مثال: '2 + 3 * 4' یا 'sqrt(16)')")
+
+
+class DateTimeInput(BaseModel):
+    """ورودی ابزار تاریخ/زمان"""
+    timezone: str = Field(default="Asia/Tehran", description="منطقه زمانی")
+
+
+# 🔥 LangChain Tools برای Agentic RAG
+@tool("web_search", args_schema=WebSearchInput)
+async def web_search_tool(query: str, max_results: int = 3) -> str:
+    """
+    جستجوی اطلاعات جدید و به‌روز از وب برای موضوعات عمومی.
+
+    این ابزار برای دریافت اطلاعات جاری، اخبار، و موضوعات عمومی از وب استفاده می‌شود.
+    """
+    try:
+        import requests
+
+        # جستجوی ساده DuckDuckGo
+        search_url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1"
+
+        response = requests.get(search_url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            answer = data.get("Answer", "")
+            if not answer:
+                answer = data.get("AbstractText", "No direct answer found")
+
+            return answer[:500]  # محدود به 500 کاراکتر
+        else:
+            return f"Web search simulation: Results for '{query}' would be shown here."
+
+    except Exception as e:
+        logger.warning(f"Web search failed: {e}")
+        return f"Web search unavailable: {str(e)}"
+
+
+@tool("calculate", args_schema=CalculatorInput)
+async def calculate_tool(expression: str) -> str:
+    """
+    انجام محاسبات ریاضی ساده.
+
+    این ابزار برای محاسبات پایه ریاضی، جذر، توان، و عملیات ساده استفاده می‌شود.
+    """
+    try:
+        # جایگزینی عملیات فارسی
+        expression = expression.replace("×", "*").replace("÷", "/")
+
+        # محاسبات امن
+        if "sqrt(" in expression:
+            import math
+            num = float(re.search(r'sqrt\((\d+(?:\.\d+)?)\)', expression).group(1))
+            return str(math.sqrt(num))
+        elif "^" in expression:
+            base, exp = expression.split("^")
+            return str(float(base.strip()) ** float(exp.strip()))
+        else:
+            # استفاده از eval با محدودیت‌های امنیتی
+            allowed_chars = "0123456789.+-*/()"
+            if all(c in allowed_chars for c in expression):
+                result = eval(expression)
+                return str(result)
+            else:
+                return "Unsupported operation"
+
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+@tool("get_current_datetime", args_schema=DateTimeInput)
+async def datetime_tool(timezone: str = "Asia/Tehran") -> str:
+    """
+    دریافت زمان و تاریخ فعلی.
+
+    این ابزار برای دریافت زمان و تاریخ جاری در منطقه زمانی مشخص استفاده می‌شود.
+    """
+    try:
+        from datetime import datetime
+        import pytz
+
+        tz = pytz.timezone(timezone)
+        now = datetime.now(tz)
+
+        return now.strftime('%Y-%m-%d %H:%M:%S %Z')
+
+    except Exception as e:
+        logger.warning(f"Datetime tool failed: {e}")
+        return f"Error getting datetime: {str(e)}"
+
+
+# لیست ابزارهای LangChain
+LANGCHAIN_TOOLS = [web_search_tool, calculate_tool, datetime_tool]
 
 
 class QueryComplexity(str, Enum):
@@ -1703,91 +1751,90 @@ class AdvancedAgenticRAG:
 
     async def use_external_tools(self, state: AgenticRAGState) -> AgenticRAGState:
         """
-        🔥 Function Calling: استفاده از ابزارهای خارجی
+        🔥 Function Calling: استفاده از ابزارهای LangChain
 
         استراتژی:
-        1. تشخیص ابزار مناسب بر اساس سوال
-        2. فراخوانی ابزار با پارامترهای مناسب
-        3. اضافه کردن نتایج به context
+        1. LLM با ابزارها bind می‌شود
+        2. LLM تصمیم می‌گیرد کدام ابزار را استفاده کند
+        3. ابزارها به صورت خودکار اجرا می‌شوند
+        4. نتایج به context اضافه می‌شود
         """
         with PerformanceLogger(logger, "use_external_tools"):
-            logger.info("🔧 Starting external tools execution")
+            logger.info("🔧 Starting LangChain tools execution")
 
             query = state["query"]
             aggregated_context = state.get("aggregated_context", {})
 
             try:
-                # استفاده از LLM برای تصمیم‌گیری درباره ابزارها
-                tool_selection_prompt = f"""
-                Analyze this query and decide which external tools to use:
-
-                Query: {query}
-
-                Available tools:
-                1. web_search: For current news, latest information, or general web queries
-                2. calculate: For mathematical calculations and computations
-                3. get_current_datetime: For current time/date information
-
-                Return a JSON object with:
-                - "tools": array of tool names to use
-                - "reasoning": brief explanation
-
-                Example: {{"tools": ["web_search"], "reasoning": "Query needs current information"}}
-                """
-
+                # دریافت LLM و bind کردن با ابزارها
                 llm = model_factory.create_model("fast")
-                tool_decision = await llm.agenerate([tool_selection_prompt])
+                llm_with_tools = llm.bind_tools(LANGCHAIN_TOOLS)
 
-                if hasattr(tool_decision, 'content'):
-                    decision_text = tool_decision.content
-                else:
-                    decision_text = str(tool_decision)
+                # فراخوانی LLM با ابزارها
+                messages = [HumanMessage(content=f"Answer this query using available tools if needed: {query}")]
+                response = await llm_with_tools.ainvoke(messages)
 
-                # پردازش تصمیم LLM
-                try:
-                    decision = json.loads(decision_text.strip())
-                    selected_tools = decision.get("tools", [])
-                except json.JSONDecodeError:
-                    # اگر JSON نامعتبر است، تشخیص ساده
-                    selected_tools = self._simple_tool_selection(query)
-
-                logger.info(f"🛠️ Selected tools: {selected_tools}")
-
-                # اجرای ابزارهای انتخاب شده
                 tool_results = []
-                for tool_name in selected_tools:
-                    try:
-                        result = await self._execute_tool(tool_name, query)
-                        if result:
-                            tool_results.append(result)
-                            logger.info(f"✅ Tool '{tool_name}' executed successfully")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Tool '{tool_name}' failed: {e}")
+
+                # بررسی آیا ابزار فراخوانی شده است
+                if hasattr(response, 'tool_calls') and response.tool_calls:
+                    logger.info(f"🛠️ LLM requested {len(response.tool_calls)} tool calls")
+
+                    # اجرای ابزارهای درخواست شده
+                    for tool_call in response.tool_calls:
+                        try:
+                            tool_name = tool_call["name"]
+                            tool_args = tool_call["args"]
+
+                            logger.info(f"🔧 Executing tool: {tool_name} with args: {tool_args}")
+
+                            # یافتن ابزار مناسب
+                            tool_func = None
+                            for tool in LANGCHAIN_TOOLS:
+                                if tool.name == tool_name:
+                                    tool_func = tool
+                                    break
+
+                            if tool_func:
+                                # اجرای ابزار
+                                result = await tool_func.ainvoke(tool_args)
+                                tool_results.append({
+                                    "tool": tool_name,
+                                    "query": query,
+                                    "args": tool_args,
+                                    "result": result,
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                                logger.info(f"✅ Tool '{tool_name}' executed successfully")
+                            else:
+                                logger.warning(f"⚠️ Tool '{tool_name}' not found")
+
+                        except Exception as e:
+                            logger.warning(f"⚠️ Tool execution failed: {e}")
+                else:
+                    logger.info("ℹ️ LLM did not request any tools")
 
                 # اضافه کردن نتایج ابزارها به context
                 if tool_results:
                     state["external_tool_results"] = tool_results
-                    state["tools_used"] = selected_tools
+                    state["tools_used"] = [r["tool"] for r in tool_results]
 
                     # اضافه کردن به aggregated_context
                     if "external_sources" not in aggregated_context:
                         aggregated_context["external_sources"] = []
 
                     for result in tool_results:
-                        aggregated_context["external_sources"].append({
-                            "tool": result["tool"],
-                            "query": result["query"],
-                            "result": result["result"],
-                            "timestamp": datetime.now().isoformat()
-                        })
+                        aggregated_context["external_sources"].append(result)
 
                     state["aggregated_context"] = aggregated_context
-                    logger.info(f"📊 Added {len(tool_results)} external tool results to context")
+                    logger.info(f"📊 Added {len(tool_results)} LangChain tool results to context")
+                else:
+                    logger.info("ℹ️ No tool results to add to context")
 
                 return state
 
             except Exception as e:
-                logger.warning(f"⚠️ External tools execution failed: {e}")
+                logger.warning(f"⚠️ LangChain tools execution failed: {e}")
                 return state
 
     def _simple_tool_selection(self, query: str) -> List[str]:

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     default_SuperAdmin_password: str = "admin123"
     
     # CORS
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:3001", "http://0.0.0.0:3000", "http://0.0.0.0:3001"]
+    cors_origins: List[str] = ["http://192.168.10.221:3000", "http://192.168.10.221:3001", "http://0.0.0.0:3000", "http://0.0.0.0:3001"]
 
     # Weaviate Vector Database Configuration
     weaviate_url: Optional[str] = None
@@ -56,10 +56,10 @@ class Settings(BaseSettings):
     
     # 🆕 RAG Retrieval Configuration
     # 🔥 OPTIMIZED for Performance - Reduced from high values to prevent memory issues
-    weaviate_retrieval_limit: int = 12      # تعداد اسناد برای بازیابی اولیه (افزایش یافته از 8)
-    reranker_top_k: int = 8                 # تعداد اسناد برتر بعد از reranking (افزایش یافته از 5)
-    context_documents_count: int = 8        # تعداد اسناد TOP برای ارسال full context (افزایش یافته از 5)
-    max_sources_to_format: int = 8          # حداکثر تعداد منابع یکتا برای نمایش (افزایش یافته از 5)
+    weaviate_retrieval_limit: int = 6       # از 12 به 6
+    reranker_top_k: int = 4                 # از 8 به 4  
+    context_documents_count: int = 3        # از 8 به 3
+    max_sources_to_format: int = 3          # از 8 به 3
     
     # 🆕 Hybrid Model Strategy (برای کاهش هزینه و بهبود سرعت)
     # برای وظایف ساده از مدل سریع و ارزان، برای وظایف پیچیده از مدل قدرتمند
@@ -71,8 +71,8 @@ class Settings(BaseSettings):
     # 🔥 OPTIMIZED for Performance - Reduced resource usage
     agentic_search_limit: int = 5                # تعداد نتایج جستجو (افزایش یافته از 3 برای پاسخ‌های کامل‌تر)
     agentic_max_subqueries: int = 3              # حداکثر تعداد زیرسوالات (افزایش یافته از 2)
-    agentic_context_chunk_size: int = 600        # اندازه chunk برای context (افزایش یافته از 400)
-    agentic_history_messages_count: int = 7      # تعداد پیام‌های تاریخچه (افزایش یافته از 3)
+    agentic_context_chunk_size: int = 300        # اندازه chunk برای context (افزایش یافته از 400)
+    agentic_history_messages_count: int = 3  # از 7 به 3
     agentic_min_confidence_threshold: float = 0.3 # حداقل confidence برای retry (کاهش یافته از 0.4)
     agentic_max_retries: int = 2                 # حداکثر تعداد retry (افزایش یافته از 1)
     
@@ -183,6 +183,7 @@ class Settings(BaseSettings):
     model_config = {
         "protected_namespaces": ("settings_",),
         "env_file": ".env",
+        "env_prefix": "",  # No prefix for environment variables
         "extra": "ignore"  # Ignore extra fields from environment variables
     }
 

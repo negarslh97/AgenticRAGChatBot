@@ -49,13 +49,13 @@ echo.
 echo =======================================
 echo    Servers Started Successfully!
 echo =======================================
-echo Backend API: http://127.0.0.1:8000
-echo Frontend App: http://localhost:3000
-echo API Docs: http://127.0.0.1:8000/docs
+echo Backend API: http://192.168.10.221:8000
+echo Frontend App: http://192.168.10.221:3000
+echo API Docs: http://192.168.10.221:8000/docs
 echo.
 echo Default Admin Login:
-echo Email: admin@sally.com
-echo Password: admin123
+echo Email: xtra_admin@sally.com
+echo Password: 123456
 echo.
 echo =======================================
 echo.

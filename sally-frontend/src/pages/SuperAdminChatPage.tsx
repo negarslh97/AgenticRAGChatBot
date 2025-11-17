@@ -260,6 +260,8 @@ const SuperAdminChatPage = () => {
     const textareaRef = useRef<HTMLTextAreaElement>(null)  // 🔥 Ref for textarea auto-resize
     const conversationIdRef = useRef<string | undefined>(undefined)  // 🔥 Store conversation_id from init event
     const refreshInProgressRef = useRef<Set<string>>(new Set())  // 🔥 Track refresh operations to prevent duplicates
+    const assistantTempIdRef = useRef<string>('')  // 🔥 Store assistantTempId in ref
+    const streamingTimeoutsRef = useRef<{[key: string]: NodeJS.Timeout}>({})  // 🔥 Track streaming timeouts
 
     // Smart scroll state - using useRef for better performance
     const userHasScrolledUp = useRef(false)
@@ -397,6 +399,36 @@ const SuperAdminChatPage = () => {
             <span className="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
         )
 
+        // 🔥 Gradual streaming function for typewriter effect
+        const streamContentGradually = useCallback((messageId: string, content: string, delay: number = 30) => {
+            // Clear any existing timeout for this message
+            if (streamingTimeoutsRef.current[messageId]) {
+                clearTimeout(streamingTimeoutsRef.current[messageId]);
+            }
+
+            let currentIndex = 0;
+            const streamNext = () => {
+                if (currentIndex < content.length) {
+                    // Add next character
+                    setTypewriterMessages(prev => ({
+                        ...prev,
+                        [messageId]: content.substring(0, currentIndex + 1)
+                    }));
+                    currentIndex++;
+                    
+                    // Schedule next character with variable delay for natural feel
+                    const nextDelay = Math.random() * 20 + 20; // 20-40ms delay
+                    streamingTimeoutsRef.current[messageId] = setTimeout(streamNext, nextDelay);
+                } else {
+                    // Cleanup timeout when done
+                    delete streamingTimeoutsRef.current[messageId];
+                }
+            };
+            
+            // Start streaming
+            streamNext();
+        }, []);
+
     const handleScroll = useCallback(() => {
         if (!messagesContainerRef.current) return
 
@@ -421,9 +453,20 @@ const SuperAdminChatPage = () => {
     useEffect(() => {
         // Always auto-scroll smoothly when messages change, but respect user scroll preference
         if (!userHasScrolledUp.current) {
-            scrollToBottom()
+            setTimeout(() => scrollToBottom(), 100)
         }
-    }, [selectedConversation?.messages, scrollToBottom])
+    }, [selectedConversation?.messages])
+
+    // 🔥 Cleanup streaming timeouts on unmount
+    useEffect(() => {
+        return () => {
+            // Clear all streaming timeouts to prevent memory leaks
+            Object.values(streamingTimeoutsRef.current).forEach(timeout => {
+                clearTimeout(timeout);
+            });
+            streamingTimeoutsRef.current = {};
+        };
+    }, []);
     
     // 🔥 Toggle sidebar collapse/expand
     const toggleSidebarCollapse = () => {
@@ -567,6 +610,7 @@ const SuperAdminChatPage = () => {
 
             // 🔥 استفاده از streaming API برای admin
             const assistantTempId = `ai-temp-${Date.now()}`;
+            assistantTempIdRef.current = assistantTempId;  // 🔥 Store in ref
             const addAssistantPlaceholder = () => setSelectedConversation(prev => ({
                 ...prev!,
                 messages: [...(prev?.messages || []), {
@@ -642,17 +686,10 @@ const SuperAdminChatPage = () => {
                                             // Accumulate content from chunks
                                             const newContent = (currentMessage.content || '') + (evt.content || '');
                                             
-                                            // 🔥 Real-time streaming: Update typewriterMessages directly for immediate display
-                                            setTypewriterMessages(prevTypewriter => {
-                                                // Get current content from typewriterMessages or from message content
-                                                const currentTypewriterContent = prevTypewriter[assistantTempId] || '';
-                                                // Append new chunk content
-                                                const updatedContent = currentTypewriterContent + (evt.content || '');
-                                                return {
-                                                    ...prevTypewriter,
-                                                    [assistantTempId]: updatedContent
-                                                };
-                                            });
+                                            // 🔥 Real-time streaming: Use gradual streaming for typewriter effect
+                                            if (evt.content) {
+                                                streamContentGradually(assistantTempId, newContent);
+                                            }
                                             
                                             // Update message content
                                             updated.messages = updated.messages.map(m =>
@@ -674,11 +711,18 @@ const SuperAdminChatPage = () => {
                                         const updated = { ...prev };
                                         const finalContent = evt.full_response || updated.messages.find(m => m.id === assistantTempId)?.content || '';
                                         
-                                        // 🔥 Update typewriterMessages with final content
-                                        setTypewriterMessages(prev => ({
-                                            ...prev,
-                                            [assistantTempId]: finalContent
-                                        }));
+                                        // 🔥 Update typewriterMessages with final content only if streaming hasn't completed
+                                        setTypewriterMessages(prev => {
+                                            const currentContent = prev[assistantTempId] || '';
+                                            // Only update if current content is less than final content (streaming in progress)
+                                            if (currentContent.length < finalContent.length) {
+                                                return {
+                                                    ...prev,
+                                                    [assistantTempId]: finalContent
+                                                };
+                                            }
+                                            return prev; // Keep current content to preserve typing effect
+                                        });
                                         
                                         updated.messages = updated.messages.map(m =>
                                             m.id === assistantTempId
@@ -2144,18 +2188,15 @@ const SuperAdminChatPage = () => {
                                                                                 const currentMessage = updated.messages.find(m => m.id === assistantTempId);
                                                                                 
                                                                                 if (currentMessage) {
+                                                                                    // Accumulate content from chunks
                                                                                     const newContent = (currentMessage.content || '') + (evt.content || '');
                                                                                     
-                                                                                    // 🔥 Real-time streaming: Update typewriterMessages directly
-                                                                                    setTypewriterMessages(prev => {
-                                                                                        const currentTypewriterContent = prev[assistantTempId] || currentMessage.content || '';
-                                                                                        const updatedContent = currentTypewriterContent + (evt.content || '');
-                                                                                        return {
-                                                                                            ...prev,
-                                                                                            [assistantTempId]: updatedContent
-                                                                                        };
-                                                                                    });
+                                                                                    // 🔥 Real-time streaming: Use gradual streaming for typewriter effect
+                                                                                    if (evt.content) {
+                                                                                        streamContentGradually(assistantTempId, newContent);
+                                                                                    }
                                                                                     
+                                                                                    // Update message content
                                                                                     updated.messages = updated.messages.map(m =>
                                                                                         m.id === assistantTempId
                                                                                             ? { ...m, content: newContent }
@@ -2175,11 +2216,18 @@ const SuperAdminChatPage = () => {
                                                                                 const updated = { ...prev };
                                                                                 const finalContent = evt.full_response || updated.messages.find(m => m.id === assistantTempId)?.content || '';
                                                                                 
-                                                                                // 🔥 Update typewriterMessages with final content
-                                                                                setTypewriterMessages(prev => ({
-                                                                                    ...prev,
-                                                                                    [assistantTempId]: finalContent
-                                                                                }));
+                                                                                // 🔥 Update typewriterMessages with final content only if streaming hasn't completed
+                                                                                setTypewriterMessages(prev => {
+                                                                                    const currentContent = prev[assistantTempId] || '';
+                                                                                    // Only update if current content is less than final content (streaming in progress)
+                                                                                    if (currentContent.length < finalContent.length) {
+                                                                                        return {
+                                                                                            ...prev,
+                                                                                            [assistantTempId]: finalContent
+                                                                                        };
+                                                                                    }
+                                                                                    return prev; // Keep current content to preserve typing effect
+                                                                                });
                                                                                 
                                                                                 updated.messages = updated.messages.map(m =>
                                                                                     m.id === assistantTempId

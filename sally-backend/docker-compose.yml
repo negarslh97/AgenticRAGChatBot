@@ -1,6 +1,35 @@
 services:
+  # ================================
+  # MongoDB Database
+  # ================================
+  mongodb:
+    image: mongo:7.0
+    container_name: sallybot-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password123}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-SallyChatBot}
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongodb-init:/docker-entrypoint-initdb.d
+    networks:
+      - sallybot-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ================================
+  # Weaviate Vector Database
+  # ================================
   weaviate:
     image: cr.weaviate.io/semitechnologies/weaviate:1.33.0
+    container_name: sallybot-weaviate
     command:
       - --host
       - 0.0.0.0
@@ -14,14 +43,14 @@ services:
       - "8080:8080"
       - "50051:50051"
       - "2112:2112"
-    restart: on-failure
+    restart: unless-stopped
     environment:
       # Basic settings
       QUERY_DEFAULTS_LIMIT: 25
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
       ENABLE_API_BASED_MODULES: 'true'
 
-      # ✅ FIX: Single-node configuration
+      # Single-node configuration
       CLUSTER_HOSTNAME: 'node1'
       DEFAULT_VECTORIZER_MODULE: 'text2vec-openai'
       ENABLE_MODULES: 'text2vec-openai'
@@ -30,43 +59,184 @@ services:
       OPENAI_APIKEY: ${Embedder_API_KEY}
       OPENAI_BASE_URL: ${Embedder_OPENAI_BASE_URL}
 
-      # ✅ FIX: Disable replication for single-node
+      # Disable replication for single-node
       REPLICATION_FACTOR: '1'
       ENABLE_REPLICATION: 'false'
 
-      # ✅ Enhanced Persistence settings for data durability
+      # Enhanced Persistence settings for data durability
       PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
       PERSISTENCE_FLUSH_IDLE_MEMTABLES_AFTER: '10'
       PERSISTENCE_MAX_SSTABLE_SIZE_FOR_MERGE: '10485760'
       PERSISTENCE_LSM_ACCESS_STRATEGY: 'mmap'
       PERSISTENCE_INVERTED_INDEX_CONFIG_MAXIMUM_CHUNK_SIZE: '10485760'
 
-      # ✅ Backup and recovery settings
+      # Backup and recovery settings
       BACKUP_FILESYSTEM_PATH: '/var/lib/weaviate/backups'
 
-      # ✅ Memory management for better performance
+      # Memory management for better performance
       QUERY_MAXIMUM_RESULTS: 10000
       MEMORY_PRESSURE_THRESHOLD: '0.85'
 
-      # ✅ Disable telemetry and set log level
+      # Disable telemetry and set log level
       DISABLE_TELEMETRY: 'true'
       LOG_LEVEL: 'info'
 
       # Enable Prometheus monitoring
       PROMETHEUS_MONITORING_ENABLED: 'true'
     volumes:
-      - ./weaviate_data:/var/lib/weaviate
+      - weaviate_data:/var/lib/weaviate
     networks:
-      - sallybot-network   
+      - sallybot-network
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/v1/.well-known/ready"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 40s    
+      start_period: 40s
 
+  # ================================
+  # Redis (برای Caching و Session Management)
+  # ================================
+  redis:
+    image: redis:7-alpine
+    container_name: sallybot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    networks:
+      - sallybot-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # ================================
+  # Backend API (FastAPI)
+  # ================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: sallybot-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      MONGODB_URL: mongodb://admin:password123@mongodb:27017/SallyChatBot?authSource=admin
+      
+      # JWT
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-sally-chatbot-super-secure-secret-key-2025-change-in-production}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 43200
+      
+      # Default Admin
+      DEFAULT_SUPERADMIN_EMAIL: ${DEFAULT_SUPERADMIN_EMAIL:-xtra@sally.com}
+      DEFAULT_SUPERADMIN_PASSWORD: ${DEFAULT_SUPERADMIN_PASSWORD:-admin123}
+      
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://localhost"]}
+      
+      # Weaviate
+      WEAVIATE_URL: http://weaviate:8080
+      
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      
+      # Embedder
+      EMBEDDER_API_KEY: ${EMBEDDER_API_KEY}
+      EMBEDDER_OPENAI_BASE_URL: ${EMBEDDER_OPENAI_BASE_URL}
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-text-embedding-3-small}
+      
+      # Ollama
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      
+      # Redis
+      REDIS_URL: redis://:redis123@redis:6379/0
+      
+      # Environment
+      DEBUG: ${DEBUG:-false}
+      
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+      - ./knowledge-base:/app/knowledge-base
+    networks:
+      - sallybot-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/system/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
+  # ================================
+  # Frontend (React)
+  # ================================
+  frontend:
+    build:
+      context: ../sally-frontend
+      dockerfile: Dockerfile.frontend
+    container_name: sallybot-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
+      REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:8000}
+    networks:
+      - sallybot-network
+    depends_on:
+      - backend
+
+  # ================================
+  # Nginx (Reverse Proxy & Load Balancer)
+  # ================================
+  nginx:
+    image: nginx:alpine
+    container_name: sallybot-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    networks:
+      - sallybot-network
+    depends_on:
+      - frontend
+      - backend
+
+# ================================
+# Volumes for Data Persistence
+# ================================
+volumes:
+  mongodb_data:
+    driver: local
+  weaviate_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ================================
+# Networks
+# ================================
 networks:
   sallybot-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

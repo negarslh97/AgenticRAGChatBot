@@ -8,26 +8,214 @@ System Routes - مسیرهای مربوط به نظارت بر سیستم
 - مشاهده آمار سیستم
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import JSONResponse
+import psutil
+import time
+import asyncio
 from typing import Dict, Any
 from app.domain.entities import Admin
 from app.core.permissions import get_current_admin
 from app.core.logging_config import get_logger
-
-logger = get_logger(__name__)
+import logging
 
 router = APIRouter()
-
+logger = logging.getLogger(__name__)
 
 @router.get("/health")
-async def health_check():
+async def health_check() -> Dict[str, Any]:
     """
-    بررسی سلامت سیستم (عمومی - بدون authentication)
+    Comprehensive health check endpoint for monitoring and deployment validation.
+    """
+    try:
+        # Check database connections
+        from app.infrastructure.database.mongodb import mongo_client
+        
+        # Test MongoDB connection
+        await mongo_client.admin.command('ping')
+        mongodb_status = "healthy"
+    except Exception as e:
+        mongodb_status = f"unhealthy: {str(e)}"
+        logger.error(f"MongoDB health check failed: {e}")
+
+    try:
+        # Test Weaviate connection
+        from app.core.config import settings
+        import httpx
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{settings.weaviate_url_loaded}/v1/.well-known/ready", timeout=10)
+            weaviate_status = "healthy" if response.status_code == 200 else f"unhealthy: {response.status_code}"
+    except Exception as e:
+        weaviate_status = f"unhealthy: {str(e)}"
+        logger.error(f"Weaviate health check failed: {e}")
+
+    # System metrics
+    try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        system_metrics = {
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory.percent,
+            "memory_available_gb": round(memory.available / (1024**3), 2),
+            "disk_percent": disk.percent,
+            "disk_free_gb": round(disk.free / (1024**3), 2)
+        }
+    except Exception as e:
+        system_metrics = {"error": f"Could not retrieve system metrics: {str(e)}"}
+        logger.error(f"System metrics collection failed: {e}")
+
+    # Overall health status
+    is_healthy = (
+        mongodb_status == "healthy" and 
+        weaviate_status == "healthy" and
+        system_metrics.get("cpu_percent", 0) < 90 and
+        system_metrics.get("memory_percent", 0) < 90
+    )
+
+    health_data = {
+        "status": "healthy" if is_healthy else "unhealthy",
+        "timestamp": time.time(),
+        "services": {
+            "mongodb": mongodb_status,
+            "weaviate": weaviate_status,
+            "backend": "healthy"
+        },
+        "system": system_metrics,
+        "version": "2.0"
+    }
+
+    # Return appropriate HTTP status code
+    status_code = 200 if is_healthy else 503
+    return JSONResponse(content=health_data, status_code=status_code)
+
+@router.get("/metrics")
+async def get_metrics() -> Dict[str, Any]:
+    """
+    Get detailed system and application metrics.
+    """
+    try:
+        # Application uptime (approximate)
+        import os
+        start_time = os.path.getctime(__file__)  # Using file creation time as proxy
+        uptime_seconds = time.time() - start_time
+        
+        # Process information
+        process = psutil.Process()
+        process_memory = process.memory_info()
+        process_cpu = process.cpu_percent()
+
+        # Network connections
+        connections = len(psutil.net_connections())
+        
+        # Database stats (if available)
+        db_stats = {}
+        try:
+            from app.infrastructure.database.mongodb import mongo_client
+            db_stats = {
+                "mongodb_connected": True,
+                "mongodb_host": str(mongo_client.server_info().get('host', 'unknown'))
+            }
+        except Exception as e:
+            db_stats = {"mongodb_connected": False, "error": str(e)}
+
+        return {
+            "timestamp": time.time(),
+            "application": {
+                "uptime_seconds": round(uptime_seconds, 2),
+                "process_memory_mb": round(process_memory.rss / 1024 / 1024, 2),
+                "process_cpu_percent": process_cpu,
+                "active_connections": connections
+            },
+            "system": {
+                "cpu_count": psutil.cpu_count(),
+                "cpu_percent": psutil.cpu_percent(interval=1),
+                "memory_total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+                "memory_available_gb": round(psutil.virtual_memory().available / (1024**3), 2),
+                "memory_percent": psutil.virtual_memory().percent,
+                "disk_total_gb": round(psutil.disk_usage('/').total / (1024**3), 2),
+                "disk_free_gb": round(psutil.disk_usage('/').free / (1024**3), 2),
+                "disk_percent": psutil.disk_usage('/').percent
+            },
+            "database": db_stats,
+            "version": "2.0"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error collecting metrics: {e}")
+        raise HTTPException(status_code=500, detail=f"Error collecting metrics: {str(e)}")
+
+@router.get("/ready")
+async def readiness_check() -> Dict[str, str]:
+    """
+    Kubernetes readiness probe endpoint.
+    """
+    try:
+        # Check if essential services are ready
+        checks = []
+        
+        # Database check
+        try:
+            from app.infrastructure.database.mongodb import mongo_client
+            await mongo_client.admin.command('ping')
+            checks.append("database:ready")
+        except Exception as e:
+            checks.append(f"database:not_ready:{str(e)}")
+        
+        # Weaviate check
+        try:
+            from app.core.config import settings
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{settings.weaviate_url_loaded}/v1/.well-known/ready", timeout=5)
+                if response.status_code == 200:
+                    checks.append("weaviate:ready")
+                else:
+                    checks.append(f"weaviate:not_ready:{response.status_code}")
+        except Exception as e:
+            checks.append(f"weaviate:not_ready:{str(e)}")
+        
+        # All checks must pass
+        not_ready = [check for check in checks if ":not_ready" in check]
+        
+        if not_ready:
+            return JSONResponse(
+                content={
+                    "status": "not_ready",
+                    "checks": checks,
+                    "timestamp": time.time()
+                },
+                status_code=503
+            )
+        
+        return {
+            "status": "ready",
+            "checks": checks,
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        return JSONResponse(
+            content={
+                "status": "error",
+                "error": str(e),
+                "timestamp": time.time()
+            },
+            status_code=503
+        )
+
+@router.get("/live")
+async def liveness_check() -> Dict[str, str]:
+    """
+    Kubernetes liveness probe endpoint.
     """
     return {
-        "status": "healthy",
-        "service": "SallyBot API",
-        "version": "1.0.0"
+        "status": "alive",
+        "timestamp": time.time(),
+        "message": "Application is running"
     }
 
 

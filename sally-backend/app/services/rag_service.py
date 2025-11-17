@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, AsyncGenerator
 from abc import ABC, abstractmethod
 import logging
 import requests  # 🆕 برای ارتباط با API خارجی reranker
@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility, Customer, Admin, ArticleCategory, ArticleTag
 import hashlib
 import time
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -1225,7 +1226,172 @@ class RAGService(ABC):
 
 class SimpleRAGService(RAGService):
     """Simple RAG for guest users - uses public knowledge base only - STRICT MODE."""
-    
+
+    def _is_math_query(self, query: str) -> bool:
+        """تشخیص سوالات ریاضی ساده"""
+        math_indicators = [
+            # فارسی
+            "محاسبه", "حساب", "درصد", "درصد چنده", "چند درصد", "جمع", "تفریق", "ضرب", "تقسیم",
+            "مربع", "مجذور", "جذر", "توان", "به توان", "میانگین", "مجموع", "عددها",
+            "ریاضی", "حسابداری", "آماری", "آمار", "محاسباتی", "کسر", "اختلاف", "نسبت",
+            # انگلیسی
+            "calculate", "math", "percent", "percentage", "sum", "add", "plus",
+            "subtract", "minus", "multiply", "divide", "square", "sqrt", "power",
+            "average", "mean", "total", "statistics", "computation",
+            # نمادها
+            "%", "+", "-", "*", "/", "^", "√", "=", "="
+        ]
+
+        query_lower = query.lower()
+        return any(indicator in query_lower for indicator in math_indicators)
+
+    def _calculate_math_expression(self, query: str) -> Optional[str]:
+        """محاسبه عبارت ریاضی ساده"""
+        try:
+            import re
+            import math
+
+            # پاکسازی query
+            query = query.strip()
+
+            # الگوهای محاسبه درصد
+            percent_patterns = [
+                r'(\d+(?:\.\d+)?)%\s*از\s*(\d+(?:\.\d+)?)',  # x% از y
+                r'(\d+(?:\.\d+)?)\s*درصد\s*از\s*(\d+(?:\.\d+)?)',  # x درصد از y
+                r'چند\s*درصد\s*از\s*(\d+(?:\.\d+)?)\s*برابر\s*(\d+(?:\.\d+)?)',  # چند درصد از x برابر y
+            ]
+
+            for pattern in percent_patterns:
+                match = re.search(pattern, query, re.IGNORECASE)
+                if match:
+                    if len(match.groups()) == 2:
+                        percent, total = map(float, match.groups())
+                        result = (percent / 100) * total
+                        return f"{percent}% از {total} برابر است با {result}"
+                    elif len(match.groups()) == 3:
+                        total, value = map(float, match.groups()[1:])
+                        percent = (value / total) * 100
+                        return f"{value} چند درصد از {total} است؟ {percent:.2f}%"
+
+            # الگوی محاسبات پایه: عدد عملگر عدد
+            basic_math_pattern = r'(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)'
+            match = re.search(basic_math_pattern, query)
+            if match:
+                num1, operator, num2 = match.groups()
+                num1, num2 = float(num1), float(num2)
+
+                if operator == '+':
+                    result = num1 + num2
+                    return f"{num1} + {num2} = {result}"
+                elif operator == '-':
+                    result = num1 - num2
+                    return f"{num1} - {num2} = {result}"
+                elif operator == '*':
+                    result = num1 * num2
+                    return f"{num1} × {num2} = {result}"
+                elif operator == '/':
+                    if num2 != 0:
+                        result = num1 / num2
+                        return f"{num1} ÷ {num2} = {result}"
+                    else:
+                        return "تقسیم بر صفر ممکن نیست"
+
+            # الگوی جذر
+            sqrt_pattern = r'جذر\s*(\d+(?:\.\d+)?)'
+            match = re.search(sqrt_pattern, query, re.IGNORECASE)
+            if match:
+                num = float(match.group(1))
+                result = math.sqrt(num)
+                return f"√{num} = {result}"
+
+            # الگوی توان
+            power_pattern = r'(\d+(?:\.\d+)?)\s*به\s*توان\s*(\d+(?:\.\d+)?)'
+            match = re.search(power_pattern, query, re.IGNORECASE)
+            if match:
+                base, exp = map(float, match.groups())
+                result = base ** exp
+                return f"{base}^{exp} = {result}"
+
+            # الگوی میانگین
+            avg_pattern = r'میانگین\s*(?:عددهای?\s*)?([0-9۰-۹\s,،]+)'
+            match = re.search(avg_pattern, query, re.IGNORECASE)
+            if match:
+                numbers_str = match.group(1)
+                # استخراج اعداد (پشتیبانی از اعداد فارسی و انگلیسی)
+                numbers = re.findall(r'[0-9۰-۹]+(?:\.[0-9۰-۹]+)?', numbers_str)
+                if len(numbers) > 1:
+                    numbers = [float(n) for n in numbers]
+                    result = sum(numbers) / len(numbers)
+                    return f"میانگین {', '.join(map(str, numbers))} = {result:.2f}"
+
+            # الگوی مجموع
+            sum_pattern = r'جمع\s*(?:عددهای?\s*)?([0-9۰-۹\s,،]+)'
+            match = re.search(sum_pattern, query, re.IGNORECASE)
+            if match:
+                numbers_str = match.group(1)
+                # استخراج اعداد (پشتیبانی از اعداد فارسی و انگلیسی)
+                numbers = re.findall(r'[0-9۰-۹]+(?:\.[0-9۰-۹]+)?', numbers_str)
+                if len(numbers) > 1:
+                    numbers = [float(n) for n in numbers]
+                    result = sum(numbers)
+                    return f"جمع {', '.join(map(str, numbers))} = {result}"
+
+            # الگوی محاسبه درصد معکوس (x چند درصد از y است)
+            reverse_percent_pattern = r'(\d+(?:\.\d+)?)\s*چند\s*درصد\s*از\s*(\d+(?:\.\d+)?)\s*(?:است|می‌شود|هست)'
+            match = re.search(reverse_percent_pattern, query, re.IGNORECASE)
+            if match:
+                part, total = map(float, match.groups())
+                if total != 0:
+                    percent = (part / total) * 100
+                    return f"{part} چند درصد از {total} است؟ {percent:.2f}%"
+
+            # الگوی محاسبه درصد ساده‌تر
+            simple_percent_pattern = r'(\d+(?:\.\d+)?)%\s*=\s*؟'
+            match = re.search(simple_percent_pattern, query)
+            if match:
+                percent = float(match.group(1))
+                return f"{percent}% = {percent/100}"
+
+            # الگوی محاسبه مربع
+            square_pattern = r'مربع\s*(\d+(?:\.\d+)?)'
+            match = re.search(square_pattern, query, re.IGNORECASE)
+            if match:
+                num = float(match.group(1))
+                result = num ** 2
+                return f"مربع {num} = {result}"
+
+            # الگوی محاسبه کسر (کسر x/y)
+            fraction_pattern = r'کسر\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)'
+            match = re.search(fraction_pattern, query, re.IGNORECASE)
+            if match:
+                num, den = map(float, match.groups())
+                if den != 0:
+                    result = num / den
+                    return f"کسر {num}/{den} = {result}"
+
+            # الگوی محاسبه اختلاف
+            diff_pattern = r'اختلاف\s*(?:بین\s*)?(\d+(?:\.\d+)?)\s*و\s*(\d+(?:\.\d+)?)'
+            match = re.search(diff_pattern, query, re.IGNORECASE)
+            if match:
+                num1, num2 = map(float, match.groups())
+                result = abs(num1 - num2)
+                return f"اختلاف بین {num1} و {num2} = {result}"
+
+            # الگوی محاسبه نسبت
+            ratio_pattern = r'نسبت\s*(?:بین\s*)?(\d+(?:\.\d+)?)\s*و\s*(\d+(?:\.\d+)?)'
+            match = re.search(ratio_pattern, query, re.IGNORECASE)
+            if match:
+                num1, num2 = map(float, match.groups())
+                if num2 != 0:
+                    result = num1 / num2
+                    return f"نسبت بین {num1} و {num2} = {result:.2f}"
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Math calculation error: {e}")
+            return None
+
     async def generate_response(self, query: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Generate response using Simple RAG with public knowledge base.
@@ -1252,6 +1418,22 @@ class SimpleRAGService(RAGService):
         logger.debug(f"🧠 LLM Model: {settings.rag_model_loaded}")
         logger.debug(f"⚠️  STRICT MODE: Only knowledge base answers")
         logger.debug("=" * 60)
+
+        # 🔥 NEW: بررسی سوالات ریاضی ساده
+        if self._is_math_query(query):
+            logger.debug("🔢 Detected math query, attempting calculation...")
+            math_result = self._calculate_math_expression(query)
+            if math_result:
+                logger.debug(f"✅ Math calculation successful: {math_result}")
+                total_time = time.time() - start_time
+                logger.debug(f"⏱️  Math calculation time: {total_time:.3f}s")
+
+                return {
+                    "response": f"نتیجه محاسبه: {math_result}",
+                    "sources": [],
+                    "confidence": 1.0,  # اطمینان کامل برای محاسبات ریاضی
+                    "calculation_type": "simple_math"
+                }
 
         # Try to retrieve relevant documents from public knowledge base
         relevant_docs = await self.retrieve_relevant_documents(query, is_public_only=True)
@@ -1646,6 +1828,66 @@ class AgenticRAGService(RAGService):
             actions.append("view_account")
         
         return actions
+
+    async def generate_response_stream(self, query: str, context: Optional[Dict[str, Any]] = None) -> AsyncGenerator[str, None]:
+        """
+        Generate streaming response using Advanced Agentic RAG workflow.
+        🔥 NEW: Stream chunks of the response to enable real-time UI updates.
+        """
+        import time
+        
+        user_context = context or {}
+        user_id = user_context.get("user_id")
+        conversation_history = user_context.get("conversation_history", [])
+
+        logger.debug("=" * 60)
+        logger.debug("🚀 Invoking Advanced Agentic RAG Workflow (Streaming)...")
+        logger.debug(f"📝 Query: '{query[:100]}{'...' if len(query) > 100 else ''}'")
+        logger.debug(f"👤 User ID: {user_id if user_id else 'Anonymous'}")
+        logger.debug(f"🔓 Access Level: Full knowledge base")
+        logger.debug("=" * 60)
+
+        if not self.advanced_workflow:
+            logger.debug("❌ Advanced workflow is not available!")
+            # Fallback to simple streaming
+            yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید."
+            return
+
+        try:
+            # Use the workflow to get a complete response first
+            workflow_result = await self.advanced_workflow.run(
+                query=query,
+                conversation_history=conversation_history
+            )
+            
+            response_content = workflow_result.get('response', '')
+            
+            # Stream the response in chunks for UI
+            if response_content:
+                # Split response into sentences or chunks for streaming
+                sentences = response_content.split('. ')
+                current_chunk = ""
+                
+                for i, sentence in enumerate(sentences):
+                    current_chunk += sentence
+                    
+                    # Send chunk periodically or at sentence boundaries
+                    if i % 2 == 1 or i == len(sentences) - 1:  # Every 2 sentences or last sentence
+                        if current_chunk.strip():
+                            yield current_chunk.strip()
+                            current_chunk = ""
+                            # Small delay to make streaming visible
+                            await asyncio.sleep(0.1)
+                
+                # Send any remaining content
+                if current_chunk.strip():
+                    yield current_chunk.strip()
+            
+            logger.debug("✅ AgenticRAGService streaming completed")
+            
+        except Exception as e:
+            logger.error(f"❌ AgenticRAGService streaming failed: {e}")
+            yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم. لطفاً بعداً دوباره امتحان کنید."
 
 
 # Service factory
