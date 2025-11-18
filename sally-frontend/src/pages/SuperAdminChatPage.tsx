@@ -12,6 +12,7 @@
  */
 
 import React, { useState, useRef, useEffect, KeyboardEvent, useCallback } from 'react'
+import { useAudio } from '../hooks/useAudio'
 import {
   Plus,
   Send,
@@ -36,7 +37,8 @@ import {
   Check,
   RotateCcw,
   AlertCircle,
-  HelpCircle
+  HelpCircle,
+  RefreshCw
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Textarea } from '../components/ui/textarea'
@@ -47,6 +49,7 @@ import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
 import ArticleHighlightModal from '../components/ArticleHighlightModal'
 import BlackCatImage from '../assets/Black-Cat.png'
+import meowSound from '../assets/meow.mp3'
 import { MODELS_CONFIG, getDefaultModel, getModelById } from '../config/models'
 
 interface Message {
@@ -130,6 +133,8 @@ const SkeletonLoader = () => (
 )
 
 const SuperAdminChatPage = () => {
+    // Initialize audio hook for meow sound
+    const { play } = useAudio(meowSound)
     // 🔧 Feature Flags - برای مخفی کردن موقت برخی قابلیت‌ها
     const FEATURE_FLAGS = {
         SHOW_SETTINGS: true, // نمایش تنظیمات مدل و RAG
@@ -166,6 +171,7 @@ const SuperAdminChatPage = () => {
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)  // 🔥 Copy feedback state
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)  // 🔥 Delete confirmation state
     const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)  // 🔥 Keyboard shortcuts modal
+    const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null)  // 🔥 Regeneration loading state
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
     const initializationRef = useRef(false)
@@ -863,6 +869,44 @@ const SuperAdminChatPage = () => {
         setNewMessage(userMessage.content)
         setTimeout(() => {
             handleSendMessage()
+        }, 100)
+    }
+
+    // 🔥 Regenerate successful AI response
+    const regenerateMessage = async (messageId: string) => {
+        if (!selectedConversation) return
+        
+        const assistantMessage = selectedConversation.messages.find(m => m.id === messageId)
+        if (!assistantMessage || assistantMessage.role !== 'assistant') return
+
+        // Set regeneration loading state
+        setRegeneratingMessageId(messageId)
+
+        // Find the corresponding user message (previous message)
+        const messageIndex = selectedConversation.messages.findIndex(m => m.id === messageId)
+        if (messageIndex <= 0) {
+            setRegeneratingMessageId(null)
+            return
+        }
+        
+        const userMessage = selectedConversation.messages[messageIndex - 1]
+        if (!userMessage || userMessage.role !== 'user') {
+            setRegeneratingMessageId(null)
+            return
+        }
+
+        // Remove the current assistant message
+        const updatedMessages = selectedConversation.messages.filter((_, idx) => idx !== messageIndex)
+        setSelectedConversation({ ...selectedConversation, messages: updatedMessages })
+
+        // Set the user message as current and send it again
+        setNewMessage(userMessage.content)
+        setTimeout(() => {
+            handleSendMessage()
+            // Clear regeneration state after sending
+            setTimeout(() => {
+                setRegeneratingMessageId(null)
+            }, 500)
         }, 100)
     }
 
@@ -1743,7 +1787,7 @@ const SuperAdminChatPage = () => {
                             
                             {/* Title */}
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
+                                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden cursor-pointer hover:scale-105 transition-transform" onClick={play}>
                                     <img
                                         src={BlackCatImage}
                                         alt="AI Assistant"
@@ -1861,7 +1905,8 @@ const SuperAdminChatPage = () => {
                                                     <img
                                                         src={BlackCatImage}
                                                         alt="AI Assistant"
-                                                        className="w-full h-full object-cover"
+                                                        className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                                                        onClick={play}
                                                         onError={(e) => {
                                                             // Fallback to Bot icon if image fails to load
                                                             e.currentTarget.style.display = 'none';
@@ -1894,6 +1939,25 @@ const SuperAdminChatPage = () => {
                                                             title="تلاش مجدد"
                                                         >
                                                             <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                                                        </button>
+                                                    )}
+                                                    {message.role === 'assistant' && !message.is_failed && (
+                                                        <button
+                                                            onClick={() => regenerateMessage(message.id)}
+                                                            disabled={regeneratingMessageId === message.id || isLoading}
+                                                            className={`p-1.5 rounded-lg shadow-sm border transition-colors ${
+                                                                regeneratingMessageId === message.id || isLoading
+                                                                    ? 'bg-gray-100 border-gray-200 cursor-not-allowed'
+                                                                    : 'bg-white hover:bg-gray-100 border-gray-200'
+                                                            }`}
+                                                            aria-label="تولید مجدد پاسخ"
+                                                            title="تولید مجدد پاسخ"
+                                                        >
+                                                            {regeneratingMessageId === message.id ? (
+                                                                <div className="animate-spin rounded-full h-3.5 w-3.5 border border-purple-600 border-t-transparent" />
+                                                            ) : (
+                                                                <RefreshCw className="w-3.5 h-3.5 text-purple-600" />
+                                                            )}
                                                         </button>
                                                     )}
                                                     <button
