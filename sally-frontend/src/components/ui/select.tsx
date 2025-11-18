@@ -95,7 +95,8 @@ const SelectContent = React.forwardRef<
         className={cn(
           "p-1",
           position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
+          className?.includes('text-right') && "text-right"
         )}
       >
         {children}
@@ -121,24 +122,33 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Item
-    ref={ref}
-    className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none hover:bg-blue-50 hover:text-blue-900 focus:bg-blue-100 focus:text-blue-900 data-[state=checked]:bg-blue-100 data-[state=checked]:text-blue-900 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      className
-    )}
-    {...props}
-  >
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-      <SelectPrimitive.ItemIndicator>
-        <Check className="h-4 w-4 text-blue-600" />
-      </SelectPrimitive.ItemIndicator>
-    </span>
+>(({ className, children, ...props }, ref) => {
+  const isRTL = className?.includes('text-right') || className?.includes('pr-8')
+  return (
+    <SelectPrimitive.Item
+      ref={ref}
+      className={cn(
+        "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 text-sm outline-none hover:bg-blue-50 hover:text-blue-900 focus:bg-blue-100 focus:text-blue-900 data-[state=checked]:bg-blue-100 data-[state=checked]:text-blue-900 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        isRTL ? "pr-8 pl-2" : "pl-8 pr-2",
+        className
+      )}
+      {...props}
+    >
+      <span className={cn(
+        "absolute flex h-3.5 w-3.5 items-center justify-center",
+        isRTL ? "right-2" : "left-2"
+      )}>
+        <SelectPrimitive.ItemIndicator>
+          <Check className="h-4 w-4 text-blue-600" />
+        </SelectPrimitive.ItemIndicator>
+      </span>
 
-    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-  </SelectPrimitive.Item>
-))
+      <SelectPrimitive.ItemText className={isRTL ? "text-right w-full" : ""}>
+        {children}
+      </SelectPrimitive.ItemText>
+    </SelectPrimitive.Item>
+  )
+})
 SelectItem.displayName = SelectPrimitive.Item.displayName
 
 const SelectSeparator = React.forwardRef<

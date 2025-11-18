@@ -179,7 +179,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
           (event) => {
             console.log("Stream event:", event);
 
-            if (event.type === 'init' && !conversationId && onNewConversation) {
+            if (event.type === 'init' && !conversationId && onNewConversation && event.conversation_id) {
               onNewConversation(event.conversation_id);
             }
             if (event.type === 'chunk') {
@@ -299,7 +299,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
             <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
               <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
                 {ragType === 'simple' ? '🔍 Simple RAG' :
-                 ragType === 'detailed' ? '📚 Detailed RAG' :
                  ragType === 'agentic' ? '🤖 Agentic RAG' :
                  ragType}
               </span>
@@ -344,7 +343,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
         content: userMessage.content,
         conversation_id: conversationId,
         guest_session_id: guestSessionIdToSend,
-        rag_type: "detailed"
+        rag_type: "agentic"
       })
 
       // Update conversation ID if this is a new conversation
@@ -361,7 +360,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ conversationId, onNewConv
           sources: response.sources,
           confidence: response.confidence,
           suggested_actions: response.suggested_actions,
-          rag_type: "detailed",
+          rag_type: "agentic",
           can_get_more_details: false, // Detailed response doesn't need more details
         },
       }

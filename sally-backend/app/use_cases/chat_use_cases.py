@@ -584,32 +584,61 @@ class ChatUseCases:
         """Get conversation message history."""
 
         from bson import ObjectId
+        
+        logger.info(f"🔍 get_conversation_history called with:")
+        logger.info(f"  - conversation_id: {conversation_id}")
+        logger.info(f"  - user_type: {user_type}")
+        logger.info(f"  - user_id: {user_id}")
+        logger.info(f"  - guest_session_id: {guest_session_id}")
+        
         conversation = await Conversation.get(ObjectId(conversation_id))
         if not conversation:
             logger.info(f"Conversation not found: {conversation_id}")
             raise ValueError("Conversation not found")
 
+        logger.info(f"📋 Found conversation:")
+        logger.info(f"  - id: {conversation.id}")
+        logger.info(f"  - customer_id: {conversation.customer_id}")
+        logger.info(f"  - admin_id: {conversation.admin_id}")
+        logger.info(f"  - guest_session_id: {conversation.guest_session_id}")
+
         # Check access permissions
         if user_type == "Customer" and user_id:
-            # For authenticated customers, allow access to conversations
-            # This allows customers to see conversations in the chat interface
-            pass
+            # For authenticated customers, check ownership
+            if conversation.customer_id != user_id:
+                logger.warning(f"❌ Customer {user_id} trying to access conversation {conversation_id} owned by {conversation.customer_id}")
+                raise ValueError("Access denied - conversation belongs to another customer")
+            else:
+                logger.info(f"✅ Customer access granted for conversation {conversation_id}")
         elif user_type == "Admin" and user_id:
-            # Admins can access any conversation
-            pass
+            # Admins can access any conversation they own
+            if conversation.admin_id != user_id:
+                logger.warning(f"❌ Admin {user_id} trying to access conversation {conversation_id} owned by {conversation.admin_id}")
+                raise ValueError("Access denied - conversation belongs to another admin")
+            else:
+                logger.info(f"✅ Admin access granted for conversation {conversation_id}")
         else:
             # For guests, allow access to guest conversations only if guest_session_id matches
             if not conversation.guest_session_id:
-                raise ValueError("Access denied")
+                logger.warning(f"❌ Guest trying to access non-guest conversation {conversation_id}")
+                raise ValueError("Access denied - not a guest conversation")
             if guest_session_id and conversation.guest_session_id != guest_session_id:
+                logger.warning(f"❌ Guest {guest_session_id} trying to access conversation {conversation_id} owned by {conversation.guest_session_id}")
                 raise ValueError("Access denied - guest session ID mismatch")
+            else:
+                logger.info(f"✅ Guest access granted for conversation {conversation_id}")
 
         # Get messages for this conversation
+        logger.info(f"🔍 Querying messages for conversation_id: {str(conversation.id)}")
         messages = await Message.find(
             Message.conversation_id == str(conversation.id)
         ).sort(Message.created_at).to_list()
 
-        logger.info(f"Found {len(messages)} messages for conversation {conversation_id}")
+        logger.info(f"📨 Found {len(messages)} messages for conversation {conversation_id}")
+        
+        # Log each message for debugging
+        for i, msg in enumerate(messages):
+            logger.info(f"  Message {i+1}: id={msg.id}, sender_type={msg.sender_type}, content_length={len(msg.content)}")
 
         result = [
             {
@@ -629,8 +658,11 @@ class ChatUseCases:
             for msg in messages
         ]
 
-        logger.info(f"Returning {len(result)} messages for conversation {conversation_id}")
-        logger.info(f"Message details: {result}")
+        logger.info(f"✅ Returning {len(result)} formatted messages for conversation {conversation_id}")
+        if result:
+            logger.info(f"📝 First message preview: {result[0]['content'][:100]}...")
+        else:
+            logger.info(f"⚠️ No messages to return")
 
         return result
 

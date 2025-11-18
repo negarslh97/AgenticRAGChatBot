@@ -645,7 +645,7 @@ const Chat: React.FC = () => {
                                     </div>
                                   )}
                                   <p className="text-xs text-gray-500 text-right mt-1">
-                                      {formatTime(new Date(conversation.created_at))}
+                                      {conversation.created_at ? formatTime(new Date(conversation.created_at)) : 'نامشخص'}
                                   </p>
                               </div>
                               {/* Icon logic can be improved later if needed */}
