@@ -6,7 +6,7 @@ from bson import ObjectId
 from typing import Union
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.config import settings
-from app.domain.entities_refactored import Admin, Customer, Role, ActivityLog
+from app.domain.entities import Admin, Customer, Role, ActivityLog
 from app.core.permissions import get_current_admin, get_current_customer, get_optional_auth_header
 from app.core.permissions import get_admin_from_token, get_current_customer_from_token, Permission
 import logging
@@ -99,7 +99,15 @@ async def register_admin(
     """Register a new admin user (requires admin authentication)."""
     # Verify the current admin has permission to create admins
     current_admin_role = await current_admin.get_role()
-    if not current_admin_role or Permission.MANAGE_adminS not in current_admin_role.permissions:
+    if not current_admin_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: cannot create admin users"
+        )
+
+    # Check if admin has permission to manage admins
+    permission_keys = {perm.permission_key for perm in current_admin_role.permissions}
+    if Permission.MANAGE_adminS not in permission_keys:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied: cannot create admin users"
@@ -134,7 +142,8 @@ async def register_admin(
         email=admin_data.email,
         hashed_password=get_password_hash(admin_data.password),
         full_name=admin_data.full_name,
-        role_id=role_id
+        role_id=str(role_id),
+        role_name=role.name
     )
     
     await admin.insert()
@@ -176,30 +185,35 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             )
         
         access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
-        access_token = create_access_token(
-            data={"sub": str(admin.id), "type": "admin"}, 
-            expires_delta=access_token_expires
-        )
-        
+
         # Get admin's role information
         role = await admin.get_role()
         role_name = role.name if role else "unknown"
 
         logger.info(f"🔐 Admin login: {admin.full_name} ({admin.email}) - Role: {role_name} - ID: {admin.id}")
 
+        # Determine user type based on role
+        user_type = "SuperAdmin" if role_name == "SuperAdmin" else "Admin"
+
+        # Create JWT token with correct type
+        access_token = create_access_token(
+            data={"sub": str(admin.id), "type": user_type},
+            expires_delta=access_token_expires
+        )
+
         # Log login activity
         activity_log = ActivityLog(
             admin_id=str(admin.id),
             action="login",
             resource_type="auth",
-            details={"user_type": "admin"}
+            details={"user_type": user_type}
         )
         await activity_log.insert()
 
         return UserLoginResponse(
             access_token=access_token,
             token_type="bearer",
-            user_type="admin",
+            user_type=user_type,
             user=AdminResponse(
                 id=str(admin.id),
                 email=admin.email,
@@ -224,14 +238,14 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
         access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
         access_token = create_access_token(
-            data={"sub": str(customer.id), "type": "customer"},
+            data={"sub": str(customer.id), "type": "Customer"},
             expires_delta=access_token_expires
         )
 
         return UserLoginResponse(
             access_token=access_token,
             token_type="bearer",
-            user_type="customer",
+            user_type="Customer",
             user=CustomerResponse(
                 id=str(customer.id),
                 email=customer.email,
@@ -255,13 +269,16 @@ async def _get_current_user_info(token: str):
     admin = await get_admin_from_token(token)
     if admin:
         role = await admin.get_role()
+        role_name = role.name if role else "unknown"
+        # Set user_type based on actual role
+        user_type = "SuperAdmin" if role_name == "SuperAdmin" else "Admin"
         return {
-            "user_type": "admin",
+            "user_type": user_type,
             "user": {
                 "id": str(admin.id),
                 "email": admin.email,
                 "full_name": admin.full_name,
-                "role": role.name if role else "unknown",
+                "role": role_name,
                 "is_active": admin.is_active
             }
         }
@@ -270,7 +287,7 @@ async def _get_current_user_info(token: str):
     customer = await get_current_customer_from_token(token)
     if customer:
         return {
-            "user_type": "customer",
+            "user_type": "Customer",
             "user": {
                 "id": str(customer.id),
                 "email": customer.email,
@@ -358,7 +375,7 @@ async def refresh_token(request: Request):
         # Create new access token for admin
         access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
         new_access_token = create_access_token(
-            data={"sub": str(admin.id), "type": "admin"},
+            data={"sub": str(admin.id), "type": "Admin"},
             expires_delta=access_token_expires
         )
 
@@ -372,7 +389,7 @@ async def refresh_token(request: Request):
         return UserLoginResponse(
             access_token=new_access_token,
             token_type="bearer",
-            user_type="admin",
+            user_type="Admin",
             user=AdminResponse(
                 id=str(admin.id),
                 email=admin.email,
@@ -391,7 +408,7 @@ async def refresh_token(request: Request):
         # Create new access token for customer
         access_token_expires = timedelta(minutes=settings.jwt_access_token_expire_minutes)
         new_access_token = create_access_token(
-            data={"sub": str(customer.id), "type": "customer"},
+            data={"sub": str(customer.id), "type": "Customer"},
             expires_delta=access_token_expires
         )
 
@@ -401,7 +418,7 @@ async def refresh_token(request: Request):
         return UserLoginResponse(
             access_token=new_access_token,
             token_type="bearer",
-            user_type="customer",
+            user_type="Customer",
             user=CustomerResponse(
                 id=str(customer.id),
                 email=customer.email,
@@ -436,7 +453,7 @@ async def logout(request: Request):
             admin_id=str(admin.id),
             action="logout",
             resource_type="auth",
-            details={"user_type": "admin"}
+            details={"user_type": "Admin"}
         )
         await activity_log.insert()
         return {"message": "admin logged out successfully"}

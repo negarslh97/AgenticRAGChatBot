@@ -1,29 +1,47 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from pydantic import BaseModel
-from app.domain.entities import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility
-from app.api.dependencies import get_optional_user, get_current_user
-from app.domain.entities import User
+from app.domain.entities import KnowledgeBaseArticle, Category, Tag, ArticleStatus, ArticleVisibility, ArticleCategory, ArticleTag, Customer
+from fastapi import HTTPException, status
+from app.api.dependencies import get_optional_user, get_current_user, get_current_customer
+from app.domain.entities import Role
 
 router = APIRouter()
 
 
+class MarkdownNodeResponse(BaseModel):
+    id: str
+    title: str
+    level: int
+    content: str
+    parent_id: Optional[str]
+    path: str
+    order: int
+    children: List['MarkdownNodeResponse'] = []
+
+class MarkdownTreeResponse(BaseModel):
+    article_id: str
+    root_nodes: List[MarkdownNodeResponse]
+
 class ArticleResponse(BaseModel):
     id: str
     title: str
-    content: str
+    content_html: str
+    content_markdown: str
     summary: Optional[str]
-    category_id: Optional[str]
-    tags: List[str]
+    category: Optional[ArticleCategory]
+    tags: List[ArticleTag]
     status: ArticleStatus
     visibility: Optional[ArticleVisibility]
     created_at: str
     updated_at: str
+    markdown_tree: Optional[MarkdownTreeResponse] = None
 
 
 class CategoryResponse(BaseModel):
     id: str
     name: str
+    slug: str
     description: Optional[str]
     is_public: bool
 
@@ -31,54 +49,63 @@ class CategoryResponse(BaseModel):
 @router.get("/articles", response_model=List[ArticleResponse])
 async def get_public_articles(
     category_id: Optional[str] = None,
-    search: Optional[str] = None
+    search_term: Optional[str] = None
 ):
     """Get public knowledge base articles (visible to guests)."""
-    query = (KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED) & \
-            (KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC)
-    
-    if category_id:
-        query = query & (KnowledgeBaseArticle.category_id == category_id)
-    
-    articles = await KnowledgeBaseArticle.find(query).to_list()
-    
-    # Simple search filter
-    if search:
-        search_lower = search.lower()
-        articles = [
-            article for article in articles
-            if search_lower in article.title.lower() or search_lower in article.content.lower()
+    try:
+        query = {"status": "published", "visibility": "public"}
+
+        if category_id:
+            # Use embedded category id for filtering (only if category exists)
+            query["category.id"] = category_id
+
+        articles = await KnowledgeBaseArticle.find(query).to_list()
+
+        # Simple search filter
+        if search_term:
+            search_lower = search_term.lower()
+            articles = [
+                article for article in articles
+                if (search_lower in article.title.lower() or
+                    search_lower in article.content_html.lower() or
+                    (article.summary and search_lower in article.summary.lower()))
+            ]
+
+        return [
+            ArticleResponse(
+                id=str(article.id),
+                title=article.title,
+                content_html=article.content_html,
+                summary=article.summary,
+                category=article.category,
+                tags=article.tags,
+                status=article.status,
+                visibility=article.visibility,
+                created_at=article.created_at.isoformat(),
+                updated_at=article.updated_at.isoformat()
+            )
+            for article in articles
         ]
-    
-    return [
-        ArticleResponse(
-            id=str(article.id),
-            title=article.title,
-            content=article.content,
-            summary=article.summary,
-            category_id=article.category_id,
-            tags=article.tags,
-            status=article.status,
-            visibility=article.visibility,
-            created_at=article.created_at.isoformat(),
-            updated_at=article.updated_at.isoformat()
-        )
-        for article in articles
-    ]
+    except Exception as e:
+        import traceback
+        print(f"Error in get_public_articles: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error fetching public articles: {type(e).__name__}")
 
 
-@router.get("/customer/articles", response_model=List[ArticleResponse])
+@router.get("/customer/articles", response_model=List[ArticleResponse], tags=["👤 Customer Knowledge Base"])
 async def get_customer_articles(
     category_id: Optional[str] = None,
     search: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_customer: Customer = Depends(get_current_customer)
 ):
+    """Get customer articles - Customer only (VIEW_PUBLIC_KB + customer visibility)"""
     """Get knowledge base articles for authenticated customers."""
-    query = (KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED) & \
-            (KnowledgeBaseArticle.visibility.in_([ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER]))
+    query = {"status": "published", "visibility": {"$in": ["public", "customer"]}}
     
     if category_id:
-        query = query & (KnowledgeBaseArticle.category_id == category_id)
+        # Use embedded category id for filtering
+        query["category.id"] = category_id
     
     articles = await KnowledgeBaseArticle.find(query).to_list()
     
@@ -87,16 +114,18 @@ async def get_customer_articles(
         search_lower = search.lower()
         articles = [
             article for article in articles
-            if search_lower in article.title.lower() or search_lower in article.content.lower()
+            if (search_lower in article.title.lower() or
+                search_lower in article.content_html.lower() or
+                (article.summary and search_lower in article.summary.lower()))
         ]
     
     return [
         ArticleResponse(
             id=str(article.id),
             title=article.title,
-            content=article.content,
+            content_html=article.content_html,
             summary=article.summary,
-            category_id=article.category_id,
+            category=article.category,
             tags=article.tags,
             status=article.status,
             visibility=article.visibility,
@@ -110,7 +139,7 @@ async def get_customer_articles(
 @router.get("/articles/{article_id}", response_model=ArticleResponse)
 async def get_article(
     article_id: str,
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: Optional[Role] = Depends(get_optional_user)
 ):
     """Get a specific article."""
     article = await KnowledgeBaseArticle.get(article_id)
@@ -128,22 +157,56 @@ async def get_article(
         if article.visibility not in [ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER]:
             raise HTTPException(status_code=403, detail="Access denied")
     
+    # دریافت ساختار درختی Markdown اگر وجود داشته باشد
+    markdown_tree = None
+    try:
+        from app.infrastructure.markdown_parser import markdown_parser
+        tree = markdown_parser.parse_to_tree(
+            article.content_markdown,
+            str(article.id),
+            article_title=article.title
+        )
+
+        if tree.get_all_nodes():
+            # تبدیل به response format
+            def convert_node(node):
+                return MarkdownNodeResponse(
+                    id=node.id,
+                    title=node.title,
+                    level=node.level,
+                    content=node.content,
+                    parent_id=node.parent_id,
+                    path=node.path,
+                    order=node.order,
+                    children=[convert_node(child) for child in node.children]
+                )
+
+            markdown_tree = MarkdownTreeResponse(
+                article_id=str(article.id),
+                root_nodes=[convert_node(node) for node in tree.root_nodes]
+            )
+    except Exception as e:
+        # در صورت خطا، ساختار درختی خالی برمی‌گردانیم
+        pass
+
     return ArticleResponse(
         id=str(article.id),
         title=article.title,
-        content=article.content,
+        content_html=article.content_html,
+        content_markdown=article.content_markdown,
         summary=article.summary,
-        category_id=article.category_id,
+        category=article.category,
         tags=article.tags,
         status=article.status,
         visibility=article.visibility,
         created_at=article.created_at.isoformat(),
-        updated_at=article.updated_at.isoformat()
+        updated_at=article.updated_at.isoformat(),
+        markdown_tree=markdown_tree
     )
 
 
 @router.get("/categories", response_model=List[CategoryResponse])
-async def get_categories(current_user: Optional[User] = Depends(get_optional_user)):
+async def get_categories(current_user: Optional[Role] = Depends(get_optional_user)):
     """Get knowledge base categories."""
     query = Category.is_public == True if not current_user else {}
     categories = await Category.find(query).to_list()
@@ -152,6 +215,7 @@ async def get_categories(current_user: Optional[User] = Depends(get_optional_use
         CategoryResponse(
             id=str(category.id),
             name=category.name,
+            slug=category.slug,
             description=category.description,
             is_public=category.is_public
         )
@@ -162,18 +226,20 @@ async def get_categories(current_user: Optional[User] = Depends(get_optional_use
 @router.get("/search")
 async def search_articles(
     q: str,
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: Optional[Role] = Depends(get_optional_user)
 ):
     """Search knowledge base articles."""
     # Set visibility based on authentication
     if not current_user:
-        visibility_query = (KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC)
+        articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED,
+            KnowledgeBaseArticle.visibility == ArticleVisibility.PUBLIC
+        ).to_list()
     else:
-        visibility_query = (KnowledgeBaseArticle.visibility.in_([ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER]))
-    
-    query = (KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED) & visibility_query
-    
-    articles = await KnowledgeBaseArticle.find(query).to_list()
+        articles = await KnowledgeBaseArticle.find(
+            KnowledgeBaseArticle.status == ArticleStatus.PUBLISHED,
+            KnowledgeBaseArticle.visibility.in_([ArticleVisibility.PUBLIC, ArticleVisibility.CUSTOMER])
+        ).to_list()
     
     # Simple text search
     search_lower = q.lower()
@@ -183,7 +249,7 @@ async def search_articles(
         score = 0
         if search_lower in article.title.lower():
             score += 10
-        if search_lower in article.content.lower():
+        if search_lower in article.content_html.lower():
             score += 5
         if article.summary and search_lower in article.summary.lower():
             score += 7
@@ -200,3 +266,106 @@ async def search_articles(
     results.sort(key=lambda x: x["score"], reverse=True)
     
     return {"results": results[:10]}  # Return top 10 results
+
+
+# Conflict handling middleware example
+async def check_article_conflict(article_id: str, current_version: int):
+    """Check if article has been modified since last read (optimistic concurrency control)."""
+    article = await KnowledgeBaseArticle.get(article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    if article.version != current_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Article has been modified by another user",
+                "current_version": article.version,
+                "conflicting_version": current_version
+            }
+        )
+    return article
+
+
+@router.put("/articles/{article_id}/resolve-conflict", status_code=status.HTTP_200_OK)
+async def resolve_article_conflict(
+    article_id: str,
+    current_version: int,
+    new_content: str,
+    resolution_choice: str  # "overwrite", "merge", "keep_current"
+):
+    """
+    Resolve article edit conflicts.
+    This endpoint allows clients to handle 409 conflicts intelligently.
+    """
+    try:
+        article = await KnowledgeBaseArticle.get(article_id)
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        if resolution_choice == "overwrite":
+            # Overwrite with new content
+            article.content_markdown = new_content
+            article.version += 1
+        elif resolution_choice == "merge":
+            # Simple merge strategy - append new content with conflict markers
+            article.content_markdown += f"\n\n---\n\n**Merged Changes:**\n\n{new_content}"
+            article.version += 1
+        elif resolution_choice == "keep_current":
+            # Keep the current version, just update the version to resolve conflict
+            article.version += 1
+        else:
+            raise HTTPException(status_code=400, detail="Invalid resolution choice")
+        
+        await article.save()
+        
+        return {
+            "message": "Conflict resolved successfully",
+            "new_version": article.version,
+            "resolution": resolution_choice
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resolving conflict: {str(e)}")
+
+
+@router.get("/articles/{article_id}/structure", tags=["Public Knowledge Base"])
+async def get_public_article_structure(
+    article_id: str
+):
+    """
+    استخراج ساختار درختی از محتوای Markdown مقاله عمومی برای پیمایش
+
+    Args:
+        article_id: شناسه مقاله
+
+    Returns:
+        ساختار درختی شامل هدرها و لینک‌ها
+    """
+    try:
+        from app.infrastructure.knowledge_base_repository import knowledge_base_repository
+
+        structure = await knowledge_base_repository.extract_markdown_structure(article_id)
+
+        if "error" in structure:
+            raise HTTPException(status_code=404, detail=structure["error"])
+
+        # بررسی اینکه مقاله عمومی است
+        from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility
+        article = await KnowledgeBaseArticle.get(article_id)
+        if not article or article.status != ArticleStatus.PUBLISHED or article.visibility != ArticleVisibility.PUBLIC:
+            raise HTTPException(status_code=404, detail="Article not found or not public")
+
+        return {
+            "success": True,
+            "structure": structure
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ خطا در دریافت ساختار مقاله عمومی {article_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"خطا در دریافت ساختار مقاله: {str(e)}"
+        )

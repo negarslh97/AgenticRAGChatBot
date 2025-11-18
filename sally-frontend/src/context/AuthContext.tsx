@@ -6,6 +6,7 @@ import { authService, type User } from "../services/authService"
 
 interface AuthContextType {
   user: User | null
+  userType: "Admin" | "SuperAdmin"| "Customer" | null
   login: (email: string, password: string) => Promise<{ user: User }>
   register: (email: string, password: string, fullName: string) => Promise<{ user: User }>
   logout: () => void
@@ -32,64 +33,65 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
+  const [userType, setUserType] = useState<"Admin" | "SuperAdmin" | "Customer" | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    console.log("AuthContext: Starting auth initialization...");
-    
     const initAuth = async () => {
       const token = localStorage.getItem("token")
-      console.log("AuthContext: Token found:", !!token);
-      
+
       if (token) {
         try {
-          console.log("AuthContext: Fetching current user...");
-          const responseData = await authService.getCurrentUser()
-          console.log("AuthContext: Raw response data:", responseData);
-          
-          // تبدیل ساختار داده بک‌اند به ساختار مورد انتظار فرانت‌اند
-          let userData: User | null = null;
-          
-          if (responseData && typeof responseData === 'object') {
-            // بررسی اینکه آیا بک‌اند داده رو در فیلد user قرار داده یا نه
-            const responseAny = responseData as any;
-            
-            if (responseAny.user && typeof responseAny.user === 'object') {
-              // حالت جدید: بک‌اند داده رو در فیلد user قرار داده
-              console.log("✅ AuthContext: Found user data in response.user field");
-              userData = responseAny.user as User;
-              
-              // اگر role در داده user نبود، از user_type استفاده کنیم
-              if (!userData.role && responseAny.user_type) {
-                userData.role = responseAny.user_type === 'admin' ? 'Admin' : 'Customer';
+          // اول authentication status را چک کنیم
+          const authStatus = await authService.getAuthStatus()
+
+          if (authStatus.auth_required && !authStatus.authenticated) {
+            // اگر سرور می‌گوید authentication لازم است و authenticated نیستیم
+            localStorage.removeItem("token")
+            window.location.href = authStatus.redirect_to || "/login"
+            return
+          }
+
+          if (authStatus.authenticated) {
+            // اگر authenticated هستیم، user data را بگیریم
+            const responseData = await authService.getCurrentUser()
+
+            // تبدیل ساختار داده بک‌اند به ساختار مورد انتظار فرانت‌اند
+            let userData: User | null = null;
+
+            if (responseData && typeof responseData === 'object') {
+              // بررسی اینکه آیا بک‌اند داده رو در فیلد user قرار داده یا نه
+              const responseAny = responseData as any;
+
+              if (responseAny.user && typeof responseAny.user === 'object') {
+                // حالت جدید: بک‌اند داده رو در فیلد user قرار داده
+                userData = responseAny.user as User;
+
+                // اگر role در داده user نبود، از user_type استفاده کنیم
+                if (!userData.role && responseAny.user_type) {
+                  userData.role = responseAny.user_type === 'admin' ? 'Admin' : 'Customer';
+                }
+              } else if (responseAny.email) {
+                // حالت قدیمی: داده مستقیم در response هست
+                userData = responseData as User;
               }
-            } else if (responseAny.email) {
-              // حالت قدیمی: داده مستقیم در response هست
-              console.log("✅ AuthContext: Found user data directly in response");
-              userData = responseData as User;
+            }
+
+            if (userData && userData.email) {
+              setUser(userData)
+              // تنظیم userType بر اساس داده‌های دریافتی
+              const responseAny = responseData as any
+              const userTypeValue = responseAny.user_type || userData.role || null
+              setUserType(userTypeValue)
+            } else {
+              localStorage.removeItem("token")
             }
           }
-          
-          console.log("AuthContext: Processed user data:", userData);
-          console.log("AuthContext: User email:", userData?.email);
-          console.log("AuthContext: User role:", userData?.role);
-          
-          if (userData && userData.email) {
-            console.log("✅ AuthContext: User data is valid, setting user");
-            setUser(userData)
-          } else {
-            console.log("❌ AuthContext: Invalid user data received");
-            localStorage.removeItem("token")
-          }
         } catch (error) {
-          console.log("❌ AuthContext: Error fetching user, removing token", error);
           localStorage.removeItem("token")
         }
-      } else {
-        console.log("AuthContext: No token found");
       }
-      
-      console.log("AuthContext: Setting loading to false");
+
       setLoading(false)
     }
 
@@ -100,11 +102,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const response = await authService.login(email, password)
     localStorage.setItem("token", response.access_token)
     setUser(response.user)
+    setUserType(response.user_type)
+    console.log("AuthContext login: Setting userType to:", response.user_type)
     return { user: response.user }
   }
 
   const register = async (email: string, password: string, fullName: string) => {
-    const userData = await authService.register(email, password, fullName)
+    await authService.register(email, password, fullName)
     // After registration, user needs to login
     const loginResponse = await login(email, password)
     return { user: loginResponse.user }
@@ -113,12 +117,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = () => {
     localStorage.removeItem("token")
     setUser(null)
+    setUserType(null)
     authService.logout()
   }
 
   const isAuthenticated = !!user
-  const isAdmin = user?.role === "Admin" || user?.role === "SuperAdmin"
-  const isSuperAdmin = user?.role === "SuperAdmin"
+  const isAdmin = userType === "Admin" || userType === "SuperAdmin"
+  const isSuperAdmin = userType === "SuperAdmin"
+
+  // Debug logging
+  console.log("AuthContext computed values:", {
+    user: user?.email,
+    userType,
+    isAuthenticated,
+    isAdmin,
+    isSuperAdmin,
+    hasUser: !!user,
+    userTypeType: typeof userType
+  })
 
   const getDashboardByRole = (role: string): string => {
     switch (role) {
@@ -133,6 +149,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const value: AuthContextType = {
     user,
+    userType,
     login,
     register,
     logout,

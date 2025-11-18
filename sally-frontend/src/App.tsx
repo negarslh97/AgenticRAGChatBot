@@ -9,21 +9,30 @@ import SuperAdminLayout from "./components/layouts/SuperAdminLayout"
 
 // Components
 import ProtectedRoute from "./components/ProtectedRoute"
+import AuthGuard from "./components/AuthGuard"
+import ArticleDetail from "./components/ArticleDetail"
 
 // Lazy loaded pages
 const HomePage = lazy(() => import("./pages/HomePage"))
 const LoginPage = lazy(() => import("./pages/LoginPage"))
 const RegisterPage = lazy(() => import("./pages/RegisterPage"))
-const DashboardPage = lazy(() => import("./pages/DashboardPage"))
+const DashboardPage = lazy(() => import("./pages/CustomerDashboardPage"))
 const ChatPage = lazy(() => import("./pages/ChatPage"))
-const TicketsPage = lazy(() => import("./pages/TicketsPage"))
+const CustomerChatPage = lazy(() => import("./pages/CustomerChatPage"))
 const KnowledgeBasePage = lazy(() => import("./pages/KnowledgeBasePage"))
 const AdminPanel = lazy(() => import("./pages/AdminPanel"))
 const SuperAdminDashboard = lazy(() => import("./pages/SuperAdminDashboard"))
 const SuperAdminKnowledgeBasePage = lazy(() => import("./pages/SuperAdminKnowledgeBasePage"))
+const SuperAdminAddArticlePage = lazy(() => import("./pages/SuperAdminAddArticlePage"))
+const SuperAdminUploadPage = lazy(() => import("./pages/SuperAdminUploadPage"))
+const SuperAdminChatPage = lazy(() => import("./pages/SuperAdminChatPage"))
+const ArticleEditPage = lazy(() => import("./pages/ArticleEditPage"))
+const WeaviateContentsPage = lazy(() => import("./pages/WeaviateContentsPage"))
 const UserManagementPage = lazy(() => import("./pages/UserManagementPage"))
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"))
 const CustomerUsersPage = lazy(() => import("./pages/CustomerUsersPage"))
+const SuperAdminReindexPage = lazy(() => import("./pages/SuperAdminReindexPage"))
+const SuperAdminLogsPage = lazy(() => import("./pages/SuperAdminLogsPage"))
 const UnauthorizedPage = lazy(() => import("./pages/UnauthorizedPage"))
 
 // Loading component for Suspense
@@ -87,6 +96,13 @@ const App: React.FC = () => {
             <Route path="/chat" element={
               <MainLayout>
                 <ProtectedRoute>
+                  <CustomerChatPage />
+                </ProtectedRoute>
+              </MainLayout>
+            } />
+            <Route path="/chat-old" element={
+              <MainLayout>
+                <ProtectedRoute>
                   <ChatPage />
                 </ProtectedRoute>
               </MainLayout>
@@ -94,13 +110,6 @@ const App: React.FC = () => {
             <Route path="/knowledge-base/*" element={
               <MainLayout>
                 <KnowledgeBasePage />
-              </MainLayout>
-            } />
-            <Route path="/tickets/*" element={
-              <MainLayout>
-                <ProtectedRoute>
-                  <TicketsPage />
-                </ProtectedRoute>
               </MainLayout>
             } />
             <Route path="/admin" element={
@@ -126,12 +135,46 @@ const App: React.FC = () => {
               }
             >
               <Route index element={<SuperAdminDashboard />} />
+              <Route path="chat" element={<SuperAdminChatPage />} />
               <Route path="users" element={<UserManagementPage />} />
               <Route path="admin/users" element={<AdminUsersPage />} />
               <Route path="customer/users" element={<CustomerUsersPage />} />
-              <Route path="tickets" element={<div className="p-6"><h1 className="text-2xl font-bold">مدیریت تیکت‌ها</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
               <Route path="knowledge-base" element={<SuperAdminKnowledgeBasePage />} />
-              <Route path="logs" element={<div className="p-6"><h1 className="text-2xl font-bold">لاگ‌های فعالیت</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
+              <Route
+                path="knowledge-base/add"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <SuperAdminAddArticlePage />
+                  </AuthGuard>
+                }
+              />
+              <Route
+                path="knowledge-base/upload"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <SuperAdminUploadPage />
+                  </AuthGuard>
+                }
+              />
+              <Route path="knowledge-base/articles/:articleId" element={<ArticleDetail isadminView={true} />} />
+              <Route path="knowledge-base/edit/:articleId" element={<ArticleEditPage />} />
+              <Route
+                path="knowledge-base/weaviate"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <WeaviateContentsPage />
+                  </AuthGuard>
+                }
+              />
+              <Route
+                path="knowledge-base/reindex"
+                element={
+                  <AuthGuard requiredRole="SuperAdmin">
+                    <SuperAdminReindexPage />
+                  </AuthGuard>
+                }
+              />
+              <Route path="logs" element={<SuperAdminLogsPage />} />
               <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">تنظیمات سیستم</h1><p>این صفحه به زودی پیاده‌سازی خواهد شد.</p></div>} />
             </Route>
 

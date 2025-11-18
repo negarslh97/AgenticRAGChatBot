@@ -8,14 +8,15 @@ import { Avatar, AvatarFallback } from '../ui/avatar'
 import {
   LayoutDashboard,
   Users,
-  Ticket,
   BookOpen,
   Activity,
   Settings,
   LogOut,
   Crown,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  FileQuestion,
+  MessageCircle
 } from 'lucide-react'
 
 const Sidebar: React.FC = () => {
@@ -35,11 +36,23 @@ const Sidebar: React.FC = () => {
 
   const isSubItemActive = (href: string) => location.pathname === href
 
+  // 🔧 Feature Flags - برای مخفی کردن موقت برخی قابلیت‌ها
+  const FEATURE_FLAGS = {
+    SHOW_REINDEX: false, // مخفی کردن reindex
+    SHOW_ACTIVITY_LOGS: false, // مخفی کردن لاگ فعالیت‌ها
+    SHOW_SETTINGS: false // مخفی کردن تنظیمات
+  }
+
   const navigationItems = [
     {
       name: 'داشبورد',
       href: '/super-admin',
       icon: LayoutDashboard
+    },
+    {
+      name: 'چت با Sally',
+      href: '/super-admin/chat',
+      icon: MessageCircle
     },
     {
       name: 'مدیریت کاربران',
@@ -56,25 +69,32 @@ const Sidebar: React.FC = () => {
       ]
     },
     {
-      name: 'مدیریت تیکت‌ها',
-      href: '/super-admin/tickets',
-      icon: Ticket
-    },
-    {
       name: 'پایگاه دانش',
-      href: '/super-admin/knowledge-base',
-      icon: BookOpen
+      icon: BookOpen,
+      submenu: [
+        {
+          name: 'مدیریت مقالات',
+          href: '/super-admin/knowledge-base'
+        },
+        // 🔧 Re-indexing - به صورت موقت مخفی شده
+        ...(FEATURE_FLAGS.SHOW_REINDEX ? [{
+          name: '🔄 Re-indexing',
+          href: '/super-admin/knowledge-base/reindex'
+        }] : [])
+      ]
     },
-    {
+    // 🔧 لاگ‌های فعالیت - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_ACTIVITY_LOGS ? [{
       name: 'لاگ‌های فعالیت',
       href: '/super-admin/logs',
       icon: Activity
-    },
-    {
+    }] : []),
+    // 🔧 تنظیمات سیستم - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_SETTINGS ? [{
       name: 'تنظیمات سیستم',
       href: '/super-admin/settings',
       icon: Settings
-    }
+    }] : [])
   ]
 
   const getInitials = (fullName: string) => {
@@ -86,10 +106,68 @@ const Sidebar: React.FC = () => {
       .slice(0, 2)
   }
 
+  const getRoleDisplay = (role: string) => {
+    switch (role) {
+      case 'Customer':
+        return 'مشتری'
+      case 'Guest':
+        return 'مهمان'
+      case 'Admin':
+        return 'ادمین'
+      case 'SuperAdmin':
+        return 'ادمین ارشد'
+      default:
+        return role
+    }
+  }
+
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case 'Customer':
+        return 'bg-green-100 text-green-800'
+      case 'Guest':
+        return 'bg-gray-100 text-gray-800'
+      case 'Admin':
+        return 'bg-blue-100 text-blue-800'
+      case 'SuperAdmin':
+        return 'bg-purple-100 text-purple-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
   return (
-    <div className="left-0 top-16 h-100% w-64 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
-      {/* Navigation Links */}
-      <nav className="flex-1 px-4 py-8 space-y-2 overflow-y-auto">
+    <div className="h-full w-64 bg-white border-l border-gray-200 flex flex-col shadow-lg">
+      {/* User Profile Section */}
+      <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50">
+        <div className="flex items-center space-x-3 mb-4">
+          <Avatar className="h-12 w-12">
+            {user?.full_name ? (
+              <AvatarFallback className="bg-purple-100 text-purple-600 font-medium text-lg">
+                {getInitials(user.full_name)}
+              </AvatarFallback>
+            ) : (
+              <AvatarFallback className="bg-purple-100 text-purple-600 font-medium text-lg">
+                <Crown className="h-6 w-6" />
+              </AvatarFallback>
+            )}
+          </Avatar>
+          <div className="flex-1 text-left">
+            <p className="text-sm font-semibold text-gray-900">
+              {user?.full_name || 'ادمین ارشد'}
+            </p>
+            <div className="flex items-center justify-start mt-1">
+              <Crown className="h-3 w-3 text-purple-600 ml-1" />
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getRoleColor(user?.role || 'SuperAdmin')}`}>
+                {getRoleDisplay(user?.role || 'SuperAdmin')}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Navigation Links - Scrollable section */}
+      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto min-h-0">
         {navigationItems.map((item) => {
           const Icon = item.icon
           const hasSubmenu = item.submenu && item.submenu.length > 0
@@ -102,14 +180,14 @@ const Sidebar: React.FC = () => {
               <div key={item.name}>
                 <button
                   onClick={() => toggleMenu(item.name)}
-                  className={`flex items-center justify-between w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
+                  className={`flex items-center justify-between w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
                     isActive || hasActiveSubItem
-                      ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                      ? 'bg-blue-50 text-blue-700 border-l-3 border-blue-700 shadow-sm'
                       : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                 >
                   <div className="flex items-center">
-                    <Icon className="ml-3 h-5 w-5" />
+                    <Icon className="mr-3 h-5 w-5" />
                     {item.name}
                   </div>
                   {isExpanded ? (
@@ -119,19 +197,20 @@ const Sidebar: React.FC = () => {
                   )}
                 </button>
                 {isExpanded && (
-                  <div className="mr-4 mt-1 space-y-1">
+                  <div className="ml-4 mt-2 space-y-1">
                     {item.submenu?.map((subItem) => (
                       <NavLink
                         key={subItem.name}
                         to={subItem.href}
                         className={({ isActive }) =>
-                          `flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-colors mr-2 ${
+                          `flex items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ml-2 ${
                             isActive
-                              ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                              ? 'bg-blue-50 text-blue-700 border-l-3 border-blue-700 shadow-sm'
                               : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                           }`
                         }
                       >
+                        <FileQuestion className="mr-2 h-4 w-4" />
                         {subItem.name}
                       </NavLink>
                     ))}
@@ -146,55 +225,32 @@ const Sidebar: React.FC = () => {
               key={item.name}
               to={item.href!}
               className={({ isActive }) =>
-                `flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
+                `flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
                   isActive
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                    ? 'bg-blue-50 text-blue-700 border-l-3 border-blue-700 shadow-sm'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                 }`
               }
             >
-              <Icon className="ml-3 h-5 w-5" />
+              <Icon className="mr-3 h-5 w-5" />
               {item.name}
             </NavLink>
           )
         })}
       </nav>
 
-      {/* User Profile Section */}
-      {/* <div className="p-4 border-t border-gray-200">
-        <div className="flex items-center space-x-3 mb-4">
-          <Avatar className="h-10 w-10">
-            {user?.full_name ? (
-              <AvatarFallback className="bg-purple-100 text-purple-600 font-medium">
-                {getInitials(user.full_name)}
-              </AvatarFallback>
-            ) : (
-              <AvatarFallback className="bg-purple-100 text-purple-600 font-medium">
-                U
-              </AvatarFallback>
-            )}
-          </Avatar>
-          <div className="flex-1 text-right">
-            <p className="text-sm font-medium text-gray-900">
-              {user?.full_name || user?.email}
-            </p>
-            <div className="flex items-center">
-              <Crown className="h-3 w-3 text-purple-600 ml-1" />
-              <span className="text-xs text-purple-600">ادمین ارشد</span>
-            </div>
-          </div>
-        </div>
-
+      {/* Logout Button - Sticky Footer */}
+      <div className="p-4 border-t border-gray-200 mt-auto">
         <Button
           onClick={logout}
           variant="outline"
           size="sm"
-          className="w-full flex items-center justify-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+          className="w-full flex items-center justify-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 hover:border-red-300 transition-colors duration-200"
         >
           <LogOut className="h-4 w-4" />
           خروج
         </Button>
-      </div> */}
+      </div>
     </div>
   )
 }

@@ -1,85 +1,125 @@
-# from fastapi import FastAPI
-# from fastapi.middleware.cors import CORSMiddleware
-# from contextlib import asynccontextmanager
-# import asyncio
-
-# from app.core.config import settings
-# from app.infrastructure.database import init_database, create_default_admin
-# from app.api.routes import auth, chat, tickets, admin, knowledge_base, admin_knowledge_base, upload
-
-
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     # Startup
-#     await init_database()
-#     await create_default_admin()
-#     yield
-#     # Shutdown
-#     pass
-
-
-# app = FastAPI(
-#     title="Sally - Customer Support Platform",
-#     description="AI-powered customer support with RAG capabilities",
-#     version="1.0.0",
-#     lifespan=lifespan
-# )
-
-# # CORS middleware
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-#     expose_headers=["*"],
-# )
-
-# # Include routers
-# app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-# app.include_router(chat.router, prefix="/chat", tags=["Chat"])
-# app.include_router(tickets.router, prefix="/tickets", tags=["Tickets"])
-# app.include_router(knowledge_base.router, prefix="/kb", tags=["Knowledge Base"])
-# app.include_router(admin.router, prefix="/admin", tags=["admin"])
-# app.include_router(admin_knowledge_base.router, prefix="/admin/kb", tags=["admin: Knowledge Base"])
-# app.include_router(upload.router, prefix="/admin/upload", tags=["File Upload"])
-
-
-# @app.get("/")
-# async def root():
-#     return {"message": "Sally Customer Support Platform API"}
-
-
-# @app.get("/health")
-# async def health_check():
-#     return {"status": "healthy"}
-
-
-# مسیر: sally-backend/main.py
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from app.core.config import settings
-from app.infrastructure.database_refactored import init_db
+from contextlib import asynccontextmanager
 import logging
 import os
+import warnings
 
-# فایل‌های جدیدی که باید بسازید یا جایگزین کنید
+from app.core.config import settings
+from app.infrastructure.database.mongodb import init_db
+
+# Suppress specific deprecation warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*general_plain_validator_function.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*with_info_plain_validator_function.*")
+
+# Initialize advanced logging system
+from app.core.logging_config import setup_logging, get_logger
+setup_logging(
+    app_name="sallybot",
+    log_level="INFO",
+    log_dir="logs",
+    enable_json=False,  # Set to True for production
+    enable_console=True,
+    enable_file=False
+)
+logger = get_logger(__name__)
+
+# Import middleware
+from app.api.middleware.logging_middleware import (
+    RequestLoggingMiddleware,
+    PerformanceMonitoringMiddleware,
+    ErrorLoggingMiddleware
+)
+from app.api.middleware.error_handler import ErrorHandlerMiddleware
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for startup and shutdown events."""
+    logger.info("🚀 Starting up the application...")
+    
+    # Initialize connection managers
+    from app.infrastructure.connection_manager import startup_connections
+    await startup_connections()
+    
+    # Initialize database
+    await init_db()
+
+    # Log existing roles in database for debugging
+    from app.domain.entities import Role
+    existing_roles = await Role.find_all().to_list()
+    logger.info(f"Existing roles in database: {[role.name for role in existing_roles]}")
+
+    # Create default roles
+    from app.core.permissions import create_default_roles, SUPER_ADMIN_ROLE_NAME
+    await create_default_roles()
+
+    # Log roles after creation
+    roles_after = await Role.find_all().to_list()
+    logger.info(f"Roles after creation: {[role.name for role in roles_after]}")
+
+    # Create default Super Admin if no admins exist
+    from app.domain.entities import Admin
+    from app.core.security import get_password_hash
+
+    admin_count = await Admin.find_all().count()
+    if admin_count == 0:
+        logger.info("No admins found. Creating default super admin...")
+        SuperAdmin_role = await Role.find_one(Role.name == SUPER_ADMIN_ROLE_NAME)
+        
+        if not SuperAdmin_role:
+            logger.error(f"CRITICAL ERROR: {SUPER_ADMIN_ROLE_NAME} role not found! Cannot create default admin.")
+            raise RuntimeError(f"CRITICAL ERROR: {SUPER_ADMIN_ROLE_NAME} role not found! Cannot create default admin. This indicates a fundamental system setup failure.")
+        else:
+            default_admin = Admin(
+                email=settings.default_SuperAdmin_email,
+                hashed_password=get_password_hash(settings.default_SuperAdmin_password),
+                full_name="Default Super Admin",
+                role_id=str(SuperAdmin_role.id),
+                role_name=SUPER_ADMIN_ROLE_NAME
+            )
+            await default_admin.insert()
+            logger.info(f"✅ Created default super admin: {settings.default_SuperAdmin_email}")
+
+    # Start background job processor
+    from app.docs_as_code.background_jobs import start_background_jobs
+    await start_background_jobs()
+    logger.info("✅ Application startup completed!")
+
+    yield  # Application runs here
+
+    # Shutdown code
+    logger.info("🛑 Shutting down the application...")
+    
+    from app.infrastructure.connection_manager import shutdown_connections
+    await shutdown_connections()
+
+    from app.infrastructure.database.mongodb import close_mongo_client
+    await close_mongo_client()
+
+    from app.docs_as_code.background_jobs import stop_background_jobs
+    await stop_background_jobs()
+    
+    logger.info("✅ Application shutdown completed!")
+
+
+# Import API routers
 from app.api.routes.auth_refactored import router as auth_router
 from app.api.routes.chat_refactored import router as chat_router
-from app.api.routes.tickets_refactored import router as tickets_router
 from app.api.routes.admin_refactored import router as admin_router
-# روترهای موجود که نیازی به تغییر بزرگ ندارند
 from app.api.routes.knowledge_base import router as kb_router
-from app.api.routes.admin_knowledge_base import router as admin_kb_router
+from app.api.routes.super_admin_knowledge_base import router as admin_kb_router
 from app.api.routes.upload import router as upload_router
+from app.api.routes.categories import router as categories_router
+from app.api.routes.system_routes import router as system_router
+from app.api.routes.super_admin_reindex import router as reindex_router
 
-# تنظیمات لاگ‌گیری برای نمایش بهتر اطلاعات
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = FastAPI(title="Sally Chat Bot API", version="2.0")
+app = FastAPI(
+    title="Sally Chat Bot API",
+    version="2.0",
+    lifespan=lifespan
+)
 
 # CORS configuration
 app.add_middleware(
@@ -90,14 +130,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include refactored routers
-app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(chat_router, prefix="/api", tags=["Chat"])
-app.include_router(tickets_router, prefix="/api", tags=["Tickets"])
-app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
-app.include_router(kb_router, prefix="/api/kb", tags=["Knowledge Base"])
-app.include_router(admin_kb_router, prefix="/admin/knowledge-base", tags=["Admin Knowledge Base"])
-app.include_router(upload_router, prefix="/api", tags=["Upload"])
+# Add middleware stack (order matters - error handler first)
+app.add_middleware(ErrorHandlerMiddleware)
+app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(PerformanceMonitoringMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
+logger.info("🚀 Middleware stack configured")
+logger.info(f"📊 Logging to: logs/")
+logger.info(f"🔧 Environment: {'Production' if not settings.debug else 'Development'}")
+
+# Include routers with consistent prefixes based on RBAC permissions
+
+# ============================================================================
+# API ROUTES ORGANIZED BY ROLE-BASED ACCESS CONTROL (RBAC)
+# ============================================================================
+
+# --- PUBLIC ROUTES (No authentication required) ---
+app.include_router(auth_router, prefix="/api/auth", tags=["🔓 Authentication"])
+app.include_router(kb_router, prefix="/api/kb", tags=["🔓 Public Knowledge Base"])
+
+# --- CUSTOMER ROUTES (Customer role permissions) ---
+# Permissions: VIEW_PUBLIC_KB
+app.include_router(chat_router, prefix="/api", tags=["💬 Chat"])
+# Note: /api/kb/customer/articles requires customer authentication
+# This endpoint is part of kb_router but requires authentication
+
+# --- ADMIN ROUTES (Admin + SuperAdmin role permissions) ---
+# Permissions: VIEW_CUSTOMERS, CREATE_KB_ARTICLES, UPDATE_KB_ARTICLES, VIEW_ACTIVITY_LOGS
+app.include_router(admin_router, prefix="/api/admin", tags=["👨‍💼 Admin Management"])
+
+# --- SUPER ADMIN ROUTES (SuperAdmin only - highest privilege) ---
+# Permissions: All admin permissions + MANAGE_ADMINS, MANAGE_CUSTOMERS,
+# PUBLISH_ARTICLES, DELETE_ARTICLES, MANAGE_SYSTEM_SETTINGS
+app.include_router(admin_kb_router, prefix="/api/super-admin/kb", tags=["👑 Super Admin Knowledge Base"])
+app.include_router(upload_router, prefix="/api/super-admin", tags=["👑 Super Admin Upload"])
+app.include_router(categories_router, prefix="/api/super-admin/categories", tags=["👑 Super Admin Categories"])
+app.include_router(reindex_router, prefix="/api/super-admin", tags=["👑 Super Admin Re-indexing"])
+app.include_router(system_router, prefix="/api/system", tags=["🔧 System Monitoring"])
+
+# ============================================================================
 
 # Alias for /api/users/me to /api/auth/me
 @app.get("/api/users/me")
@@ -109,72 +181,105 @@ async def get_current_user_alias(request: Request):
     token = auth_header.split(" ")[1]
     return await _get_current_user_info(token)
 
-# Serve frontend for SPA routes (development only)
+# Authentication status check endpoint
+@app.get("/api/auth/status")
+async def get_auth_status(request: Request):
+    """Check authentication status for SPA routing."""
+    from app.api.routes.auth_refactored import _get_current_user_info
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return {
+            "authenticated": False,
+            "user": None,
+            "user_type": None
+        }
+
+    try:
+        token = auth_header.split(" ")[1]
+        user_info = await _get_current_user_info(token)
+        return {
+            "authenticated": True,
+            "user": user_info["user"],
+            "user_type": user_info["user_type"]
+        }
+    except HTTPException:
+        return {
+            "authenticated": False,
+            "user": None,
+            "user_type": None
+        }
+
+# SPA Route handler with authentication check
 @app.get("/{path:path}")
-async def serve_spa(path: str):
-    # Skip API routes
-    if path.startswith("api/") or path.startswith("docs") or path.startswith("redoc") or path.startswith("openapi"):
+async def serve_spa_with_auth(path: str, request: Request):
+    """Serve SPA with authentication awareness."""
+
+    # Skip API routes, docs, and static files
+    if (path.startswith("api/") or
+        path.startswith("docs") or
+        path.startswith("redoc") or
+        path.startswith("openapi") or
+        path.startswith("_next") or
+        path.endswith((".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2"))):
         raise HTTPException(status_code=404, detail="Not found")
 
-    # Serve index.html for all other routes
+    # Check if this is a protected route
+    protected_routes = ["/dashboard", "/chat", "/admin", "/super-admin"]
+    is_protected_route = any(path.startswith(route) for route in protected_routes)
+
+    if is_protected_route:
+        # Check authentication for protected routes
+        from app.api.routes.auth_refactored import _get_current_user_info
+        auth_header = request.headers.get("Authorization")
+
+        if not auth_header or not auth_header.startswith("Bearer "):
+            # Return auth required response for SPA
+            return {
+                "auth_required": True,
+                "redirect_to": "/login",
+                "message": "Authentication required"
+            }
+
+        try:
+            token = auth_header.split(" ")[1]
+            user_info = await _get_current_user_info(token)
+            # User is authenticated, serve the SPA normally
+        except HTTPException:
+            # Authentication failed
+            return {
+                "auth_required": True,
+                "redirect_to": "/login",
+                "message": "Authentication required"
+            }
+
+    # Serve index.html for all other routes (including public routes)
     index_path = "sally-frontend/build/index.html"
     if os.path.exists(index_path):
         return FileResponse(index_path)
     else:
         return {"message": "Frontend not built. Run 'npm run build' in sally-frontend directory."}
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and create default roles/admin on startup."""
-    logger.info("Starting up the application...")
-    await init_db()
-
-    # Log existing roles in database for debugging
-    from app.domain.entities_refactored import Role
-    existing_roles = await Role.find_all().to_list()
-    logger.info(f"DEBUG: Existing roles in database before create_default_roles: {[role.name for role in existing_roles]}")
-
-    # این تابع نقش‌ها را با حروف بزرگ (SuperAdmin, Admin, ...) می‌سازد
-    from app.core.permissions import create_default_roles
-    await create_default_roles()
-
-    # Log roles after creation
-    roles_after = await Role.find_all().to_list()
-    logger.info(f"DEBUG: Roles in database after create_default_roles: {[role.name for role in roles_after]}")
-
-    # ساخت ادمین پیش‌فرض در صورتی که هیچ ادمینی وجود نداشته باشد
-    from app.domain.entities_refactored import Admin, Role
-    from app.core.security import get_password_hash
-
-    admin_count = await Admin.find_all().count()
-    if admin_count == 0:
-        logger.info("No admins found. Creating default super admin...")
-
-        # --- اصلاح اصلی و کلیدی اینجاست ---
-        # حالا به دنبال نقشی با نام "SuperAdmin" (با حرف بزرگ) می‌گردیم
-        SuperAdmin_role = await Role.find_one(Role.name == "SuperAdmin")
-        # --- پایان اصلاح ---
-
-        if not SuperAdmin_role:
-            # این پیام خطا حالا بسیار مهم است، چون نشان می‌دهد حتی نقش با حروف بزرگ هم ساخته نشده
-            logger.error("SuperAdmin role not found! Cannot create default admin. Check DEFAULT_ROLES in permissions.py")
-            return
-
-        default_admin = Admin(
-            email=settings.default_SuperAdmin_email,
-            hashed_password=get_password_hash(settings.default_SuperAdmin_password),
-            full_name="Default Super Admin",
-            # --- بهبود کوچک اما مهم: تبدیل id به رشته ---
-            role_id=str(SuperAdmin_role.id),
-            # --- بهبود دوم: اضافه کردن role_name ---
-            role_name=SuperAdmin_role.name
-        )
-        await default_admin.insert()
-        logger.info(f"Created default super Admin: {settings.default_SuperAdmin_email}")
 
 @app.get("/")
 async def root():
-    return {"message": "Sally Chat Bot API v2.0 - Multi-User System with RBAC"}
+    return {
+        "message": "🎯 Sally Chat Bot API v2.0 - Multi-User System with RBAC",
+        "version": "2.0",
+        "documentation": "/docs",
+        "roles": {
+            "SuperAdmin": "👑 Full system access",
+            "Admin": "👨‍💼 Customer management",
+            "Customer": "👤 Chat access",
+            "Guest": "🔓 Public knowledge base only"
+        },
+        "endpoints": {
+            "public": ["/api/auth/*", "/api/kb/articles"],
+            "customer": ["/api/chat/*"],
+            "admin": ["/api/admin/*"],
+            "super_admin": ["/api/super-admin/*"]
+        }
+    }
 
 if __name__ == "__main__":
     import uvicorn

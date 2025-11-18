@@ -4,7 +4,9 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
-import { useAuth } from "../context/AuthContext"
+import { adminService } from "../services/adminService"
+import { Button } from "./ui/button"
+import { MarkdownRenderer } from "./ui/markdown-renderer"
 import toast from "react-hot-toast"
 
 interface ArticleDetailProps {
@@ -15,59 +17,29 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
   const { articleId } = useParams<{ articleId: string }>()
   const [article, setArticle] = useState<Article | null>(null)
   const [loading, setLoading] = useState(true)
-  const { isAdmin, isSuperAdmin } = useAuth()
-
-  useEffect(() => {
-    if (articleId) {
-      loadArticle()
-    }
-  }, [articleId])
 
   const loadArticle = async () => {
     try {
-      const articleData = await knowledgeBaseService.getArticle(articleId!)
+      // اگر در حالت admin هستیم، از admin API استفاده کنیم
+      const articleData = isadminView
+        ? await adminService.getArticle(articleId!)
+        : await knowledgeBaseService.getArticle(articleId!)
       setArticle(articleData)
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to load article")
+      console.error("Error loading article:", error)
+      toast.error(error.response?.data?.detail || "خطا در بارگذاری مقاله")
     } finally {
       setLoading(false)
     }
   }
 
-  const handlePublish = async () => {
-    if (!article || !isSuperAdmin) return
-
-    try {
-      await knowledgeBaseService.publishArticle(article.id)
-      toast.success("Article published successfully!")
-      loadArticle() // Reload to get updated status
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to publish article")
+  useEffect(() => {
+    if (articleId) {
+      loadArticle()
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articleId])
 
-  const handleDelete = async () => {
-    if (!article || !isSuperAdmin) return
-
-    if (window.confirm("Are you sure you want to delete this article? This action cannot be undone.")) {
-      try {
-        await knowledgeBaseService.deleteArticle(article.id)
-        toast.success("Article deleted successfully!")
-        window.history.back()
-      } catch (error: any) {
-        toast.error(error.response?.data?.detail || "Failed to delete article")
-      }
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    const colors = {
-      DRAFT: "bg-gray-100 text-gray-800",
-      PUBLISHED: "bg-green-100 text-green-800",
-      ARCHIVED: "bg-red-100 text-red-800",
-    }
-    return colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"
-  }
 
   if (loading) {
     return (
@@ -89,8 +61,8 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
     return (
       <div className="max-w-4xl mx-auto text-center py-12">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Article Not Found</h2>
-        <Link to="/kb" className="btn-primary">
-          Back to Knowledge Base
+        <Link to="/kb">
+          <Button>Back to Knowledge Base</Button>
         </Link>
       </div>
     )
@@ -102,20 +74,28 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
       <div className="mb-8">
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">{article.title}</h1>
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">{article.title || "عنوان مقاله"}</h1>
 
             <div className="flex items-center space-x-4 mb-4">
-              {isadminView && (
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(article.status)}`}>
-                  {article.status.toUpperCase()}
-                </span>
+              {isadminView && article.status && (
+                <>
+                  {(() => {
+                    const badge = adminService.getStatusBadge(article.status);
+                    return (
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${badge.bgColor} ${badge.color}`}>
+                        <span className="mr-1">{badge.icon}</span>
+                        {badge.text}
+                      </span>
+                    );
+                  })()}
+                </>
               )}
 
-              {article.tags.length > 0 && (
+              {article.tags && article.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {article.tags.map((tag, index) => (
                     <span key={index} className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
-                      {tag}
+                      {tag.name}
                     </span>
                   ))}
                 </div>
@@ -126,48 +106,30 @@ const ArticleDetail: React.FC<ArticleDetailProps> = ({ isadminView = false }) =>
           </div>
 
           {isadminView && (
-            <div className="flex flex-col space-y-2 ml-6">
-              {article.status === "DRAFT" && isSuperAdmin && (
-                <button onClick={handlePublish} className="btn-primary text-sm">
-                  Publish Article
-                </button>
-              )}
-
-              {isAdmin && (
-                <Link to={`/admin/kb/articles/${article.id}/edit`} className="btn-secondary text-sm">
-                  Edit Article
-                </Link>
-              )}
-
-              {isSuperAdmin && (
-                <button
-                  onClick={handleDelete}
-                  className="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-2 rounded-lg transition-colors"
-                >
-                  Delete Article
-                </button>
-              )}
+            <div className="mt-12 pt-8 border-t border-gray-200">
+              <Link to={isadminView ? "/super-admin/knowledge-base" : "/kb"} className="text-blue-600 hover:text-blue-500 font-large">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                </svg>
+              </Link>
             </div>
           )}
         </div>
 
         <div className="text-sm text-gray-500 border-b border-gray-200 pb-4">
-          <p>Created: {new Date(article.created_at).toLocaleDateString()}</p>
-          <p>Last updated: {new Date(article.updated_at).toLocaleDateString()}</p>
+          <p>Created: {article.created_at ? new Date(article.created_at).toLocaleDateString() : "نامشخص"}</p>
+          <p>Last updated: {article.updated_at ? new Date(article.updated_at).toLocaleDateString() : "نامشخص"}</p>
         </div>
       </div>
 
       {/* Article Content */}
-      <div className="prose prose-lg max-w-none">
-        <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">{article.content}</div>
-      </div>
+      <MarkdownRenderer 
+        content={article.content_markdown || article.content_html || "محتوایی برای نمایش وجود ندارد."}
+        variant="default"
+      />
 
       {/* Navigation */}
-      <div className="mt-12 pt-8 border-t border-gray-200">
-        <Link to={isadminView ? "/admin/kb" : "/kb"} className="text-blue-600 hover:text-blue-500 font-medium">
-          ← Back to {isadminView ? "Admin" : ""} Knowledge Base
-        </Link>
-      </div>
+      
     </div>
   )
 }

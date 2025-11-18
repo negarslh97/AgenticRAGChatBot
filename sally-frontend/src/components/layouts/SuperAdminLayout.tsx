@@ -13,11 +13,17 @@ const SuperAdminLayout: React.FC = () => {
 
       {/* Main Content Area with Sidebar */}
       <div className="flex">
-        {/* Fixed Sidebar - Now positioned absolutely */}
-        <Sidebar />
+        {/* Desktop Sidebar - Fixed on the right side */}
+        <div className="hidden lg:block w-64 flex-shrink-0 h-full fixed top-0 right-0 z-30"
+             style={{
+               top: '120px',
+               height: `calc(100vh - 120px)`
+             }}>
+          <Sidebar />
+        </div>
 
-        {/* Main Content - Add left margin for fixed sidebar */}
-        <main className="flex-1 ml-64 p-6">
+        {/* Main Content - Add right padding for desktop sidebar */}
+        <main className="flex-1 lg:pr-64 p-6">
           <Outlet />
         </main>
       </div>

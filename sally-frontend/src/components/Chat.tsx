@@ -12,10 +12,15 @@ import {
   ChevronRight,
   Sparkles,
   Lightbulb,
-  HelpCircle
+  HelpCircle,
+  ExternalLink,
+  Settings
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
+import ArticleHighlightModal from './ArticleHighlightModal';
+import ModelSelector from './ModelSelector';
+import { getDefaultModel } from '../config/models';
 
 // Define component-specific types
 interface Message {
@@ -23,6 +28,32 @@ interface Message {
   content: string;
   role: 'user' | 'assistant';
   timestamp: Date;
+  sender_type?: 'Customer' | 'Admin' | 'SuperAdmin' | 'Guest' | 'AI';
+  is_failed?: boolean;
+  failure_reason?: string;
+  rating?: {
+    rating: number;
+    comment?: string;
+    rated_by?: string;
+    rated_at?: string;
+  };
+  metadata?: {
+    model_name?: string;
+    provider?: string;
+    confidence?: number;
+    sources?: Array<{
+      id: string;
+      title: string;
+      score: number;
+      category?: string;
+      tags?: string[];
+    }>;
+    token_usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+  };
 }
 
 interface Conversation extends ApiConversation {
@@ -36,7 +67,31 @@ const Chat: React.FC = () => {
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [selectedModel, setSelectedModel] = useState(getDefaultModel('chat')); // Default model from config
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // 🔥 State برای Article Highlight Modal
+  const [highlightModal, setHighlightModal] = useState<{
+    isOpen: boolean;
+    articleId: string;
+    userQuery: string;
+  }>({ isOpen: false, articleId: '', userQuery: '' });
+
+  // Helper: Dedupe sources by ID (backend should already do this, but double-check)
+  const dedupeSourcesById = (sources?: any[]) => {
+    if (!sources) return [] as any[];
+    const seen = new Set<string>();
+    const unique: any[] = [];
+    for (const s of sources) {
+      const id = s?.id?.toString?.() || '';
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        unique.push(s);
+      }
+    }
+    return unique;
+  };
 
   // 1. Fetch conversation list on mount
   useEffect(() => {
@@ -63,6 +118,12 @@ const Chat: React.FC = () => {
     setNewMessage('');
   };
 
+  // Model selection handler
+  const handleModelChange = (modelId: string) => {
+    setSelectedModel(modelId);
+    setShowModelSelector(false);
+  };
+
   // 4. Simplified "Conversation Select" handler
   const handleSelectConversation = async (conversation: ApiConversation) => {
     // Prevent re-fetching if already selected
@@ -74,8 +135,13 @@ const Chat: React.FC = () => {
       const transformedMessages: Message[] = fetchedMessages.map(msg => ({
         id: msg.id,
         content: msg.content,
-        role: msg.is_from_user ? 'user' : 'assistant',
+        role: msg.sender_type === 'AI' ? 'assistant' : 'user',
         timestamp: new Date(msg.created_at),
+        sender_type: msg.sender_type,
+        is_failed: msg.is_failed,
+        failure_reason: msg.failure_reason,
+        rating: msg.rating,
+        metadata: msg.metadata,
       }));
 
       setSelectedConversation({
@@ -90,7 +156,7 @@ const Chat: React.FC = () => {
   };
 
 
-  // 5. Refactored "Send Message" handler
+  // 5. Streaming "Send Message" handler
   const handleSendMessage = async () => {
     if (!newMessage.trim() || isLoading) return;
 
@@ -112,6 +178,7 @@ const Chat: React.FC = () => {
       setSelectedConversation({
         id: 'new-chat',
         title: newMessage.slice(0, 30),
+        tags: [],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         messages: [optimisticUserMessage],
@@ -122,39 +189,137 @@ const Chat: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const response = await chatService.sendMessage(
-        newMessage,
-        selectedConversation?.id === 'new-chat' ? undefined : selectedConversation?.id || undefined
-      );
-      
-      const assistantMessage: Message = {
-        id: response.message_id,
-        content: response.message,
-        role: 'assistant',
-        timestamp: new Date(),
-      };
+      // Add a streaming assistant placeholder
+      const assistantTempId = `ai-temp-${Date.now()}`;
+      const addAssistantPlaceholder = () => setSelectedConversation(prev => ({
+        ...prev!,
+        messages: [...(prev?.messages || []), {
+          id: assistantTempId,
+          content: '',
+          role: 'assistant',
+          timestamp: new Date(),
+          metadata: { sources: [] }
+        } as Message]
+      } as Conversation));
 
-      // If it was a new chat, update the conversation list and the selected conversation
-      if (!selectedConversation || selectedConversation.id === 'new-chat') {
-        const newConvFromServer = { id: response.conversation_id, title: newMessage.slice(0, 30), created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-        setConversations(prev => [newConvFromServer, ...prev]);
-        setSelectedConversation({
-            ...newConvFromServer,
-            messages: [optimisticUserMessage, assistantMessage]
-        });
-      } 
-      else {
-        // Otherwise, just add the new message
-        setSelectedConversation(prev => ({
-          ...prev!,
-          messages: [...prev!.messages, assistantMessage],
-        }));
-      }
+      addAssistantPlaceholder();
+
+      const currentConvId = selectedConversation?.id === 'new-chat' ? undefined : selectedConversation?.id;
+
+      await chatService.sendMessageStream(
+        optimisticUserMessage.content,
+        currentConvId,
+        undefined,
+        (evt: any) => {
+          if (!evt || !selectedConversation) return;
+
+          if (evt.type === 'init') {
+            // Set conversation id if it was a new chat and add to list
+            if (!currentConvId && evt.conversation_id) {
+              const newConv: ApiConversation = {
+                id: evt.conversation_id,
+                title: optimisticUserMessage.content.slice(0, 30),
+                tags: [],
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              };
+              setConversations(prev => [newConv, ...prev]);
+              setSelectedConversation(prev => prev ? ({ ...prev, id: evt.conversation_id }) : prev);
+            }
+          }
+
+          if (evt.type === 'sources') {
+            const unique = dedupeSourcesById(evt.sources);
+            console.log('📚 Sources received:', unique);
+            unique.forEach((s: any, i: number) => {
+              console.log(`   Source ${i+1}: ID="${s.id}", Title="${s.title}"`);
+            });
+            
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                metadata: {
+                  ...(m.metadata || {}),
+                  sources: unique
+                }
+              }) : m);
+              return next;
+            });
+          }
+
+          if (evt.type === 'chunk') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                content: (m.content || '') + (evt.content || '')
+              }) : m);
+              return next;
+            });
+          }
+
+          if (evt.type === 'complete') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                id: evt.message_id || assistantTempId,
+                content: evt.full_response || m.content || '',
+                metadata: {
+                  ...(m.metadata || {}),
+                  confidence: evt.confidence
+                }
+              }) : m);
+              return next;
+            });
+            setIsLoading(false);
+            
+            // 🔥 Fetch updated conversation with new title
+            if (evt.conversation_id) {
+              setTimeout(async () => {
+                try {
+                  const updatedConv = await chatService.getConversation(evt.conversation_id);
+                  if (updatedConv && updatedConv.title) {
+                    // Update conversations list
+                    setConversations(prev => prev.map(c => 
+                      c.id === evt.conversation_id ? updatedConv : c
+                    ));
+                    // Update selected conversation
+                    setSelectedConversation(prev => prev && prev.id === evt.conversation_id ? 
+                      { ...prev, ...updatedConv } : prev
+                    );
+                  }
+                } catch (error) {
+                  console.error('Failed to fetch updated conversation:', error);
+                }
+              }, 1500); // Wait 1.5s for backend to generate title
+            }
+          }
+
+          if (evt.type === 'error') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev;
+              const next = { ...prev } as Conversation;
+              next.messages = next.messages.map(m => m.id === assistantTempId ? ({
+                ...m,
+                is_failed: true,
+                failure_reason: evt.message
+              }) : m);
+              return next;
+            });
+            setIsLoading(false);
+          }
+        },
+        selectedModel,
+        0.7  // Default temperature
+      );
 
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // Optional: Add logic to remove the optimistic message on error
-    } finally {
+      console.error('Failed to send message (stream):', error);
       setIsLoading(false);
     }
   };
@@ -174,32 +339,68 @@ const Chat: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-full bg-gray-50">
+    <>
+      {/* 🔥 Article Highlight Modal */}
+      {highlightModal.isOpen && (
+        <ArticleHighlightModal
+          articleId={highlightModal.articleId}
+          userQuery={highlightModal.userQuery}
+          onClose={() => setHighlightModal({ isOpen: false, articleId: '', userQuery: '' })}
+        />
+      )}
+      
+      <div className="flex h-screen w-full bg-gray-50">
       {/* =============================================================== */}
       {/* Main Content Area (CORRECTED for RTL) */}
       {/* =============================================================== */}
       <main className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarOpen ? 'mr-80' : 'mr-0'}`}>
         <header className="flex items-center justify-between p-4 bg-white shadow-sm">
-            {/* ... Header content remains the same ... */}
-            <div className="flex items-center gap-3"> {/* For RTL, remove mr-4 */}
+            {/* Left side - Bot info and model selector */}
+            <div className="flex items-center gap-3">
                 <div className="relative">
                     <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center">
                         <Bot className="h-4 w-4 text-white" />
                     </div>
                     <div className="absolute -bottom-1 -right-1 h-3 w-3 bg-green-500 border-2 border-white rounded-full"></div>
                 </div>
-                <div>
+                <div className="flex flex-col">
                     <h1 className="font-semibold text-gray-900">سالی</h1>
-                    <p className="text-xs text-gray-500">آنلاین</p>
+                    <div className="flex items-center gap-2">
+                        <p className="text-xs text-gray-500">آنلاین</p>
+                        <Button
+                            onClick={() => setShowModelSelector(!showModelSelector)}
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto p-1 text-xs"
+                        >
+                            <Settings className="h-3 w-3" />
+                            <span className="mr-1">
+                                {selectedModel.split('/').pop()?.split(':')[0] || selectedModel}
+                            </span>
+                        </Button>
+                    </div>
                 </div>
             </div>
-            <Button
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                variant="ghost"
-                size="icon"
-            >
-                {isSidebarOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </Button>
+
+            {/* Right side - Sidebar toggle */}
+            <div className="flex items-center gap-2">
+                {showModelSelector && (
+                    <div className="w-80">
+                        <ModelSelector
+                            selectedModel={selectedModel}
+                            onModelChange={handleModelChange}
+                            disabled={isLoading}
+                        />
+                    </div>
+                )}
+                <Button
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    variant="ghost"
+                    size="icon"
+                >
+                    {isSidebarOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                </Button>
+            </div>
         </header>
 
         {/* Chat messages area */}
@@ -259,12 +460,101 @@ const Chat: React.FC = () => {
                     </div>
                   )}
                   <div className={`max-w-[70%]`}>
-                    <div className={`p-4 rounded-lg shadow-sm ${message.role === 'user' ? 'bg-white text-slate-800' : 'bg-blue-600 text-white'}`}>
+                    <div className={`p-4 rounded-lg shadow-sm ${message.role === 'user' ? 'bg-white text-slate-800' : message.is_failed ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-blue-600 text-white'}`}>
                       <p className="text-right whitespace-pre-wrap">{message.content}</p>
+                      {/* 🔥 Streaming indicator */}
+                      {message.role === 'assistant' && !message.content && isLoading && (
+                        <div className="flex items-center gap-2 text-white/70">
+                          <div className="animate-pulse">در حال نوشتن</div>
+                          <div className="flex gap-1">
+                            <div className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                            <div className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                            <div className="w-2 h-2 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                          </div>
+                        </div>
+                      )}
+                      {message.is_failed && message.failure_reason && (
+                        <p className="text-xs text-red-600 mt-2 text-right">
+                          خطا: {message.failure_reason}
+                        </p>
+                      )}
+                      {message.metadata && message.role === 'assistant' && (
+                        <div className="mt-2 space-y-2">
+                          {/* Sources section - clickable with highlighting */}
+                          {message.metadata.sources && message.metadata.sources.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-white/20">
+                              <p className="text-xs font-medium opacity-90 mb-2 flex items-center gap-1">
+                                <Sparkles className="h-3 w-3" />
+                                📚 منابع مرتبط (کلیک کنید برای مشاهده با highlight):
+                              </p>
+                              <div className="space-y-2">
+                                {message.metadata.sources.map((source: any, index: number) => {
+                                  // 🔥 پیدا کردن سوال اصلی کاربر (پیام قبلی)
+                                  const messageIndex = selectedConversation?.messages.findIndex(m => m.id === message.id);
+                                  const userMessage = messageIndex !== undefined && messageIndex > 0 
+                                    ? selectedConversation?.messages[messageIndex - 1] 
+                                    : null;
+                                  const userQuery = userMessage?.role === 'user' ? userMessage.content : '';
+                                  
+                                  return (
+                                    <button
+                                      key={source.id || index}
+                                      onClick={() => {
+                                        console.log('🖱️ Source clicked!');
+                                        console.log('   Article ID:', source.id);
+                                        console.log('   User Query:', userQuery);
+                                        console.log('   Source:', source);
+                                        
+                                        if (!source.id) {
+                                          console.error('❌ No article ID!');
+                                          alert('خطا: شناسه مقاله موجود نیست!');
+                                          return;
+                                        }
+                                        
+                                        setHighlightModal({
+                                          isOpen: true,
+                                          articleId: source.id,
+                                          userQuery: userQuery
+                                        });
+                                      }}
+                                      className="text-xs opacity-80 hover:opacity-100 transition-all w-full text-right p-2 rounded hover:bg-white/10 flex items-center gap-2 group"
+                                    >
+                                      <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" />
+                                      <span className="flex-1">
+                                        {index + 1}. {source.title}
+                                      </span>
+                                      {/* 🔥 Debug info */}
+                                      <span className="text-xs opacity-50">
+                                        (ID: {source.id ? source.id.substring(0, 8) + '...' : 'N/A'})
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Model info */}
+                          <div className="text-xs opacity-75 text-left">
+                            {message.metadata.model_name && (
+                              <span>مدل: {message.metadata.model_name}</span>
+                            )}
+                            {message.metadata.confidence && (
+                              <span className="mr-2">دقت: {Math.round(message.metadata.confidence * 100)}%</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <p className={`text-xs text-gray-500 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+                    <div className={`text-xs text-gray-500 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                       {formatTime(message.timestamp)}
-                    </p>
+                      {message.sender_type && message.sender_type !== 'AI' && message.sender_type !== 'Guest' && (
+                        <span className="mr-2">({message.sender_type})</span>
+                      )}
+                      <span className="mr-2">
+                        {message.role === 'user' ? 'کاربر' : 'AI'}
+                      </span>
+                    </div>
                   </div>
                   {message.role === 'user' && (
                     <div className="h-8 w-8 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center">
@@ -327,7 +617,34 @@ const Chat: React.FC = () => {
                                   <h4 className="font-medium text-gray-900 truncate text-right">
                                       {conversation.title}
                                   </h4>
-                                  <p className="text-xs text-gray-500 text-right">
+                                  {/* 🆕 نمایش metadata */}
+                                  <div className="flex flex-wrap gap-1 mt-1 text-right">
+                                    {conversation.rag_type && (
+                                      <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">
+                                        {conversation.rag_type === 'agentic' ? '🧠 Agentic RAG' : '📚 Simple RAG'}
+                                      </span>
+                                    )}
+                                    {conversation.model_name && (
+                                      <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full" title={conversation.model_name}>
+                                        🤖 {conversation.model_name.split('/').pop()?.split(':')[0] || conversation.model_name}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {conversation.tags && conversation.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {conversation.tags.slice(0, 2).map((tag, index) => (
+                                        <span key={index} className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                      {conversation.tags.length > 2 && (
+                                        <span className="text-xs text-gray-500">
+                                          +{conversation.tags.length - 2}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  <p className="text-xs text-gray-500 text-right mt-1">
                                       {formatTime(new Date(conversation.created_at))}
                                   </p>
                               </div>
@@ -339,6 +656,7 @@ const Chat: React.FC = () => {
           </div>
       </aside>
     </div>
+    </>
   )
 };
 

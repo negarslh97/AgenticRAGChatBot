@@ -78,15 +78,6 @@ const UserManagementPage: React.FC = () => {
     return roleLabels[value as keyof typeof roleLabels] || 'همه نقش‌ها'
   }
 
-  const getStatusDisplayText = (value: string) => {
-    const statusLabels = {
-      all: 'همه وضعیت‌ها',
-      true: 'فعال',
-      false: 'غیرفعال'
-    }
-    return statusLabels[value as keyof typeof statusLabels] || 'همه وضعیت‌ها'
-  }
-
   // Mock data for demonstration
   useEffect(() => {
     const mockUsers: User[] = [
@@ -228,7 +219,7 @@ const UserManagementPage: React.FC = () => {
         ),
       }),
     ],
-    []
+    [dropdownOpen]
   )
 
   const table = useReactTable({

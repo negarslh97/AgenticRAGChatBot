@@ -3,9 +3,14 @@ import { Link } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { Button } from "./ui/button"
 import logo from "../assets/logo.png" // مسیر لوگو را به درستی تنظیم کنید
+import { Menu } from "lucide-react"
 
-const Navbar: React.FC = () => {
-  const { user, logout, isAuthenticated, isAdmin } = useAuth()
+interface NavbarProps {
+  onMobileMenuToggle?: () => void
+}
+
+const Navbar: React.FC<NavbarProps> = ({ onMobileMenuToggle }) => {
+  const { user, userType, logout, isAuthenticated, getDashboardByRole } = useAuth()
 
   const handleLogout = () => {
     logout()
@@ -13,12 +18,24 @@ const Navbar: React.FC = () => {
 
   return (
     // <nav className="bg-white border-b border-gray-200 px-4 py-3">
-    <nav className="bg-white px-4 py-3">
+    <nav className="bg-white px-4 py-3 border-b border-gray-200">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
 
-        {/* Right side - Logo */}
+        {/* Left side - Logo and Mobile Menu */}
         <div className="flex items-center">
-          <Link to={user ? "/dashboard" : "/"}>
+          {/* Mobile Menu Button */}
+          {isAuthenticated && onMobileMenuToggle && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onMobileMenuToggle}
+              className="lg:hidden mr-3 p-2"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          )}
+
+          <Link to={user ? (userType ? getDashboardByRole(userType) : "/dashboard") : "/"}>
             <img
                 src={logo}
                 alt="Sally Logo"
@@ -49,8 +66,8 @@ const Navbar: React.FC = () => {
               >
                 خروج
               </Button>
-              <Link to="/profile">
-                <Button variant="ghost">پروفایل</Button>
+              <Link to={userType ? getDashboardByRole(userType) : "/dashboard"}>
+                <Button variant="ghost">داشبورد</Button>
               </Link>
             </>
           )}
@@ -73,12 +90,6 @@ const Navbar: React.FC = () => {
               className="text-gray-700 hover:text-blue-600 transition-colors font-medium"
             >
               چت
-            </Link>
-            <Link
-              to="/tickets"
-              className="text-gray-700 hover:text-blue-600 transition-colors font-medium"
-            >
-              تیکت‌ها
             </Link>
             <Link
               to="/knowledge-base"
@@ -109,12 +120,6 @@ const Navbar: React.FC = () => {
               className="text-sm text-gray-700 hover:text-blue-600 transition-colors"
             >
               چت
-            </Link>
-            <Link
-              to="/tickets"
-              className="text-sm text-gray-700 hover:text-blue-600 transition-colors"
-            >
-              تیکت‌ها
             </Link>
             <Link
               to="/knowledge-base"

@@ -1,14 +1,27 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from typing import Optional, List, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from bson import ObjectId
-from app.domain.entities_refactored import (
-    Customer, Admin, Conversation, Message, GuestSession, UnansweredQuestion
+from app.domain.entities import (
+    Customer, Admin, Conversation, Message, GuestSession, UnansweredQuestion,
+    MessageRating
 )
-from app.core.permissions import get_current_customer, get_optional_customer, get_optional_admin
-from app.use_cases.chat_use_cases_refactored import ChatUseCases
+from app.core.permissions import get_current_customer, get_optional_customer, get_optional_admin, get_current_admin
+from app.use_cases.chat_use_cases import ChatUseCases
 import json
 from datetime import datetime
+import logging
+import asyncio
+
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# Wrapper dependency for async get_current_admin
+async def get_admin_dependency() -> Admin:
+    """Wrapper dependency for get_current_admin"""
+    return await get_current_admin()
 
 router = APIRouter()
 
@@ -17,9 +30,45 @@ class ChatMessage(BaseModel):
     content: str
     conversation_id: Optional[str] = None
     guest_session_id: Optional[str] = None
+    rag_type: str = "simple"  # 🆕 "simple" or "detailed" for two-speed RAG
+    model: Optional[str] = None  # Model name (e.g., "gpt-4o", "ollama:llama3.2", "claude-3-5-sonnet")
+    temperature: Optional[float] = 0.7  # Temperature for text generation (0.0-2.0)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminChatMessage(BaseModel):
+    content: str
+    conversation_id: Optional[str] = None
+    rag_type: str = "simple"  # "simple", "agentic", or "advanced_agentic"
+    model: Optional[str] = None  # Model name (e.g., "gpt-4o", "ollama:llama3.2", "claude-3-5-sonnet")
+    temperature: Optional[float] = 0.7  # Temperature for text generation (0.0-2.0)
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdvancedAgenticRequest(BaseModel):
+    """درخواست برای Advanced Agentic RAG"""
+    query: str
+    conversation_id: Optional[str] = None
+    include_metadata: bool = True  # شامل شدن metadata مثل action_history
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdvancedAgenticResponse(BaseModel):
+    """پاسخ Advanced Agentic RAG"""
+    response: str
+    sources: List[dict]
+    confidence: float
+    complexity: str
+    actions_taken: List[str]
+    reflection_notes: List[str]
+    errors: List[str]
+    session_id: str
+    conversation_id: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatResponse(BaseModel):
@@ -45,24 +94,26 @@ async def send_message(
     user_type = "Customer" if current_customer else ("Admin" if current_admin else "guest")
     
     try:
-        # Debug logging
-        print(f"DEBUG: Received message request: {message}")
-        print(f"DEBUG: Current user type: {user_type}")
-        print(f"DEBUG: Current user: {current_user}")
-        print(f"DEBUG: Guest session ID: {message.guest_session_id}")
-        print(f"DEBUG: Message content: {message.content}")
-        print(f"DEBUG: Conversation ID: {message.conversation_id}")
+        # Log message for monitoring
+        logger.info(f"Chat message received - User type: {user_type}, Content length: {len(message.content)}, Conversation ID: {message.conversation_id}")
         
         # Validate guest session ID for guests only
         if not current_user and not message.guest_session_id:
             raise HTTPException(status_code=400, detail="guest_session_id is required for guest users")
         
+        # Validate RAG type
+        if message.rag_type not in ["simple", "detailed"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple' or 'detailed'")
+
         response = await ChatUseCases.send_message(
             content=message.content,
             user=current_user,
             user_type=user_type,
             conversation_id=message.conversation_id,
-            guest_session_id=message.guest_session_id
+            guest_session_id=message.guest_session_id,
+            rag_type=message.rag_type,
+            model=message.model,
+            temperature=message.temperature
         )
         
         return ChatResponse(**response)
@@ -76,20 +127,176 @@ async def send_message(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/conversations")
-async def get_conversations(current_customer: Customer = Depends(get_current_customer)):
-    """Get customer's conversation history."""
+@router.post("/admin/message", response_model=ChatResponse)
+async def send_admin_message(
+    request: Request,
+    message: AdminChatMessage,
+    current_admin: Admin = Depends(get_optional_admin)
+):
+    """Send a chat message as admin with RAG type selection (non-streaming)."""
+    
+    if not current_admin:
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+    
     try:
-        conversations = await ChatUseCases.get_user_conversations(current_customer)
-        return {"conversations": conversations}
+        # Log message for monitoring
+        logger.info(f"Admin chat message received - Admin: {current_admin.email}, RAG type: {message.rag_type}, Content length: {len(message.content)}, Conversation ID: {message.conversation_id}")
+        
+        # Validate RAG type
+        if message.rag_type not in ["simple", "agentic", "advanced_agentic"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple', 'agentic', or 'advanced_agentic'")
+        
+        response = await ChatUseCases.send_admin_message(
+            content=message.content,
+            admin=current_admin,
+            conversation_id=message.conversation_id,
+            rag_type=message.rag_type,
+            model=message.model,
+            temperature=message.temperature
+        )
+        
+        return ChatResponse(**response)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
+        logger.error(f"Unexpected error in send_admin_message: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
+@router.post("/admin/message/stream")
+async def send_admin_message_stream(
+    request: Request,
+    message: AdminChatMessage,
+    current_admin: Admin = Depends(get_optional_admin)
+):
+    """Send a chat message as admin with RAG type selection (streaming)."""
+    
+    if not current_admin:
+        raise HTTPException(status_code=401, detail="Admin authentication required")
+    
+    try:
+        logger.info(f"🌊 Admin streaming message - Admin: {current_admin.email}, RAG type: {message.rag_type}")
+        
+        # Validate RAG type
+        if message.rag_type not in ["simple", "agentic", "advanced_agentic"]:
+            raise HTTPException(status_code=400, detail="Invalid RAG type. Must be 'simple', 'agentic', or 'advanced_agentic'")
+        
+        async def generate_stream():
+            """Generator for admin streaming"""
+            try:
+                async for event_data in ChatUseCases.send_admin_message_stream(
+                    content=message.content,
+                    admin=current_admin,
+                    conversation_id=message.conversation_id,
+                    rag_type=message.rag_type,
+                    model=message.model,
+                    temperature=message.temperature
+                ):
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.01)
+                
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/conversations")
+async def get_conversations(
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Get conversations - authenticated users only"""
+    try:
+        # Determine user type and get appropriate conversations
+        if current_customer:
+            conversations = await ChatUseCases.get_user_conversations(current_customer)
+        elif current_admin:
+            conversations = await ChatUseCases.get_admin_conversations(current_admin)
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        return {"conversations": conversations}
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        logger.error(f"Error getting conversations: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: str,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Get a single conversation by ID - authenticated users only"""
+    try:
+        from bson import ObjectId
+        
+        # Get the conversation
+        conversation = await Conversation.get(ObjectId(conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Check permissions
+        if current_customer:
+            if conversation.customer_id != str(current_customer.id):
+                raise HTTPException(status_code=403, detail="Access denied")
+        elif current_admin:
+            if conversation.admin_id != str(current_admin.id):
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        # Return conversation with all fields including metadata
+        return {
+            "id": str(conversation.id),
+            "title": conversation.title,
+            "tags": conversation.tags,
+            "created_at": conversation.created_at.isoformat(),
+            "updated_at": conversation.updated_at.isoformat(),
+            "rag_type": conversation.rag_type,
+            "model_name": conversation.model_name,
+            "temperature": conversation.temperature
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting conversation: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class TitleUpdateRequest(BaseModel):
+    title: str
+
+
+class MessageRatingRequest(BaseModel):
+    rating: int  # 1-5 scale
+    comment: Optional[str] = None
 
 @router.put("/conversations/{conversation_id}/title")
 async def update_conversation_title(
     conversation_id: str,
-    title: str,
+    title_request: TitleUpdateRequest,
     current_customer: Customer = Depends(get_current_customer)
 ):
     """Update conversation title."""
@@ -98,20 +305,151 @@ async def update_conversation_title(
         conversation = await Conversation.get(ObjectId(conversation_id))
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        
+
         # Check if customer owns the conversation
-        if conversation.customer_id != current_customer.id:
+        if conversation.customer_id != str(current_customer.id):
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         # Update the title
-        conversation.title = title
+        conversation.title = title_request.title
         conversation.updated_at = datetime.utcnow()
         await conversation.save()
-        
+
         return {"message": "Title updated successfully"}
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/conversations/{conversation_id}/generate-title-tags")
+async def generate_conversation_title_tags(
+    conversation_id: str,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Generate AI-powered title and tags for a conversation."""
+    try:
+        # Get the conversation to check ownership
+        conversation = await Conversation.get(ObjectId(conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Check permissions
+        if current_customer and conversation.customer_id != str(current_customer.id):
+            raise HTTPException(status_code=403, detail="Access denied")
+        elif not current_customer and not current_admin:
+            # For guests, check guest session ownership
+            raise HTTPException(status_code=403, detail="Access denied - authentication required")
+
+        # Generate title and tags
+        result = await ChatUseCases.generate_conversation_title_and_tags(conversation_id)
+
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return {
+            "message": "Title and tags generated successfully",
+            "title": result["title"],
+            "tags": result["tags"]
+        }
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"Error generating title and tags: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/messages/{message_id}/rate")
+async def rate_message(
+    message_id: str,
+    rating_request: MessageRatingRequest,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Rate an AI message response."""
+    try:
+        # Validate rating range
+        if not 1 <= rating_request.rating <= 5:
+            raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+
+        # Get the message
+        message = await Message.get(ObjectId(message_id))
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        # Check if message is from AI
+        if message.sender_type != "AI":
+            raise HTTPException(status_code=400, detail="Only AI messages can be rated")
+
+        # Get the conversation to check ownership
+        conversation = await Conversation.get(ObjectId(message.conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Check permissions - only conversation owner can rate messages
+        rater_id = None
+        if current_customer and conversation.customer_id == str(current_customer.id):
+            rater_id = str(current_customer.id)
+        elif current_admin:
+            rater_id = str(current_admin.id)
+        else:
+            raise HTTPException(status_code=403, detail="Access denied - only conversation participants can rate messages")
+
+        # Create or update rating
+        message.rating = MessageRating(
+            rating=rating_request.rating,
+            comment=rating_request.comment,
+            rated_by=rater_id,
+            rated_at=datetime.utcnow()
+        )
+
+        await message.save()
+
+        return {
+            "message": "Rating submitted successfully",
+            "rating": rating_request.rating,
+            "comment": rating_request.comment
+        }
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"Error rating message: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/conversations/{conversation_id}/rating-stats")
+async def get_conversation_rating_stats(
+    conversation_id: str,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """Get rating statistics for a conversation."""
+    try:
+        # Get the conversation to check ownership
+        conversation = await Conversation.get(ObjectId(conversation_id))
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Check permissions
+        if current_customer and conversation.customer_id != str(current_customer.id):
+            raise HTTPException(status_code=403, detail="Access denied")
+        elif not current_customer and not current_admin:
+            raise HTTPException(status_code=403, detail="Access denied - authentication required")
+
+        # Get rating statistics
+        stats = await ChatUseCases.get_message_rating_stats(conversation_id)
+
+        return {
+            "conversation_id": conversation_id,
+            "rating_stats": stats
+        }
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"Error getting rating stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -124,17 +462,15 @@ async def get_conversation_messages(
 ):
     """Get messages from a conversation."""
     try:
-        print(f"DEBUG: Getting messages for conversation: {conversation_id}")
-        print(f"DEBUG: Current user type: {'customer' if current_customer else ('Admin' if current_admin else 'Guest')}")
-        print(f"DEBUG: Guest session ID: {guest_session_id}")
+        # Determine user type and ID for access control
+        user_type = "Customer" if current_customer else ("Admin" if current_admin else "Guest")
+        user_id = str(current_customer.id) if current_customer else (str(current_admin.id) if current_admin else None)
+        
+        logger.info(f"Getting conversation history - Conversation ID: {conversation_id}, User type: {user_type}")
         
         # Validate guest session ID for guests
         if not current_customer and not current_admin and not guest_session_id:
             raise HTTPException(status_code=400, detail="guest_session_id is required for guest users")
-        
-        # Determine user type and ID for access control
-        user_type = "Customer" if current_customer else ("Admin" if current_admin else "Guest")
-        user_id = str(current_customer.id) if current_customer else (str(current_admin.id) if current_admin else None)
         
         messages = await ChatUseCases.get_conversation_history(
             conversation_id, 
@@ -142,11 +478,11 @@ async def get_conversation_messages(
             user_id=user_id, 
             guest_session_id=guest_session_id
         )
-        print(f"DEBUG: Found {len(messages)} messages")
+        logger.info(f"Returning {len(messages)} messages for conversation {conversation_id}")
         
         return {"messages": messages}
     except ValueError as e:
-        print(f"DEBUG: ValueError: {e}")
+        logger.error(f"Chat API error: {e}")
         if "Conversation not found" in str(e):
             raise HTTPException(status_code=404, detail="Conversation not found")
         elif "Access denied" in str(e):
@@ -156,10 +492,666 @@ async def get_conversation_messages(
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        print(f"DEBUG: Exception: {e}")
+        logger.error(f"Unexpected error in chat API: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/article/{article_id}")
+async def get_article_for_highlighting(
+    article_id: str,
+    query: Optional[str] = None,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """
+    Get article with highlighting information based on user query.
+    برای نمایش مقاله با highlight کردن قسمت‌های مرتبط.
+    """
+    try:
+        from bson import ObjectId
+        from app.domain.entities import KnowledgeBaseArticle
+        from app.infrastructure.database.mongodb import init_db, get_mongo_client
+        
+        if get_mongo_client() is None:
+            await init_db()
+        
+        # دریافت مقاله
+        article = await KnowledgeBaseArticle.get(ObjectId(article_id))
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        # استخراج کلمات کلیدی از query برای highlighting
+        highlight_keywords = []
+        if query:
+            # لیست stop words فارسی (کلماتی که نباید highlight بشن)
+            persian_stop_words = {
+                'است', 'هست', 'که', 'در', 'به', 'از', 'را', 'با', 'برای', 'این', 'آن',
+                'یک', 'چه', 'چی', 'چند', 'کدام', 'چطور', 'چگونه', 'چرا', 'کی', 'کجا',
+                'می', 'شود', 'میشود', 'می‌شود', 'بود', 'باشد', 'های', 'ها', 'ای', 'ان',
+                'و', 'یا', 'اما', 'ولی', 'تا', 'اگر', 'چون', 'پس', 'نه', 'بله', 'آره'
+            }
+            
+            # تمیز کردن query از علائم نگارشی
+            import re
+            cleaned_query = re.sub(r'[؟?!،,.\-_]', ' ', query)
+            
+            # تقسیم به کلمات
+            words = cleaned_query.split()
+            
+            # فقط کلمات معنادار (بیشتر از 2 حرف و نه stop word)
+            highlight_keywords = [
+                w.strip() for w in words 
+                if len(w.strip()) > 2 and w.strip().lower() not in persian_stop_words
+            ]
+            
+            logger.info(f"🎯 Extracted {len(highlight_keywords)} keywords from query: {highlight_keywords}")
+        
+        return {
+            "id": str(article.id),
+            "title": article.title,
+            "content": article.content_markdown,
+            "summary": article.summary,
+            "category": article.category.name if article.category else None,
+            "tags": [tag.name for tag in article.tags] if article.tags else [],
+            "highlight_keywords": highlight_keywords,  # 🔥 کلمات کلیدی برای highlight
+            "created_at": article.created_at.isoformat(),
+            "updated_at": article.updated_at.isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting article: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/advanced-agentic/stream")
+async def advanced_agentic_rag_stream(
+    request: AdvancedAgenticRequest,
+    current_admin: Optional[Admin] = Depends(get_optional_admin),
+    current_customer: Optional[Customer] = Depends(get_optional_customer)
+):
+    """
+    🌊 Advanced Agentic RAG with Streaming Support
+    
+    این endpoint پاسخ را به صورت تدریجی و لحظه‌ای ارسال می‌کند.
+    مناسب برای سوالات پیچیده که به تحلیل عمیق نیاز دارند.
+    """
+    
+    try:
+        logger.info("="*80)
+        logger.info("🌊 Advanced Agentic RAG Streaming Request Received")
+        logger.info(f"📝 Query: {request.query}")
+        logger.info(f"👤 User: {'Admin' if current_admin else 'Customer' if current_customer else 'Guest'}")
+        logger.info("="*80)
+        
+        # بررسی دسترسی - فقط کاربران احراز هویت شده
+        current_user = current_admin or current_customer
+        if not current_user:
+            raise HTTPException(
+                status_code=401, 
+                detail="Authentication required for Advanced Agentic RAG"
+            )
+        
+        async def generate_stream():
+            """Generator for streaming advanced agentic response"""
+            conversation_id_str = None
+            
+            try:
+                # Import services
+                from app.infrastructure.langchain_orchestrator import orchestrator
+                from app.infrastructure.rag_service import get_rag_service
+                from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
+                from app.domain.entities import Conversation, Message, SenderType
+                from bson import ObjectId
+                from datetime import datetime, timezone
+                
+                # دریافت RAG service
+                rag_service = get_rag_service(current_user)
+                
+                # دریافت Advanced Agentic RAG
+                advanced_rag = get_advanced_agentic_rag(
+                    orchestrator,
+                    rag_service
+                )
+                
+                # 1️⃣ ساخت یا بازیابی Conversation
+                conversation = None
+                if request.conversation_id:
+                    try:
+                        conversation = await Conversation.get(ObjectId(request.conversation_id))
+                        if not conversation:
+                            logger.warning(f"⚠️ Conversation {request.conversation_id} not found, creating new one")
+                            conversation = None
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error loading conversation: {e}")
+                        conversation = None
+                
+                if not conversation:
+                    # ساخت conversation جدید
+                    conversation = Conversation(
+                        customer_id=str(current_user.id) if current_customer else None,
+                        admin_id=str(current_user.id) if current_admin else None,
+                        title=request.query[:50] + "..." if len(request.query) > 50 else request.query,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc)
+                    )
+                    await conversation.insert()
+                    logger.info(f"💾 Created new conversation: {conversation.id} for {'Customer' if current_customer else 'Admin'}")
+                
+                conversation_id_str = str(conversation.id)
+                
+                # Send conversation_id first
+                yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': conversation_id_str}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.01)
+                
+                # 2️⃣ ذخیره پیام کاربر
+                user_sender_type = SenderType.ADMIN.value if current_admin else SenderType.CUSTOMER.value
+                user_message = Message(
+                    conversation_id=conversation_id_str,
+                    user_id=str(current_user.id),
+                    content=request.query,
+                    sender_type=user_sender_type,
+                    created_at=datetime.now(timezone.utc),
+                    metadata={
+                        "rag_type": "agentic_stream",
+                        "endpoint": "/api/advanced-agentic/stream"
+                    }
+                )
+                await user_message.insert()
+                logger.info(f"💾 Saved user message: {user_message.id}")
+                
+                # دریافت تاریخچه مکالمه
+                conversation_history = []
+                try:
+                    messages = await Message.find(
+                        {"conversation_id": conversation_id_str}
+                    ).sort("created_at", 1).to_list()
+                    
+                    for msg in messages[-10:]:
+                        conversation_history.append({
+                            "role": "user" if msg.sender_type in ["Customer", "Admin"] else "assistant",
+                            "content": msg.content
+                        })
+                    
+                    logger.info(f"📚 Loaded {len(conversation_history)} messages")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not load conversation history: {e}")
+                
+                # اجرای workflow
+                result = await advanced_rag.run(
+                    query=request.query,
+                    user_id=str(current_user.id),
+                    conversation_history=conversation_history
+                )
+                
+                # Stream the response
+                response_text = result["response"]
+                chunk_size = 15
+                words = response_text.split()
+                
+                for i in range(0, len(words), chunk_size):
+                    chunk = " ".join(words[i:i + chunk_size])
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk + ' '}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.03)
+                
+                # Send metadata
+                metadata_event = {
+                    'type': 'metadata',
+                    'confidence': result['confidence'],
+                    'complexity': result['complexity'],
+                    'actions_taken': result['actions_taken'],
+                    'sources': result['sources']
+                }
+                yield f"data: {json.dumps(metadata_event, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.01)
+                
+                # ذخیره پیام AI
+                ai_message = Message(
+                    conversation_id=conversation_id_str,
+                    user_id=str(current_user.id),
+                    content=result["response"],
+                    sender_type=SenderType.AI.value,
+                    created_at=datetime.now(timezone.utc),
+                    metadata={
+                        "rag_type": "agentic_stream",
+                        "confidence": result["confidence"],
+                        "complexity": result["complexity"],
+                        "actions_taken": result["actions_taken"],
+                        "sources": result["sources"],
+                        "session_id": result["session_id"],
+                        "model": "x-ai/grok-4-fast"
+                    }
+                )
+                await ai_message.insert()
+                logger.info(f"💾 Saved AI message: {ai_message.id}")
+                
+                # بروزرسانی conversation
+                conversation.updated_at = datetime.now(timezone.utc)
+                await conversation.save()
+                
+                # تولید عنوان
+                try:
+                    from app.use_cases.chat_use_cases import ChatUseCases
+                    await ChatUseCases.generate_conversation_title_and_tags(conversation_id_str)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to generate title: {e}")
+                
+                logger.info(f"✅ Streaming completed")
+                yield f"data: {json.dumps({'type': 'done', 'message_id': str(ai_message.id)}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Streaming error: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Advanced Agentic RAG streaming error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Advanced Agentic RAG streaming failed: {str(e)}"
+        )
+
+
+@router.post("/advanced-agentic", response_model=AdvancedAgenticResponse)
+async def advanced_agentic_rag(
+    request: AdvancedAgenticRequest,
+    current_admin: Optional[Admin] = Depends(get_optional_admin),
+    current_customer: Optional[Customer] = Depends(get_optional_customer)
+):
+    """
+    Advanced Agentic RAG endpoint با قابلیت‌های پیشرفته:
+    - Multi-agent workflow با LangGraph
+    - Tree-aware search در ساختار درختی Markdown
+    - Query decomposition برای سوالات پیچیده
+    - Self-reflection و quality assessment
+    
+    این endpoint برای سوالات پیچیده و تحقیقات عمیق مناسب است.
+    """
+    
+    try:
+        logger.info("="*80)
+        logger.info("🚀 Advanced Agentic RAG Request Received")
+        logger.info(f"📝 Query: {request.query}")
+        logger.info(f"👤 User: {'Admin' if current_admin else 'Customer' if current_customer else 'Guest'}")
+        logger.info("="*80)
+        
+        # بررسی دسترسی - فقط کاربران احراز هویت شده
+        current_user = current_admin or current_customer
+        if not current_user:
+            raise HTTPException(
+                status_code=401, 
+                detail="Authentication required for Advanced Agentic RAG"
+            )
+        
+        # Import services
+        from app.infrastructure.langchain_orchestrator import orchestrator
+        from app.infrastructure.rag_service import get_rag_service
+        from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
+        from app.domain.entities import Conversation, Message
+        from bson import ObjectId
+        
+        # دریافت RAG service
+        rag_service = get_rag_service(current_user)
+        
+        # دریافت Advanced Agentic RAG
+        advanced_rag = get_advanced_agentic_rag(
+            orchestrator,
+            rag_service
+        )
+        
+        # دریافت تاریخچه مکالمه از MongoDB
+        conversation_history = []
+        if request.conversation_id:
+            try:
+                conversation = await Conversation.get(ObjectId(request.conversation_id))
+                if conversation:
+                    # دریافت پیام‌های قبلی
+                    messages = await Message.find(
+                        {"conversation_id": request.conversation_id}
+                    ).sort("created_at", 1).to_list()
+                    
+                    # تبدیل به فرمت مورد نیاز
+                    for msg in messages[-10:]:  # فقط 10 پیام آخر
+                        conversation_history.append({
+                            "role": "user" if msg.sender_type in ["Customer", "Admin"] else "assistant",
+                            "content": msg.content
+                        })
+                    
+                    logger.info(f"📚 Loaded {len(conversation_history)} messages from conversation history")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not load conversation history: {e}")
+        
+        # اجرای workflow با تاریخچه
+        result = await advanced_rag.run(
+            query=request.query,
+            user_id=str(current_user.id),
+            conversation_history=conversation_history
+        )
+        
+        logger.info("="*80)
+        logger.info("✅ Advanced Agentic RAG Completed")
+        logger.info(f"🎯 Confidence: {result['confidence']:.2f}")
+        logger.info(f"🔍 Complexity: {result['complexity']}")
+        logger.info(f"📊 Actions Taken: {len(result['actions_taken'])}")
+        logger.info("="*80)
+        
+        # ===================================================================
+        # 💾 ذخیره‌سازی Conversation و Messages در MongoDB
+        # ===================================================================
+        from app.domain.entities import SenderType
+        from datetime import datetime, timezone
+        
+        # 1️⃣ ساخت یا بازیابی Conversation
+        if request.conversation_id:
+            try:
+                conversation = await Conversation.get(ObjectId(request.conversation_id))
+                if not conversation:
+                    logger.warning(f"⚠️ Conversation {request.conversation_id} not found, creating new one")
+                    conversation = None
+            except Exception as e:
+                logger.warning(f"⚠️ Error loading conversation: {e}")
+                conversation = None
+        else:
+            conversation = None
+        
+        if not conversation:
+            # ساخت conversation جدید
+            conversation = Conversation(
+                customer_id=str(current_user.id) if current_customer else None,
+                admin_id=str(current_user.id) if current_admin else None,
+                title=request.query[:50] + "..." if len(request.query) > 50 else request.query,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            )
+            await conversation.insert()
+            logger.info(f"💾 Created new conversation: {conversation.id} for {'Customer' if current_customer else 'Admin'}")
+        
+        conversation_id_str = str(conversation.id)
+        
+        # 2️⃣ ذخیره پیام کاربر
+        user_sender_type = SenderType.ADMIN.value if current_admin else SenderType.CUSTOMER.value
+        user_message = Message(
+            conversation_id=conversation_id_str,
+            user_id=str(current_user.id),
+            content=request.query,
+            sender_type=user_sender_type,
+            created_at=datetime.now(timezone.utc),
+            metadata={
+                "rag_type": "agentic",
+                "endpoint": "/api/advanced-agentic"
+            }
+        )
+        await user_message.insert()
+        logger.info(f"💾 Saved user message: {user_message.id}")
+        
+        # 3️⃣ ذخیره پیام AI
+        ai_message = Message(
+            conversation_id=conversation_id_str,
+            user_id=str(current_user.id),
+            content=result["response"],
+            sender_type=SenderType.AI.value,
+            created_at=datetime.now(timezone.utc),
+            metadata={
+                "rag_type": "agentic",
+                "confidence": result["confidence"],
+                "complexity": result["complexity"],
+                "actions_taken": result["actions_taken"],
+                "reflection_notes": result.get("reflection_notes", []),
+                "errors": result.get("errors", []),
+                "sources": result["sources"],
+                "session_id": result["session_id"],
+                "model": "x-ai/grok-4-fast",
+                "endpoint": "/api/advanced-agentic"
+            }
+        )
+        await ai_message.insert()
+        logger.info(f"💾 Saved AI message: {ai_message.id}")
+        
+        # 4️⃣ بروزرسانی conversation
+        conversation.updated_at = datetime.now(timezone.utc)
+        await conversation.save()
+        logger.info(f"💾 Updated conversation: {conversation_id_str}")
+        
+        # آماده‌سازی پاسخ
+        response_data = {
+            "response": result["response"],
+            "sources": result["sources"],
+            "confidence": result["confidence"],
+            "complexity": result["complexity"],
+            "actions_taken": result["actions_taken"],
+            "reflection_notes": result.get("reflection_notes", []),
+            "errors": result.get("errors", []),
+            "session_id": result["session_id"],
+            "conversation_id": conversation_id_str  # 🔥 برگرداندن conversation_id جدید یا موجود
+        }
+        
+        return AdvancedAgenticResponse(**response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Advanced Agentic RAG error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Advanced Agentic RAG failed: {str(e)}"
+        )
+
+
+@router.post("/create-sample-articles")
+async def create_sample_articles(
+    current_admin: Admin = Depends(get_admin_dependency)
+):
+    """Create sample articles for testing RAG functionality"""
+    try:
+        from app.infrastructure.database.mongodb import init_db, get_mongo_client
+        from app.domain.entities import KnowledgeBaseArticle, ArticleStatus, ArticleVisibility
+
+        if get_mongo_client() is None:
+            await init_db()
+
+        # Check existing articles
+        existing = await KnowledgeBaseArticle.find().to_list()
+
+        if existing:
+            return {
+                "message": f"Already have {len(existing)} articles in MongoDB",
+                "articles": [{"id": str(a.id), "title": a.title} for a in existing]
+            }
+
+        # Create sample articles
+        sample_articles = [
+            {
+                "title": "Database Design",
+                "content_markdown": """# Database Design
+
+Database design is one of the most important steps in software development.
+
+## Design Stages
+
+1. **Requirements Analysis** - Identify entities and relationships
+2. **Conceptual Modeling** - Design ERD
+3. **Logical Modeling** - Convert to tables
+4. **Physical Modeling** - Implement in DBMS
+
+## Important Notes
+
+- Use appropriate foreign keys
+- Define proper constraints
+- Optimize for performance""",
+                "summary": "Complete guide to database design including analysis, modeling and implementation",
+                "status": ArticleStatus.PUBLISHED,
+                "visibility": ArticleVisibility.PUBLIC
+            },
+            {
+                "title": "Web Development",
+                "content_markdown": """# Web Development
+
+Web development includes both frontend and backend design.
+
+## Main Technologies
+
+### Frontend
+- HTML/CSS/JavaScript
+- React, Vue, Angular
+- Responsive Design
+
+### Backend
+- Node.js, Python, PHP
+- RESTful APIs
+- Database Management""",
+                "summary": "Introduction to web development technologies including frontend and backend",
+                "status": ArticleStatus.PUBLISHED,
+                "visibility": ArticleVisibility.PUBLIC
+            },
+            {
+                "title": "Machine Learning with Python",
+                "content_markdown": """# Machine Learning with Python
+
+Python is the best language for machine learning.
+
+## Important Libraries
+
+- **Scikit-learn** - Basic ML tools
+- **TensorFlow** - Deep neural networks
+- **PyTorch** - Research and production
+- **Pandas** - Data analysis
+- **NumPy** - Numerical computations""",
+                "summary": "Guide to machine learning with Python and introduction to important libraries",
+                "status": ArticleStatus.PUBLISHED,
+                "visibility": ArticleVisibility.PUBLIC
+            }
+        ]
+
+        created_articles = []
+        for article_data in sample_articles:
+            article = KnowledgeBaseArticle(
+                title=article_data["title"],
+                content_markdown=article_data["content_markdown"],
+                content_html=f"<h1>{article_data['title']}</h1><p>{article_data['content_markdown'].replace('#', '').replace('##', '')}</p>",
+                summary=article_data["summary"],
+                status=article_data["status"],
+                visibility=article_data["visibility"],
+                author_id=str(current_admin.id),
+            )
+
+            await article.insert()
+            created_articles.append({
+                "id": str(article.id),
+                "title": article.title
+            })
+
+        return {
+            "message": f"Created {len(created_articles)} sample articles",
+            "articles": created_articles
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating sample articles: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/message/stream")
+async def send_message_stream(
+    request: Request,
+    message: ChatMessage,
+    current_customer: Optional[Customer] = Depends(get_optional_customer),
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """
+    Send a chat message and get AI response as a stream (Server-Sent Events).
+    این endpoint پاسخ را به صورت تدریجی و لحظه‌ای ارسال می‌کند.
+    """
+    
+    # Determine user type
+    current_user = current_customer or current_admin
+    user_type = "Customer" if current_customer else ("Admin" if current_admin else "guest")
+    
+    try:
+        logger.info(
+            f"🌊 Streaming chat message received",
+            extra={
+                'extra_data': {
+                    'user_type': user_type,
+                    'content_length': len(message.content),
+                    'conversation_id': message.conversation_id
+                }
+            }
+        )
+        
+        # Validate guest session ID for guests
+        if not current_user and not message.guest_session_id:
+            raise HTTPException(status_code=400, detail="guest_session_id is required for guest users")
+        
+        async def generate_stream():
+            """Generator function for streaming response"""
+            try:
+                # استفاده از streaming use case
+                chunk_count = 0
+                async for event_data in ChatUseCases.send_message_stream(
+                    content=message.content,
+                    user=current_user,
+                    user_type=user_type,
+                    conversation_id=message.conversation_id,
+                    guest_session_id=message.guest_session_id,
+                    model=message.model,
+                    temperature=message.temperature
+                ):
+                    chunk_count += 1
+                    # 🔥 DEBUG: Log each chunk
+                    if event_data.get('type') == 'chunk':
+                        logger.info(f"📤 Sending chunk #{chunk_count}: {len(event_data.get('content', ''))} chars")
+                    
+                    # ارسال داده به فرمت Server-Sent Events (SSE)
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    # Force flush به client
+                    await asyncio.sleep(0.01)  # کمی تاخیر برای اطمینان از flush شدن
+                
+                logger.info(f"✅ Stream completed: {chunk_count} total events sent")
+                # ارسال پیام پایان
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Streaming error: {e}", exc_info=True)
+                error_data = {
+                    'type': 'error',
+                    'message': str(e)
+                }
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+        
+        # Return streaming response با SSE headers
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # برای nginx
+            }
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in streaming: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# WebSocket functionality - temporarily disabled
+# TODO: Implement WebSocket support when real-time features are needed
+"""
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -185,43 +1177,6 @@ manager = ConnectionManager()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time chat."""
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
-            
-            # Extract user info if available (in real implementation, verify JWT token)
-            user_id = message_data.get("user_id")
-            user_type = message_data.get("user_type", "guest")
-            
-            user = None
-            if user_id and user_type == "Admin":
-                user = await Admin.get(user_id)
-            elif user_id and user_type == "Customer":
-                user = await Customer.get(user_id)
-            
-            # Process message
-            response = await ChatUseCases.send_message(
-                content=message_data.get("content", ""),
-                user=user,
-                user_type=user_type,
-                conversation_id=message_data.get("conversation_id"),
-                guest_session_id=message_data.get("guest_session_id")
-            )
-            
-            # Send response back
-            await manager.send_personal_message(json.dumps({
-                "type": "message_response",
-                "data": response
-            }), websocket)
-            
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception as e:
-        await manager.send_personal_message(json.dumps({
-            "type": "error",
-            "message": "An error occurred processing your message"
-        }), websocket)
-        manager.disconnect(websocket)
+    # WebSocket endpoint temporarily disabled
+    await websocket.close(code=1001)  # Going away
+"""

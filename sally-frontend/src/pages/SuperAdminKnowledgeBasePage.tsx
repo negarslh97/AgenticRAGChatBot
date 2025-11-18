@@ -1,188 +1,53 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { knowledgeBaseService, type Article } from "../services/knowledgeBaseService"
+import { adminService } from "../services/adminService"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table"
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
-import { Badge } from "../components/ui/badge"
-import AdminFileUpload from "../components/AdminFileUpload"
+import { Card, CardContent } from "../components/ui/card"
 import toast from "react-hot-toast"
-import { Plus, Edit, Trash2, Eye, Search, ChevronLeft, ChevronRight, Upload } from "lucide-react"
-
-// Article Form Component
-const ArticleForm: React.FC<{
-  article?: Article
-  onSave: () => void
-  onCancel: () => void
-}> = ({ article, onSave, onCancel }) => {
-  const [formData, setFormData] = useState({
-    title: article?.title || "",
-    content: article?.content || "",
-    summary: article?.summary || "",
-    category_id: article?.category_id || "",
-    tags: article?.tags?.join(", ") || ""
-  })
-  const [loading, setLoading] = useState(false)
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    try {
-      const data = {
-        title: formData.title,
-        content: formData.content,
-        summary: formData.summary || undefined,
-        category_id: formData.category_id || undefined,
-        tags: formData.tags.split(",").map(tag => tag.trim()).filter(Boolean)
-      }
-
-      if (article) {
-        await knowledgeBaseService.updateArticle(article.id, data)
-        toast.success("مقاله با موفقیت بروزرسانی شد")
-      } else {
-        await knowledgeBaseService.createArticle(data)
-        toast.success("مقاله با موفقیت ایجاد شد")
-      }
-      onSave()
-    } catch (error: any) {
-      toast.error(error.message || "خطا در ذخیره مقاله")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Card className="mb-6">
-      <CardHeader>
-        <CardTitle>{article ? "ویرایش مقاله" : "ایجاد مقاله جدید"}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">عنوان *</label>
-            <Input
-              value={formData.title}
-              onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-              required
-              placeholder="عنوان مقاله را وارد کنید"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">خلاصه</label>
-            <textarea
-              value={formData.summary}
-              onChange={(e) => setFormData(prev => ({ ...prev, summary: e.target.value }))}
-              rows={3}
-              className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="خلاصه مقاله را وارد کنید"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">دسته‌بندی</label>
-            <Input
-              value={formData.category_id}
-              onChange={(e) => setFormData(prev => ({ ...prev, category_id: e.target.value }))}
-              placeholder="شناسه دسته‌بندی"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">برچسب‌ها</label>
-            <Input
-              value={formData.tags}
-              onChange={(e) => setFormData(prev => ({ ...prev, tags: e.target.value }))}
-              placeholder="برچسب1, برچسب2"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">محتوا *</label>
-            <textarea
-              value={formData.content}
-              onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-              rows={10}
-              required
-              className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="محتوای مقاله را وارد کنید (TinyMCE در آینده اضافه خواهد شد)"
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <Button type="submit" disabled={loading}>
-              {loading ? "در حال ذخیره..." : (article ? "بروزرسانی" : "ایجاد")}
-            </Button>
-            <Button type="button" variant="outline" onClick={onCancel}>
-              لغو
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
-  )
-}
+import { Plus, Edit, Trash2, Search, ChevronLeft, ChevronRight, Upload } from "lucide-react"
+import SyncStatusWidget from "../components/SyncStatusWidget"
 
 const SuperAdminKnowledgeBasePage: React.FC = () => {
+  const navigate = useNavigate()
   const { user, isSuperAdmin, loading: authLoading } = useAuth()
   const [articles, setArticles] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
-  const [showForm, setShowForm] = useState(false)
-  const [showUpload, setShowUpload] = useState(false)
-  const [editingArticle, setEditingArticle] = useState<Article | undefined>()
   const [deleteConfirm, setDeleteConfirm] = useState<{ show: boolean; article?: Article }>({ show: false })
   const itemsPerPage = 10
 
   useEffect(() => {
-    console.log("SuperAdminKnowledgeBasePage useEffect:", {
-      authLoading,
-      isSuperAdmin,
-      user: user?.email,
-      hasToken: !!localStorage.getItem('token')
-    });
-    
     // فقط اگر احراز هویت کامل شده و کاربر SuperAdmin باشه، دیتا رو لود کن
     if (!authLoading && isSuperAdmin && user) {
-      console.log("✅ Conditions met, loading articles...");
       loadArticles()
-    } else {
-      console.log("⏳ Waiting for auth to complete...");
     }
   }, [isSuperAdmin, authLoading, user])
 
   const loadArticles = async () => {
     setLoading(true)
     try {
-      console.log("Starting to load articles...")
-      console.log("Token available:", !!localStorage.getItem("token"))
       
       const data = await knowledgeBaseService.getAllArticles()
-      console.log("Raw response data:", data)
-      console.log("Data type:", typeof data)
-      console.log("Is Array:", Array.isArray(data))
       
       // بررسی دقیق داده‌ها
       if (data === null || data === undefined) {
-        console.error("No data received from API")
         setArticles([])
         toast.error("هیچ داده‌ای از سرور دریافت نشد")
       } else if (Array.isArray(data)) {
-        console.log("Received array with length:", data.length)
         setArticles(data)
       } else {
-        console.error("Expected array but got:", typeof data, data)
         setArticles([])
         toast.error("فرمت داده‌های دریافتی نادرست است")
       }
     } catch (error: any) {
-      console.error("Error loading articles:", error)
-      console.error("Error details:", error.message)
-      console.error("Error response:", error.response)
+      toast.error("خطا در بارگذاری مقالات")
       
       if (error.response?.status === 401) {
         toast.error("خطای احراز هویت - لطفاً دوباره وارد شوید")
@@ -230,9 +95,22 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
     setDeleteConfirm({ show: false })
   }
 
+  const handleViewContent = (article: Article) => {
+    window.location.href = `/super-admin/knowledge-base/articles/${article.id}`
+  }
+
+  // پاک کردن کدهای modal قدیمی که دیگر استفاده نمی‌شوند
+  // const [showContentModal, setShowContentModal] = useState(false)
+  // const [selectedArticle, setSelectedArticle] = useState<Article | undefined>()
+
+  // const closeContentModal = () => {
+  //   setShowContentModal(false)
+  //   setSelectedArticle(undefined)
+  // }
+
   const filteredArticles = Array.isArray(articles) ? articles.filter(article =>
     article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    article.content.toLowerCase().includes(searchTerm.toLowerCase())
+    article.content_markdown.toLowerCase().includes(searchTerm.toLowerCase())
   ) : []
 
   const paginatedArticles = filteredArticles.slice(
@@ -254,44 +132,16 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
   return (
     <div className="p-6" dir="rtl">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">پایگاه دانش</h1>
-        <p className="text-gray-600">این صفحه فقط برای سوپر ادمین‌ها قابل دسترسی است.</p>
+      <div className="mb-8 flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">پایگاه دانش</h1>
+          <p className="text-gray-600">این صفحه فقط برای سوپر ادمین‌ها قابل دسترسی است.</p>
+        </div>
+        <div className="w-96">
+          <SyncStatusWidget />
+        </div>
       </div>
 
-      {/* Form */}
-      {showForm && (
-        <ArticleForm
-          article={editingArticle}
-          onSave={() => {
-            setShowForm(false)
-            setEditingArticle(undefined)
-            loadArticles()
-          }}
-          onCancel={() => {
-            setShowForm(false)
-            setEditingArticle(undefined)
-          }}
-        />
-      )}
-
-      {/* Upload Form */}
-      {showUpload && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>آپلود فایل</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AdminFileUpload
-              onUploadSuccess={(data) => {
-                toast.success(`فایل ${data.filename} با موفقیت آپلود شد!`)
-                setShowUpload(false)
-              }}
-              onClose={() => setShowUpload(false)}
-            />
-          </CardContent>
-        </Card>
-      )}
 
       {/* Delete Confirmation Dialog */}
       {deleteConfirm.show && deleteConfirm.article && (
@@ -326,23 +176,34 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
         </Card>
       )}
 
+
       {/* Actions */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex gap-2">
           <Button
-            onClick={() => setShowForm(true)}
+            onClick={() => navigate("/super-admin/knowledge-base/add")}
             className="flex items-center gap-2"
           >
             <Plus className="h-4 w-4" />
             افزودن مقاله جدید
           </Button>
           <Button
-            onClick={() => setShowUpload(true)}
+            onClick={() => navigate("/super-admin/knowledge-base/upload")}
             variant="outline"
             className="flex items-center gap-2"
           >
             <Upload className="h-4 w-4" />
             آپلود فایل
+          </Button>
+          <Button
+            onClick={() => navigate("/super-admin/knowledge-base/weaviate")}
+            variant="outline"
+            className="flex items-center gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+          >
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
+            </svg>
+            مشاهده Weaviate
           </Button>
         </div>
 
@@ -380,6 +241,7 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                     <TableHead>عنوان</TableHead>
                     <TableHead>دسته‌بندی</TableHead>
                     <TableHead>وضعیت</TableHead>
+                    <TableHead>سطح دسترسی</TableHead>
                     <TableHead>تاریخ ایجاد</TableHead>
                     <TableHead>عملیات</TableHead>
                   </TableRow>
@@ -387,12 +249,36 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                 <TableBody>
                   {paginatedArticles.map((article) => (
                     <TableRow key={article.id}>
-                      <TableCell className="font-medium">{article.title}</TableCell>
-                      <TableCell>{article.category_id || "-"}</TableCell>
+                      <TableCell className="font-medium">
+                        <button
+                          onClick={() => handleViewContent(article)}
+                          className="text-blue-600 hover:text-blue-800 hover:underline text-right"
+                        >
+                          {article.title}
+                        </button>
+                      </TableCell>
+                      <TableCell>{article.category?.name || "-"}</TableCell>
                       <TableCell>
-                        <Badge variant={article.status === "PUBLISHED" ? "default" : "secondary"}>
-                          {article.status === "PUBLISHED" ? "منتشر شده" : "پیش‌نویس"}
-                        </Badge>
+                        {(() => {
+                          const badge = adminService.getStatusBadge(article.status);
+                          return (
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                              <span className="mr-1">{badge.icon}</span>
+                              {badge.text}
+                            </span>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const badge = adminService.getVisibilityBadge(article.visibility);
+                          return (
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                              <span className="mr-1">{badge.icon}</span>
+                              {badge.text}
+                            </span>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>{new Date(article.created_at).toLocaleDateString("fa-IR")}</TableCell>
                       <TableCell>
@@ -400,14 +286,11 @@ const SuperAdminKnowledgeBasePage: React.FC = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              setEditingArticle(article)
-                              setShowForm(true)
-                            }}
+                            onClick={() => navigate(`/super-admin/knowledge-base/edit/${article.id}`)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
-                          {article.status === "DRAFT" && (
+                          {article.status === "draft" && (
                             <Button
                               size="sm"
                               variant="outline"

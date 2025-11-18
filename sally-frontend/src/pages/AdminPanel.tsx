@@ -5,19 +5,8 @@ import { useAuth } from "../context/AuthContext"
 import AdminArticleForm from "../components/AdminArticleForm"
 import AdminFileUpload from "../components/AdminFileUpload"
 import { toast } from "react-hot-toast"
-
-interface Article {
-  id: string
-  title: string
-  summary?: string
-  status: "DRAFT" | "PUBLISHED" | "ARCHIVED"
-  visibility?: "public" | "customer" | "internal" | null
-  author_id: string
-  version: number
-  created_at: string
-  updated_at: string
-  published_at?: string
-}
+import { type Article } from "../services/knowledgeBaseService"
+import { adminService } from "../services/adminService"
 
 const AdminPanel: React.FC = () => {
   const { user } = useAuth()
@@ -35,13 +24,19 @@ const AdminPanel: React.FC = () => {
   // useEffect must be called before any conditional returns
   useEffect(() => {
     fetchArticles()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch articles data
+  // Fetch articles data - Use appropriate endpoint based on user role
   const fetchArticles = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      // SuperAdmin uses super-admin endpoint, Admin uses admin endpoint
+      const endpoint = user?.role === "SuperAdmin" 
+        ? '/api/super-admin/kb/articles' 
+        : '/api/admin/kb/articles'
+      
+      const response = await fetch(`${apiUrl}${endpoint}`, {
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
         }
@@ -61,8 +56,15 @@ const AdminPanel: React.FC = () => {
   }
 
   const publishArticle = async (articleId: string, visibility: "public" | "customer" | "internal") => {
+    // Only SuperAdmin can publish articles
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای انتشار مقاله را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}/publish`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/${articleId}/publish`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -86,9 +88,16 @@ const AdminPanel: React.FC = () => {
     }
   }
 
-  const updateArticleStatus = async (articleId: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED") => {
+  const updateArticleStatus = async (articleId: string, status: "draft" | "published" | "archived") => {
+    // Only SuperAdmin can change article status
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای تغییر وضعیت مقاله را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}/status`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/${articleId}/status`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -112,12 +121,19 @@ const AdminPanel: React.FC = () => {
   }
 
   const deleteArticle = async (articleId: string) => {
+    // Only SuperAdmin can delete articles
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای حذف مقاله را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     if (!window.confirm("آیا از حذف این مقاله مطمئن هستید؟")) {
       return
     }
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/articles/${articleId}`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/${articleId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
@@ -136,11 +152,18 @@ const AdminPanel: React.FC = () => {
   }
 
   const handleUploadFile = async (file: File) => {
+    // Only SuperAdmin can upload files
+    if (user?.role !== "SuperAdmin") {
+      toast.error("شما دسترسی لازم برای آپلود فایل را ندارید. لطفاً با ادمین ارشد تماس بگیرید.")
+      return
+    }
+
     try {
       const formData = new FormData()
       formData.append("file", file)
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/kb/upload`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const response = await fetch(`${apiUrl}/api/super-admin/kb/articles/upload`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("token")}`
@@ -178,15 +201,6 @@ const AdminPanel: React.FC = () => {
     ? articles.filter(article => article.status === selectedStatus)
     : articles
 
-  const getVisibilityLabel = (visibility: string | null | undefined) => {
-    switch (visibility) {
-      case "public": return "عمومی"
-      case "customer": return "مشتریان"
-      case "internal": return "داخلی"
-      default: return "تعیین نشده"
-    }
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -221,12 +235,15 @@ const AdminPanel: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">منو</h2>
               
               <div className="space-y-2">
-                <button
-                  onClick={() => setShowUploadForm(!showUploadForm)}
-                  className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
-                >
-                  {showUploadForm ? "بستن آپلود فایل" : "آپلود فایل"}
-                </button>
+                {/* Only SuperAdmin can upload files */}
+                {user?.role === "SuperAdmin" && (
+                  <button
+                    onClick={() => setShowUploadForm(!showUploadForm)}
+                    className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
+                  >
+                    {showUploadForm ? "بستن آپلود فایل" : "آپلود فایل"}
+                  </button>
+                )}
 
                 <button
                   onClick={() => setShowCreateForm(!showCreateForm)}
@@ -243,9 +260,9 @@ const AdminPanel: React.FC = () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">همه مقالات</option>
-                    <option value="DRAFT">پیش‌نویس</option>
-                    <option value="PUBLISHED">منتشر شده</option>
-                    <option value="ARCHIVED">بایگانی شده</option>
+                    <option value="draft">پیش‌نویس</option>
+                    <option value="published">منتشر شده</option>
+                    <option value="archived">بایگانی شده</option>
                   </select>
                 </div>
 
@@ -259,13 +276,13 @@ const AdminPanel: React.FC = () => {
                       نمایش همه
                     </button>
                     <button
-                      onClick={() => setSelectedStatus("DRAFT")}
+                      onClick={() => setSelectedStatus("draft")}
                       className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
                     >
                       پیش‌نویس‌ها
                     </button>
                     <button
-                      onClick={() => setSelectedStatus("PUBLISHED")}
+                      onClick={() => setSelectedStatus("published")}
                       className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
                     >
                       منتشر شده‌ها
@@ -327,28 +344,25 @@ const AdminPanel: React.FC = () => {
                           )}
                           
                           <div className="flex flex-wrap items-center gap-2 mt-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              article.status === "PUBLISHED"
-                                ? "bg-green-100 text-green-800"
-                                : article.status === "DRAFT"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}>
-                              {article.status === "PUBLISHED" ? "منتشر شده" :
-                               article.status === "DRAFT" ? "پیش‌نویس" : "بایگانی شده"}
-                            </span>
+                            {(() => {
+                              const badge = adminService.getStatusBadge(article.status);
+                              return (
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                                  <span className="mr-1">{badge.icon}</span>
+                                  {badge.text}
+                                </span>
+                              );
+                            })()}
                             
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              article.visibility === "public"
-                                ? "bg-blue-100 text-blue-800"
-                                : article.visibility === "customer"
-                                ? "bg-purple-100 text-purple-800"
-                                : article.visibility === "internal"
-                                ? "bg-indigo-100 text-indigo-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}>
-                              {getVisibilityLabel(article.visibility)}
-                            </span>
+                            {(() => {
+                              const badge = adminService.getVisibilityBadge(article.visibility);
+                              return (
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bgColor} ${badge.color}`}>
+                                  <span className="mr-1">{badge.icon}</span>
+                                  {badge.text}
+                                </span>
+                              );
+                            })()}
                             
                             <span className="text-xs text-gray-500">
                               نسخه {article.version}
@@ -357,48 +371,67 @@ const AdminPanel: React.FC = () => {
                         </div>
 
                         <div className="flex items-center space-x-2 ml-4">
-                          {article.status === "DRAFT" && user?.role === "SuperAdmin" && (
+                          {/* Admin can only edit their own draft articles */}
+                          {article.status === "draft" && (
                             <button
-                              onClick={() => openPublishModal(article)}
-                              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
-                              title="انتشار مقاله"
+                              onClick={() => {
+                                // Navigate to edit page or open edit modal
+                                toast("قابلیت ویرایش به زودی اضافه خواهد شد", { icon: "ℹ️" })
+                              }}
+                              className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                              title="ویرایش مقاله"
                             >
-                              انتشار
+                              ویرایش
                             </button>
                           )}
                           
-                          {article.status === "PUBLISHED" && user?.role === "SuperAdmin" && (
-                            <button
-                              onClick={() => updateArticleStatus(article.id, "DRAFT")}
-                              className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700"
-                              title="بازگشت به پیش‌نویس"
-                            >
-                              پیش‌نویس
-                            </button>
+                          {/* Only SuperAdmin can publish, archive, or delete articles */}
+                          {user?.role === "SuperAdmin" && (
+                            <>
+                              {article.status === "draft" && (
+                                <button
+                                  onClick={() => openPublishModal(article)}
+                                  className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                                  title="انتشار مقاله"
+                                >
+                                  انتشار
+                                </button>
+                              )}
+                              
+                              {article.status === "published" && (
+                                <button
+                                  onClick={() => updateArticleStatus(article.id, "draft")}
+                                  className="px-3 py-1 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700"
+                                  title="بازگشت به پیش‌نویس"
+                                >
+                                  پیش‌نویس
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => updateArticleStatus(
+                                  article.id,
+                                  article.status === "archived" ? "draft" : "archived"
+                                )}
+                                className={`px-3 py-1 text-sm rounded ${
+                                  article.status === "archived"
+                                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                                    : "bg-gray-600 text-white hover:bg-gray-700"
+                                }`}
+                                title={article.status === "archived" ? "بازگرداندن" : "بایگانی"}
+                              >
+                                {article.status === "archived" ? "بازگرداندن" : "بایگانی"}
+                              </button>
+
+                              <button
+                                onClick={() => deleteArticle(article.id)}
+                                className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                                title="حذف مقاله"
+                              >
+                                حذف
+                              </button>
+                            </>
                           )}
-
-                          <button
-                            onClick={() => updateArticleStatus(
-                              article.id,
-                              article.status === "ARCHIVED" ? "DRAFT" : "ARCHIVED"
-                            )}
-                            className={`px-3 py-1 text-sm rounded ${
-                              article.status === "ARCHIVED"
-                                ? "bg-blue-600 text-white hover:bg-blue-700"
-                                : "bg-gray-600 text-white hover:bg-gray-700"
-                            }`}
-                            title={article.status === "ARCHIVED" ? "بازگرداندن" : "بایگانی"}
-                          >
-                            {article.status === "ARCHIVED" ? "بازگرداندن" : "بایگانی"}
-                          </button>
-
-                          <button
-                            onClick={() => deleteArticle(article.id)}
-                            className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
-                            title="حذف مقاله"
-                          >
-                            حذف
-                          </button>
                         </div>
                       </div>
                     </div>

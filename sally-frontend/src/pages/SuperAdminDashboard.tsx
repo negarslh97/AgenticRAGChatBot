@@ -1,16 +1,16 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import StatCard from '../components/StatCard'
 import {
   Users,
-  Ticket,
   BookOpen,
-  Activity,
   Settings,
-  Crown
+  Crown,
+  Database,
+  MessageSquare
 } from 'lucide-react'
 
 interface DashboardStats {
@@ -18,17 +18,34 @@ interface DashboardStats {
     totalAdmins: number
     totalCustomers: number
   }
-  tickets: {
-    open: number
-    awaitingReply: number
-    resolved: number
-  }
+  // tickets: {
+  //   open: number
+  //   awaitingReply: number
+  //   resolved: number
+  // }
   knowledgeBase: {
     published: number
     drafts: number
   }
   activityLogs: {
     total: number
+  }
+  chat: {
+    conversations: number
+    messages: number
+  }
+  weaviateCollections?: {
+    small: {
+      name: string
+      count: number
+      model: string
+    }
+    large: {
+      name: string
+      count: number
+      model: string
+    }
+    currentModel: string
   }
 }
 
@@ -37,15 +54,20 @@ const SuperAdminDashboard: React.FC = () => {
   const navigate = useNavigate()
   const [stats, setStats] = useState<DashboardStats>({
     users: { totalAdmins: 0, totalCustomers: 0 },
-    tickets: { open: 0, awaitingReply: 0, resolved: 0 },
     knowledgeBase: { published: 0, drafts: 0 },
-    activityLogs: { total: 0 }
+    activityLogs: { total: 0 },
+    chat: { conversations: 0, messages: 0 },
+    weaviateCollections: {
+      small: { name: 'MarkdownNode_Small', count: 0, model: 'text-embedding-3-small' },
+      large: { name: 'MarkdownNode_Large', count: 0, model: 'text-embedding-3-large' },
+      currentModel: 'text-embedding-3-small'
+    }
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   // Fetch dashboard stats function
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async (): Promise<void> => {
     try {
       setLoading(true)
       setError(null)
@@ -95,21 +117,26 @@ const SuperAdminDashboard: React.FC = () => {
       // Fallback mock data
       setStats({
         users: { totalAdmins: 0, totalCustomers: 0 },
-        tickets: { open: 0, awaitingReply: 0, resolved: 0 },
         knowledgeBase: { published: 0, drafts: 0 },
-        activityLogs: { total: 0 }
+        activityLogs: { total: 0 },
+        chat: { conversations: 0, messages: 0 },
+        weaviateCollections: {
+          small: { name: 'MarkdownNode_Small', count: 0, model: 'text-embedding-3-small' },
+          large: { name: 'MarkdownNode_Large', count: 0, model: 'text-embedding-3-large' },
+          currentModel: 'text-embedding-3-small'
+        }
       })
     } finally {
       setLoading(false)
     }
-  }
+  }, [user])
 
   // Fetch dashboard stats on mount and user change
   useEffect(() => {
     if (user) {
       fetchStats()
     }
-  }, [user])
+  }, [user, fetchStats])
 
   // Real-time updates - poll every 60 seconds for dashboard stats
   useEffect(() => {
@@ -120,9 +147,15 @@ const SuperAdminDashboard: React.FC = () => {
     }, 60000) // 60 seconds
 
     return () => clearInterval(interval)
-  }, [user])
+  }, [user, fetchStats])
 
   // Removed handleLogout since logout button is now in navbar
+
+  // 🔧 Feature Flags - برای مخفی کردن موقت برخی قابلیت‌ها
+  const FEATURE_FLAGS = {
+    SHOW_ACTIVITY_LOGS: false, // مخفی کردن لاگ فعالیت‌ها
+    SHOW_SETTINGS: false // مخفی کردن تنظیمات
+  }
 
   const managementCards = [
     {
@@ -145,26 +178,6 @@ const SuperAdminDashboard: React.FC = () => {
       ]
     },
     {
-      title: 'مدیریت تیکت‌ها',
-      stats: [
-        { label: 'تیکت‌های باز', value: stats.tickets.open },
-        { label: 'در انتظار پاسخ', value: stats.tickets.awaitingReply },
-        { label: 'حل شده', value: stats.tickets.resolved }
-      ],
-      icon: Ticket,
-      iconColor: 'text-green-600',
-      actions: [
-        {
-          label: 'مشاهده همه تیکت‌ها',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
-        },
-        {
-          label: 'تخصیص تیکت‌ها',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
-        }
-      ]
-    },
-    {
       title: 'مدیریت پایگاه دانش',
       stats: [
         { label: 'مقالات منتشر شده', value: stats.knowledgeBase.published },
@@ -175,30 +188,57 @@ const SuperAdminDashboard: React.FC = () => {
       actions: [
         {
           label: 'مدیریت مقالات',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          onClick: () => navigate('/super-admin/knowledge-base')
         },
         {
           label: 'ایجاد مقاله جدید',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          onClick: () => navigate('/super-admin/knowledge-base/add')
         }
       ]
     },
-    {
-      title: 'لاگ‌های فعالیت سیستم',
+    // 🔧 فعالیت چت - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_ACTIVITY_LOGS ? [{
+      title: 'فعالیت چت',
       stats: [
-        { label: 'کل لاگ‌ها', value: stats.activityLogs.total }
+        { label: 'کل مکالمات', value: stats.chat.conversations },
+        { label: 'کل پیام‌ها', value: stats.chat.messages }
       ],
-      description: 'نظارت بر تمام اقدامات کاربران و سیستم',
-      icon: Activity,
-      iconColor: 'text-orange-600',
+      description: 'آمار گفتگوهای مشتریان و ادمین‌ها',
+      icon: MessageSquare,
+      iconColor: 'text-cyan-600',
       actions: [
         {
-          label: 'مشاهده لاگ‌های فعالیت',
-          onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
+          label: 'مشاهده لاگ‌ها',
+          onClick: () => navigate('/super-admin/logs')
+        }
+      ]
+    }] : []),
+    {
+      title: 'Weaviate Collections',
+      stats: [
+        { label: 'Small Collection', value: stats.weaviateCollections?.small.count || 0 },
+        { label: 'Large Collection', value: stats.weaviateCollections?.large.count || 0 },
+        {
+          label: 'Current Model',
+          value: (
+            <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-mono bg-blue-50 text-blue-700 border border-blue-200">
+              {stats.weaviateCollections?.currentModel || 'Unknown'}
+            </span>
+          )
+        }
+      ],
+      description: 'آمار collections Weaviate بر اساس مدل embedding',
+      icon: Database,
+      iconColor: 'text-indigo-600',
+      actions: [
+        {
+          label: 'مشاهده جزئیات',
+          onClick: () => alert(`مدل فعلی: ${stats.weaviateCollections?.currentModel}\nSmall: ${stats.weaviateCollections?.small.count} گره\nLarge: ${stats.weaviateCollections?.large.count} گره`)
         }
       ]
     },
-    {
+    // 🔧 تنظیمات سیستم - به صورت موقت مخفی شده
+    ...(FEATURE_FLAGS.SHOW_SETTINGS ? [{
       title: 'تنظیمات سیستم',
       description: 'پیکربندی پارامترهای اصلی برنامه و یکپارچه‌سازی‌ها',
       icon: Settings,
@@ -209,7 +249,7 @@ const SuperAdminDashboard: React.FC = () => {
           onClick: () => alert('این قابلیت به زودی اضافه خواهد شد')
         }
       ]
-    }
+    }] : [])
   ]
 
   if (loading) {

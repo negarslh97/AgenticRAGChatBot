@@ -1,7 +1,7 @@
-import axios from "axios";
+import axios, { AxiosResponse, AxiosError, InternalAxiosRequestConfig } from "axios";
 import type { User } from "../types/user";
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = ""; // Use relative URLs for production (will use same domain as frontend)
 
 // ===================================================================================
 // ١. اینترفیس User برای مطابقت با پاسخ بک‌اند اصلاح شد
@@ -15,7 +15,7 @@ export type { User };
 export interface LoginResponse {
   access_token: string;
   token_type: string;
-  user_type: "admin" | "Customer"; // این فیلد جدید از بک‌اند می‌آید
+  user_type: "Admin" | "SuperAdmin" | "Customer"; // این فیلد جدید از بک‌اند می‌آید
   user: User;
 }
 
@@ -27,7 +27,7 @@ const api = axios.create({
 });
 
 // اضافه کردن توکن به هدر درخواست‌ها
-api.interceptors.request.use((config) => {
+api.interceptors.request.use((config: InternalAxiosRequestConfig): InternalAxiosRequestConfig => {
   const token = localStorage.getItem("token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -37,8 +37,8 @@ api.interceptors.request.use((config) => {
 
 // مدیریت خطای 401 برای خروج خودکار کاربر
 api.interceptors.response.use(
-  (response) => response,
-  (error) => {
+  (response: AxiosResponse) => response,
+  (error: AxiosError) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("token");
       // برای جلوگیری از ریدایرکت‌های بی‌نهایت، چک می‌کنیم که در صفحه لاگین نباشیم
@@ -70,12 +70,12 @@ export const authService = {
 
   /**
    * ٤. تابع ثبت‌نام:
-   * - آدرس API به /api/auth/register اصلاح شد
+   * - آدرس API به /api/auth/register/customer اصلاح شد
    * - ارسال full_name به بک‌اند اضافه شد
    * - روش ارسال داده به JSON تغییر یافت (رایج‌تر برای FastAPI)
    */
   async register(email: string, password: string, fullName: string): Promise<User> {
-    const response = await api.post<User>("/api/auth/register", {
+    const response = await api.post<User>("/api/auth/register/customer", {
       email,
       password,
       full_name: fullName,
@@ -90,6 +90,15 @@ export const authService = {
    */
   async getCurrentUser(): Promise<User> {
     const response = await api.get<User>("/api/users/me");
+    return response.data;
+  },
+
+  /**
+   * ٦. تابع چک کردن وضعیت احراز هویت:
+   * - برای SPA routing و جلوگیری از خطای unauthorized در reload
+   */
+  async getAuthStatus(): Promise<{authenticated: boolean, user?: User, user_type?: string, auth_required?: boolean, redirect_to?: string}> {
+    const response = await api.get("/api/auth/status");
     return response.data;
   },
 

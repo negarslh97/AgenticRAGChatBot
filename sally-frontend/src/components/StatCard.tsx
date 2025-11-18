@@ -7,7 +7,7 @@ interface StatCardProps {
   title: string
   stats?: Array<{
     label: string
-    value: number | string
+    value: number | string | React.ReactElement
   }>
   description?: string
   icon: LucideIcon
