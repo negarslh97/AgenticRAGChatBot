@@ -1209,11 +1209,17 @@ class AdvancedAgenticRAG:
                 
                 # آماده‌سازی تاریخچه مکالمه
                 history_text = ""
-                if state.get("conversation_history") and len(state["conversation_history"]) > 0:
-                    logger.info(f"💬 Including conversation history ({len(state['conversation_history'])} messages)")
+                conversation_history = state.get("conversation_history", [])
+                is_first_message = not conversation_history or len(conversation_history) == 0
+                
+                if is_first_message:
+                    logger.info("👋 First message detected (Agentic RAG) - Bot will introduce itself")
+                    history_text = "\n\n[هیچ تاریخچه‌ای وجود ندارد - این اولین پیام است]\n\n---\n"
+                elif len(conversation_history) > 0:
+                    logger.info(f"💬 Including conversation history ({len(conversation_history)} messages)")
                     history_text = "\n\nتاریخچه مکالمه:\n"
                     # افزایش تعداد پیام‌های تاریخچه از 5 به 7
-                    recent_messages = state["conversation_history"][-7:]
+                    recent_messages = conversation_history[-7:]
                     for msg in recent_messages:
                         role = "کاربر" if msg.get("role") == "user" else "دستیار"
                         content = msg.get("content", "")

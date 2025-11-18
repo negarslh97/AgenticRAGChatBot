@@ -232,6 +232,13 @@ class ResponseGenerator:
         """Generate non-streaming response."""
         # Build conversation history
         history_text = memory_service.format_history_for_prompt(request_context.conversation_history)
+        
+        # 🎯 Add introduction for first message (if no history exists)
+        is_first_message = not request_context.conversation_history or len(request_context.conversation_history) == 0
+        if is_first_message:
+            logger.info("👋 First message detected (ResponseGenerator non-streaming) - Bot will introduce itself")
+            if not history_text or history_text.strip() == "":
+                history_text = "[هیچ تاریخچه‌ای وجود ندارد - این اولین پیام است]"
 
         # Get prompt based on query type
         prompt = self._build_prompt(request_context, history_text)
@@ -262,6 +269,13 @@ class ResponseGenerator:
         """Generate streaming response as async generator."""
         # Build conversation history
         history_text = memory_service.format_history_for_prompt(request_context.conversation_history)
+        
+        # 🎯 Add introduction for first message (if no history exists)
+        is_first_message = not request_context.conversation_history or len(request_context.conversation_history) == 0
+        if is_first_message:
+            logger.info("👋 First message detected (ResponseGenerator streaming) - Bot will introduce itself")
+            if not history_text or history_text.strip() == "":
+                history_text = "[هیچ تاریخچه‌ای وجود ندارد - این اولین پیام است]"
 
         # Get prompt based on query type
         prompt = self._build_prompt(request_context, history_text)
@@ -879,6 +893,14 @@ class LangChainOrchestrator:
             # Build the final prompt with context and history
             prompt_build_start = time.time()
             history_text = self.memory_service.format_history_for_prompt(request_context.conversation_history)
+            
+            # 🎯 Add introduction for first message (if no history exists)
+            is_first_message = not request_context.conversation_history or len(request_context.conversation_history) == 0
+            if is_first_message:
+                logger.info("👋 First message detected (LangChain Orchestrator) - Bot will introduce itself")
+                if not history_text or history_text.strip() == "":
+                    history_text = "[هیچ تاریخچه‌ای وجود ندارد - این اولین پیام است]"
+            
             final_prompt = custom_prompt_content
 
             # Replace common placeholders
@@ -888,8 +910,9 @@ class LangChainOrchestrator:
             if "{context}" in final_prompt and request_context.context:
                 final_prompt = final_prompt.replace("{context}", request_context.context)
 
-            if "{history}" in final_prompt and history_text:
-                final_prompt = final_prompt.replace("{history}", history_text)
+            if "{history}" in final_prompt:
+                # Always replace history, even if empty (for first message detection)
+                final_prompt = final_prompt.replace("{history}", history_text or "[هیچ تاریخچه‌ای وجود ندارد]")
 
             prompt_build_time = time.time() - prompt_build_start
 

@@ -87,6 +87,15 @@ class RAGResponseService:
 
                 # Build conversation history text using ConversationMemoryService
                 history_text = conversation_memory_service.format_history_for_prompt(conversation_history)
+                
+                # 🎯 Add introduction for first message (if no history exists)
+                is_first_message = not conversation_history or len(conversation_history) == 0
+                if is_first_message:
+                    logger.debug("👋 First message detected - Bot will introduce itself")
+                    # The prompt already has instruction to introduce if history is empty
+                    # But we can add a note to history_text to make it explicit
+                    if not history_text or history_text.strip() == "":
+                        history_text = "[هیچ تاریخچه‌ای وجود ندارد - این اولین پیام است]"
 
                 # 🎯 Match response style with query type - use prompt files
                 logger.debug(f"🎯 Query Type: {query_type}")
@@ -196,6 +205,13 @@ class RAGResponseService:
 
             # 🧠 Build conversation history using ConversationMemoryService
             history_text = conversation_memory_service.format_history_for_prompt(conversation_history[-10:] if conversation_history else None)
+            
+            # 🎯 Add introduction for first message (if no history exists)
+            is_first_message = not conversation_history or len(conversation_history) == 0
+            if is_first_message:
+                logger.debug("👋 First message detected (streaming) - Bot will introduce itself")
+                if not history_text or history_text.strip() == "":
+                    history_text = "[هیچ تاریخچه‌ای وجود ندارد - این اولین پیام است]"
             
             chain = prompt | model
             

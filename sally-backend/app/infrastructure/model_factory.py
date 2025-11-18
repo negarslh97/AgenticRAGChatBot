@@ -603,23 +603,16 @@ class ModelFactory:
     
     def get_model(self, model_name: str, **kwargs) -> BaseModelInterface:
         """Get a model instance by name."""
-        # 🔧 SAFETY CHECK: If model not found, try to use first available model
         if model_name not in self._models:
-            logger.warning(f"Model {model_name} not found in factory")
-            logger.warning(f"Available models: {list(self._models.keys())}")
+            available_models = ", ".join(self._models.keys())
+            logger.error(f"Model {model_name} not found in factory")
+            logger.error(f"Available models: {available_models}")
             
-            # If no models available at all, raise the original error
-            if not self._models:
-                raise AIException(
-                    message=f"Model {model_name} not found",
-                    error_type=ErrorType.MODEL_UNAVAILABLE,
-                    severity=AISeverity.HIGH
-                )
-            
-            # Use the first available model as a fallback
-            first_model = list(self._models.keys())[0]
-            logger.warning(f"Using fallback model: {first_model} instead of {model_name}")
-            model_name = first_model
+            raise AIException(
+                message=f"Model '{model_name}' not found. Available models: {available_models}",
+                error_type=ErrorType.MODEL_UNAVAILABLE,
+                severity=AISeverity.HIGH
+            )
         
         model = self._models[model_name]
         
@@ -734,18 +727,15 @@ class ModelFactory:
                 best_model = name
         
         if best_model is None:
-            # 🔧 SAFETY FALLBACK: If no model meets requirements, use the first available model
-            if self._models:
-                first_model = list(self._models.keys())[0]
-                logger.warning(f"No suitable model found for task '{task_type}', using first available model: {first_model}")
-                logger.warning(f"Available models: {list(self._models.keys())}")
-                return first_model
-            else:
-                raise AIException(
-                    message=f"No suitable model found for task type: {task_type}",
-                    error_type=ErrorType.MODEL_UNAVAILABLE,
-                    severity=AISeverity.HIGH
-                )
+            available_models = ", ".join(self._models.keys())
+            logger.error(f"No suitable model found for task '{task_type}' that meets requirements")
+            logger.error(f"Available models: {available_models}")
+            
+            raise AIException(
+                message=f"No suitable model found for task type: {task_type}. Available models: {available_models}",
+                error_type=ErrorType.MODEL_UNAVAILABLE,
+                severity=AISeverity.HIGH
+            )
         
         logger.info(f"Selected optimal model: {best_model} for task: {task_type}")
         return best_model
