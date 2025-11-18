@@ -235,7 +235,7 @@ sally-platform.iml
 
 # Release folder
 release/
-sally-backend/release/
+sally-backend/release/*
 
 # Windows
 Thumbs.db
