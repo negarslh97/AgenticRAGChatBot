@@ -3,12 +3,15 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useChatPage } from '../hooks/useChatPage'
+import { useAudio } from '../hooks/useAudio'
 import ChatContainer from '../components/chat/ChatContainer'
 import ConversationSidebar from '../components/chat/ConversationSidebar'
 import SettingsModal from '../components/chat/SettingsModal'
 import { chatService } from '../services/chatService'
 import { getDefaultModel } from '../config/models'
 import { toast } from 'react-hot-toast'
+import blackCatImage from '../assets/Black-Cat.png'
+import meowSound from '../assets/meow.mp3'
 
 // Skeleton Loader Component
 const SkeletonLoader = (): JSX.Element => (
@@ -29,7 +32,12 @@ const TypewriterCursor = (): JSX.Element => (
 
 const CustomerChatPage = () => {
   const { user } = useAuth()
-  
+  const { play } = useAudio(meowSound)
+
+  const handleAvatarClick = () => {
+    play()
+  }
+
   const FEATURE_FLAGS = {
     SHOW_SETTINGS: true,
     SHOW_VOICE_INPUT: false
@@ -167,18 +175,21 @@ const CustomerChatPage = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="relative">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-600 via-blue-600 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-purple-500/30 transform hover:scale-105 transition-transform duration-200">
-                <span className="text-base font-bold">S</span>
-              </div>
+              <img
+                src={blackCatImage}
+                alt="سالی"
+                className="h-10 w-10 rounded-xl cursor-pointer object-cover shadow-lg shadow-purple-500/30 transform hover:scale-105 transition-transform duration-200"
+                onClick={handleAvatarClick}
+              />
               <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full shadow-sm"></div>
             </div>
             <div className="flex flex-col">
               <h1 className="text-xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-                چت با Sally
+                چت با سالی
               </h1>
               <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                دستیار هوشمند پیشرفته
+                دستیار هوشمند گربه‌ای
               </p>
             </div>
           </div>

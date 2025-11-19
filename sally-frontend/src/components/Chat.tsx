@@ -18,9 +18,9 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import ArticleHighlightModal from './ArticleHighlightModal';
 import ModelSelector from './ModelSelector';
 import { getDefaultModel } from '../config/models';
+import ArticleHighlightModal from './ArticleHighlightModal';
 
 // Define component-specific types
 interface Message {
@@ -91,6 +91,112 @@ const Chat: React.FC = () => {
       }
     }
     return unique;
+  };
+
+  // 🔥 Helper: استخراج کلمات کلیدی از پیام کاربر برای هایلایت
+  const extractKeywordsFromQuery = (query: string): string[] => {
+    if (!query) return [];
+
+    // لیست stop words فارسی (کلماتی که نباید highlight بشن)
+    const persianStopWords = new Set([
+      'است', 'هست', 'که', 'در', 'به', 'از', 'را', 'با', 'برای', 'این', 'آن',
+      'یک', 'چه', 'چی', 'چند', 'کدام', 'چطور', 'چگونه', 'چرا', 'کی', 'کجا',
+      'می', 'شود', 'میشود', 'می‌شود', 'بود', 'باشد', 'های', 'ها', 'ای', 'ان',
+      'و', 'یا', 'اما', 'ولی', 'تا', 'اگر', 'چون', 'پس', 'نه', 'بله', 'آره'
+    ]);
+
+    // تمیز کردن query از علائم نگارشی
+    const cleanedQuery = query.replace(/[؟?!،,.\-_]/g, ' ');
+
+    // تقسیم به کلمات و فیلتر کردن
+    const words = cleanedQuery.split(/\s+/).filter(word =>
+      word.length > 2 && !persianStopWords.has(word.toLowerCase())
+    );
+
+    return Array.from(new Set(words)); // حذف تکراری‌ها
+  };
+
+  // 🔥 Helper: هایلایت کردن کلمات کلیدی در متن با استفاده از React components
+  const highlightKeywordsInText = (text: string, keywords: string[]): React.ReactNode => {
+    if (!keywords.length || !text) {
+      return text;
+    }
+
+    console.log('🎨 Highlighting text:', text.substring(0, 50) + '...');
+    console.log('🎯 Keywords:', keywords);
+
+    // پیدا کردن تمام کلمات کلیدی در متن
+    const matches: Array<{ start: number; end: number; keyword: string }> = [];
+
+    keywords.forEach(keyword => {
+      if (!keyword || keyword.trim().length === 0) return;
+
+      const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const keywordRegex = new RegExp(`\\b${escapedKeyword}\\b`, 'gi');
+
+      let match;
+      while ((match = keywordRegex.exec(text)) !== null) {
+        matches.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          keyword: match[0]
+        });
+      }
+    });
+
+    if (matches.length === 0) {
+      console.log('⚠️ No keywords found in text');
+      return text;
+    }
+
+    // مرتب کردن matches بر اساس موقعیت
+    matches.sort((a, b) => a.start - b.start);
+
+    // حذف هم‌پوشانی‌ها
+    const filteredMatches = [];
+    for (const match of matches) {
+      const lastMatch = filteredMatches[filteredMatches.length - 1];
+      if (!lastMatch || match.start >= lastMatch.end) {
+        filteredMatches.push(match);
+      }
+    }
+
+    // ساختن کامپوننت React با هایلایت
+    const result: React.ReactNode[] = [];
+    let lastIndex = 0;
+
+    filteredMatches.forEach((match, index) => {
+      // متن قبل از هایلایت
+      if (match.start > lastIndex) {
+        result.push(text.slice(lastIndex, match.start));
+      }
+
+      // کلمه هایلایت شده
+      result.push(
+        <mark
+          key={index}
+          className="bg-yellow-300 text-gray-900 px-1 rounded font-semibold"
+          style={{
+            backgroundColor: '#fef08a',
+            padding: '1px 3px',
+            borderRadius: '3px',
+            fontWeight: '600'
+          }}
+        >
+          {match.keyword}
+        </mark>
+      );
+
+      lastIndex = match.end;
+    });
+
+    // متن باقی‌مانده
+    if (lastIndex < text.length) {
+      result.push(text.slice(lastIndex));
+    }
+
+    console.log('✅ Highlighted result created with', filteredMatches.length, 'highlights');
+    return result;
   };
 
   // 1. Fetch conversation list on mount
@@ -488,14 +594,28 @@ const Chat: React.FC = () => {
                                 📚 منابع مرتبط (کلیک کنید برای مشاهده با highlight):
                               </p>
                               <div className="space-y-2">
+                                {(() => {
+                                  console.log('📚 Rendering sources for message:', message.id, 'Sources:', message.metadata.sources);
+                                  return null;
+                                })()}
                                 {message.metadata.sources.map((source: any, index: number) => {
                                   // 🔥 پیدا کردن سوال اصلی کاربر (پیام قبلی)
                                   const messageIndex = selectedConversation?.messages.findIndex(m => m.id === message.id);
-                                  const userMessage = messageIndex !== undefined && messageIndex > 0 
-                                    ? selectedConversation?.messages[messageIndex - 1] 
+                                  const userMessage = messageIndex !== undefined && messageIndex > 0
+                                    ? selectedConversation?.messages[messageIndex - 1]
                                     : null;
                                   const userQuery = userMessage?.role === 'user' ? userMessage.content : '';
-                                  
+
+                                  // 🔥 استخراج کلمات کلیدی از سوال کاربر
+                                  const keywords = extractKeywordsFromQuery(userQuery);
+                                  console.log('🔍 Chat.tsx - User Query:', userQuery);
+                                  console.log('🔍 Chat.tsx - Extracted Keywords:', keywords);
+                                  console.log('🔍 Chat.tsx - Source Title:', source.title);
+
+                                  // تست مستقیم هایلایت
+                                  const highlightedTitle = highlightKeywordsInText(source.title, keywords);
+                                  console.log('🔍 Chat.tsx - Highlighted Title result:', highlightedTitle);
+
                                   return (
                                     <button
                                       key={source.id || index}
@@ -503,14 +623,15 @@ const Chat: React.FC = () => {
                                         console.log('🖱️ Source clicked!');
                                         console.log('   Article ID:', source.id);
                                         console.log('   User Query:', userQuery);
+                                        console.log('   Keywords:', keywords);
                                         console.log('   Source:', source);
-                                        
+
                                         if (!source.id) {
                                           console.error('❌ No article ID!');
                                           alert('خطا: شناسه مقاله موجود نیست!');
                                           return;
                                         }
-                                        
+
                                         setHighlightModal({
                                           isOpen: true,
                                           articleId: source.id,
@@ -521,7 +642,7 @@ const Chat: React.FC = () => {
                                     >
                                       <ExternalLink className="h-3 w-3 opacity-50 group-hover:opacity-100" />
                                       <span className="flex-1">
-                                        {index + 1}. {source.title}
+                                        {index + 1}. {highlightedTitle}
                                       </span>
                                       {/* 🔥 Debug info */}
                                       <span className="text-xs opacity-50">

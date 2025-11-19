@@ -50,14 +50,18 @@ const TypewriterCursor = (): JSX.Element => (
 
 const SuperAdminChatPage = () => {
   const { play } = useAudio(meowSound)
-  
+
+  const handleAvatarClick = () => {
+    play()
+  }
+
   const FEATURE_FLAGS = {
     SHOW_SETTINGS: true,
     SHOW_VOICE_INPUT: false
   }
 
   const { user } = useAuth()
-  
+
   // Custom hook for chat functionality
   const {
     conversations,
@@ -78,16 +82,17 @@ const SuperAdminChatPage = () => {
     showSettingsModal,
     showGoToBottomBtn,
     highlightModal,
+    closeHighlightModal,
     isSidebarOpen,
     isSidebarCollapsed,
     setIsSidebarOpen,
     messagesEndRef,
     messagesContainerRef,
     textareaRef,
-    selectedArticle,
-    
+
     // Actions
     handleSendMessage,
+    handleSelectConversation,
     handleKeyPress,
     deleteConversation,
     copyMessage,
@@ -110,7 +115,6 @@ const SuperAdminChatPage = () => {
     setDeleteConfirmId,
     setNewMessage,
     setShowSettingsModal,
-    setSelectedArticle,
     setSelectedModel,
     setTemperature,
     setRagType
@@ -126,7 +130,7 @@ const SuperAdminChatPage = () => {
 
   // Wrapper function for ConversationSidebar
   const handleSetSelectedConversation = async (conv: any) => {
-    setSelectedConversation(conv)
+    handleSelectConversation(conv)
   }
 
   // Keyboard shortcuts handler
@@ -165,7 +169,7 @@ const SuperAdminChatPage = () => {
         setIsSidebarOpen(false)
       }
     }
-    
+
     handleResize()
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
@@ -190,96 +194,89 @@ const SuperAdminChatPage = () => {
   }, [user?.id, loadConversations, loadAvailableModels])
 
   return (
-    <div className="flex h-[calc(100vh-170px)] bg-gray-50">
-      {/* Sidebar */}
-      <ConversationSidebar
-        conversations={conversations}
-        selectedConversation={selectedConversation}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        isSidebarOpen={isSidebarOpen}
-        isSidebarCollapsed={isSidebarCollapsed}
-        toggleSidebar={toggleSidebar}
-        toggleSidebarCollapse={toggleSidebarCollapse}
-        deleteConversation={deleteConversation}
-        createNewConversation={createNewConversation}
-        setSelectedConversation={handleSetSelectedConversation}
-        isInitialLoading={isInitialLoading}
-        deleteConfirmId={deleteConfirmId}
-        setDeleteConfirmId={setDeleteConfirmId}
-      />
-
-      {/* Main Chat Area */}
-      <ChatContainer
-        selectedConversation={selectedConversation}
-        newMessage={newMessage}
-        setNewMessage={setNewMessage}
-        isLoading={isLoading}
-        isThinking={isThinking}
-        ragType={ragType}
-        selectedModel={selectedModel}
-        temperature={temperature}
-        availableModels={availableModels}
-        handleSendMessage={handleSendMessage}
-        handleKeyPress={handleKeyPress}
-        messagesContainerRef={messagesContainerRef}
-        messagesEndRef={messagesEndRef}
-        handleScroll={handleScroll}
-        handleGoToBottom={handleGoToBottom}
-        showGoToBottomBtn={showGoToBottomBtn}
-        showSettingsModal={showSettingsModal}
-        setShowSettingsModal={setShowSettingsModal}
-        textareaRef={textareaRef}
-        formatTime={formatTime}
-        getRagTypeIcon={getRagTypeIcon}
-        getRagTypeLabel={getRagTypeLabel}
-        SkeletonLoader={SkeletonLoader}
-        TypewriterCursor={TypewriterCursor}
-        streamContentGradually={streamContentGradually}
-        typewriterMessages={typewriterMessages}
-        copiedMessageId={copiedMessageId}
-        copyMessage={copyMessage}
-        retryMessage={retryMessage}
-        regenerateMessage={regenerateMessage}
-        handleSourceClick={handleSourceClick}
-        FEATURE_FLAGS={FEATURE_FLAGS}
-      />
-
-      {/* Article Modal */}
-      {selectedArticle && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-4xl max-h-[80vh] w-full flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900 flex-1 ml-4">
-                {selectedArticle.title}
-              </h2>
-              <Button
-                onClick={() => setSelectedArticle(null)}
-                variant="ghost"
-                size="sm"
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4">
-              <MarkdownRenderer 
-                content={selectedArticle.content}
-                variant="default"
-              />
-            </div>
-            
-            <div className="flex justify-end p-4 border-t border-gray-200">
-              <Button
-                onClick={() => setSelectedArticle(null)}
-                variant="outline"
-              >
-                بستن
-              </Button>
-            </div>
+    <div className="flex flex-col h-[calc(100vh-170px)] bg-gray-50">
+      {/* Header with Black Cat Avatar */}
+      <div className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <img
+              src={BlackCatImage}
+              alt="سالی"
+              className="h-8 w-8 rounded-full cursor-pointer object-cover hover:scale-105 transition-transform duration-200"
+              onClick={handleAvatarClick}
+            />
+            <div className="absolute -bottom-1 -right-1 h-3 w-3 bg-green-500 border-2 border-white rounded-full"></div>
+          </div>
+          <div>
+            <h1 className="font-semibold text-gray-900">سالی</h1>
+            <p className="text-xs text-gray-500">آنلاین</p>
           </div>
         </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <ConversationSidebar
+          conversations={conversations}
+          selectedConversation={selectedConversation}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          isSidebarOpen={isSidebarOpen}
+          isSidebarCollapsed={isSidebarCollapsed}
+          toggleSidebar={toggleSidebar}
+          toggleSidebarCollapse={toggleSidebarCollapse}
+          deleteConversation={deleteConversation}
+          createNewConversation={createNewConversation}
+          setSelectedConversation={handleSetSelectedConversation}
+          isInitialLoading={isInitialLoading}
+          deleteConfirmId={deleteConfirmId}
+          setDeleteConfirmId={setDeleteConfirmId}
+        />
+
+        {/* Main Chat Area */}
+        <ChatContainer
+          selectedConversation={selectedConversation}
+          newMessage={newMessage}
+          setNewMessage={setNewMessage}
+          isLoading={isLoading}
+          isThinking={isThinking}
+          ragType={ragType}
+          selectedModel={selectedModel}
+          temperature={temperature}
+          availableModels={availableModels}
+          handleSendMessage={handleSendMessage}
+          handleKeyPress={handleKeyPress}
+          messagesContainerRef={messagesContainerRef}
+          messagesEndRef={messagesEndRef}
+          handleScroll={handleScroll}
+          handleGoToBottom={handleGoToBottom}
+          showGoToBottomBtn={showGoToBottomBtn}
+          showSettingsModal={showSettingsModal}
+          setShowSettingsModal={setShowSettingsModal}
+          textareaRef={textareaRef}
+          formatTime={formatTime}
+          getRagTypeIcon={getRagTypeIcon}
+          getRagTypeLabel={getRagTypeLabel}
+          SkeletonLoader={SkeletonLoader}
+          TypewriterCursor={TypewriterCursor}
+          streamContentGradually={streamContentGradually}
+          typewriterMessages={typewriterMessages}
+          copiedMessageId={copiedMessageId}
+          copyMessage={copyMessage}
+          retryMessage={retryMessage}
+          regenerateMessage={regenerateMessage}
+          handleSourceClick={handleSourceClick}
+          FEATURE_FLAGS={FEATURE_FLAGS}
+        />
+      </div>
+
+      {/* Article Highlight Modal */}
+      {highlightModal.isOpen && (
+        <ArticleHighlightModal
+          articleId={highlightModal.articleId}
+          userQuery={highlightModal.userQuery}
+          onClose={closeHighlightModal}
+        />
       )}
 
       {/* Settings Modal */}

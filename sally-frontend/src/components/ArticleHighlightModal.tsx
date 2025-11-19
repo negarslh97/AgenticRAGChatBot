@@ -61,41 +61,55 @@ const ArticleHighlightModal: React.FC<ArticleHighlightModalProps> = ({
     }
 
     console.log('🎨 Highlighting text with keywords:', keywords);
+    console.log('📝 Text to highlight:', text.substring(0, 100) + '...');
 
-    // Escape special regex characters in keywords
-    const escapedKeywords = keywords.map(kw => 
-      kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    );
+    // اگر هیچ کلیدی نداریم، متن را مستقیم برمی‌گردانیم
+    if (keywords.length === 0) {
+      return text;
+    }
 
-    // ساخت regex برای پیدا کردن کلمات کلیدی (case-insensitive & word boundaries)
-    const pattern = new RegExp(`(${escapedKeywords.join('|')})`, 'gi');
-    const parts = text.split(pattern);
+    // رویکرد پیشرفته‌تر برای متن‌های فارسی: جایگزینی مستقیم کلمات کلیدی
+    let result = text;
+    let hasHighlights = false;
 
-    console.log('📊 Split into parts:', parts.length);
+    keywords.forEach((keyword, index) => {
+      if (!keyword || keyword.trim().length === 0) return;
 
-    return parts.map((part, index) => {
-      const isKeyword = keywords.some(
-        keyword => part.toLowerCase().trim() === keyword.toLowerCase().trim()
-      );
+      const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // برای متن‌های فارسی از word boundary صرف نظر می‌کنیم و از space یا punctuation استفاده می‌کنیم
+      const keywordPattern = new RegExp(`(?<!\\w)${escapedKeyword}(?!\\w)`, 'gi');
 
-      if (isKeyword) {
-        console.log('✨ Highlighting:', part);
-        return (
-          <mark
-            key={index}
-            className="bg-yellow-300 text-gray-900 px-1 rounded font-bold"
-            style={{ 
-              backgroundColor: '#fef08a',
-              padding: '2px 4px',
-              borderRadius: '3px'
-            }}
-          >
-            {part}
-          </mark>
-        );
+      // بررسی اینکه آیا کلمه کلیدی در متن وجود دارد
+      if (keywordPattern.test(result)) {
+        console.log('✨ Found keyword to highlight:', keyword);
+        hasHighlights = true;
+
+        // جایگزینی با markup
+        result = result.replace(keywordPattern, (match) => {
+          return `<mark class="bg-yellow-300 text-gray-900 px-1 rounded font-bold" style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px;">${match}</mark>`;
+        });
+      } else {
+        console.log('⚠️ Keyword not found in text:', keyword);
+        // امتحان با روش ساده‌تر اگر روش پیشرفته کار نکرد
+        const simplePattern = new RegExp(escapedKeyword, 'gi');
+        if (simplePattern.test(result)) {
+          console.log('🔄 Found keyword with simple method:', keyword);
+          hasHighlights = true;
+          result = result.replace(simplePattern, (match) => {
+            return `<mark class="bg-yellow-300 text-gray-900 px-1 rounded font-bold" style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px;">${match}</mark>`;
+          });
+        }
       }
-      return <span key={index}>{part}</span>;
     });
+
+    if (!hasHighlights) {
+      console.log('⚠️ No keywords found in text, returning original text');
+      return text;
+    }
+
+    console.log('✅ Highlighted text created');
+    // تبدیل HTML string به React elements
+    return <span dangerouslySetInnerHTML={{ __html: result }} />;
   };
 
   // 🔥 پردازش محتوای Markdown برای نمایش با highlight
@@ -258,4 +272,3 @@ const ArticleHighlightModal: React.FC<ArticleHighlightModalProps> = ({
 };
 
 export default ArticleHighlightModal;
-

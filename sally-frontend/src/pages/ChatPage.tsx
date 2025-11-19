@@ -2,7 +2,7 @@
 
 /**
  * ChatPage - Dynamic Chat Interface
- * 
+ *
  * Features:
  * - Dynamic conversation history (saved to database)
  * - New chat on every page load
@@ -10,13 +10,13 @@
  * - Edit conversation titles
  * - Delete conversations
  * - Responsive design
- * 
+ *
  * Current Status:
  * - ✅ Connected to real database API
  * - ✅ Loads conversations by user ID
  * - ✅ Saves messages to database
  * - ✅ Real-time conversation updates
- * 
+ *
  * API Integration:
  * - Uses chatService for API calls
  * - Authenticates requests with user token
@@ -31,11 +31,19 @@ import { WelcomeMessage } from '../components/chat/WelcomeMessage'
 import { MarkdownRenderer } from '../components/ui/markdown-renderer'
 import { Bot, User } from 'lucide-react'
 import { useChatPage } from '../hooks/useChatPage'
+import { useAudio } from '../hooks/useAudio'
+import blackCatImage from '../assets/Black-Cat.png'
+import meowSound from '../assets/meow.mp3'
 import type { Message } from '../types/chat'
 
 const ChatPage = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
-  
+  const { play } = useAudio(meowSound)
+
+  const handleAvatarClick = () => {
+    play()
+  }
+
   const {
     conversations,
     selectedConversation,
@@ -72,14 +80,17 @@ const ChatPage = () => {
   const renderMessage = (message: Message) => (
     <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       {message.role === 'assistant' && (
-        <div className="h-8 w-8 rounded-full bg-blue-600 flex-shrink-0 flex items-center justify-center">
-          <Bot className="h-4 w-4 text-white" />
-        </div>
+        <img
+          src={blackCatImage}
+          alt="سالی"
+          className="h-8 w-8 rounded-full cursor-pointer object-cover flex-shrink-0 hover:scale-105 transition-transform duration-200"
+          onClick={handleAvatarClick}
+        />
       )}
       <div className={`max-w-[70%] ${message.role === 'user' ? 'order-2' : 'order-1'}`}>
         <div className={`p-4 rounded-lg shadow-sm ${message.role === 'user' ? 'bg-white text-slate-800' : 'bg-blue-600 text-white'}`}>
           {message.role === 'assistant' ? (
-            <MarkdownRenderer 
+            <MarkdownRenderer
               content={message.content}
               variant="chat"
               className="text-white"
@@ -121,11 +132,6 @@ const ChatPage = () => {
           {formatTime(message.timestamp)}
         </p>
       </div>
-      {message.role === 'user' && (
-        <div className="h-8 w-8 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center">
-          <User className="h-4 w-4 text-gray-600" />
-        </div>
-      )}
     </div>
   )
 

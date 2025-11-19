@@ -135,7 +135,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         }}
         isTyping={isTyping}
         onCopy={copyMessage}
-        onRetry={retryMessage}
         onRegenerate={regenerateMessage}
         onSourceClick={handleSourceClick}
         copiedMessageId={copiedMessageId}
@@ -161,7 +160,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         message={thinkingMessage}
         isTyping={true}
         onCopy={copyMessage}
-        onRetry={retryMessage}
         onRegenerate={regenerateMessage}
         onSourceClick={handleSourceClick}
         copiedMessageId={copiedMessageId}

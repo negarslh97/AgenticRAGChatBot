@@ -3,11 +3,13 @@ import { Bot, User, Copy, Check, RotateCcw, AlertCircle, ExternalLink, Sparkles 
 import { Button } from '../ui/button'
 import { MarkdownRenderer } from '../ui/markdown-renderer'
 import { Message } from '../../types/chat'
+import blackCatImage from '../../assets/Black-Cat.png'
+import { useAudio } from '../../hooks/useAudio'
+import meowSound from '../../assets/meow.mp3'
 
 interface MessageBubbleProps {
   message: Message
   isTyping?: boolean
-  onRetry?: (messageId: string) => void
   onRegenerate?: (messageId: string) => void
   onCopy?: (messageId: string, content: string) => void
   onSourceClick?: (sourceId: string, messageId: string) => void
@@ -19,7 +21,6 @@ interface MessageBubbleProps {
 const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   isTyping = false,
-  onRetry,
   onRegenerate,
   onCopy,
   onSourceClick,
@@ -27,18 +28,19 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   copiedMessageId,
   isLoading = false
 }) => {
+  const { play } = useAudio(meowSound)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showFullContent, setShowFullContent] = useState(false)
+
+  const handleAvatarClick = () => {
+    if (!isUser) {
+      play()
+    }
+  }
 
   const handleCopy = () => {
     if (onCopy) {
       onCopy(message.id, message.content)
-    }
-  }
-
-  const handleRetry = () => {
-    if (onRetry) {
-      onRetry(message.id)
     }
   }
 
@@ -59,6 +61,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
       onGetMoreDetails(message.id)
     }
   }
+
 
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('fa-IR', {
@@ -95,46 +98,47 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const displayContent = isTyping ? message.content : (showFullContent ? message.content : message.content.slice(0, 1000) + (message.content.length > 1000 ? '...' : ''))
 
   return (
-    <div className={`flex items-start space-x-2 space-x-reverse ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {/* Avatar */}
-      <div className={`flex-shrink-0 ${isUser ? 'order-2' : 'order-1'}`}>
-        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center ${
-          isUser 
-            ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' 
-            : 'bg-gradient-to-r from-green-600 to-teal-600 text-white'
-        }`}>
-          {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-        </div>
+      <div className={`flex items-start space-x-2 space-x-reverse ${isUser ? 'justify-end' : 'justify-start'}`}>
+        {/* Avatar */}
+        <div className={`flex-shrink-0 ${isUser ? 'order-2' : 'order-1'}`}>
+        {isUser ? (
+          <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 flex items-center justify-center text-white">
+            <User className="w-4 h-4" />
+          </div>
+        ) : (
+          <img
+            src={blackCatImage}
+            alt="سالی"
+            className="w-8 h-8 md:w-10 md:h-10 rounded-full cursor-pointer object-cover hover:scale-105 transition-transform duration-200"
+            onClick={handleAvatarClick}
+          />
+        )}
       </div>
 
       {/* Message Content */}
       <div className={`flex-1 max-w-[80%] ${isUser ? 'order-1' : 'order-2'}`}>
-        <div className={`rounded-lg p-3 ${
-          isUser 
-            ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' 
-            : isFailed 
-              ? 'bg-red-50 border border-red-200 text-red-800' 
-              : 'bg-white border border-gray-200 text-gray-900'
-        }`}>
+        <div className={`rounded-lg p-3 ${isUser
+          ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
+          : isFailed
+            ? 'bg-red-50 border border-red-200 text-red-800'
+            : 'bg-white border border-gray-200 text-gray-900'
+          }`}>
           {/* Message Header */}
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${
-                isUser ? 'text-purple-100' : 'text-gray-600'
-              }`}>
+              <span className={`text-xs font-medium ${isUser ? 'text-purple-100' : 'text-gray-600'
+                }`}>
                 {isUser ? 'شما' : 'دستیار هوشمند'}
               </span>
               {message.metadata?.rag_type && (
-                <span className={`text-xs px-2 py-1 rounded-full ${
-                  isUser ? 'bg-purple-800 text-purple-100' : 'bg-gray-100 text-gray-600'
-                }`}>
+                <span className={`text-xs px-2 py-1 rounded-full ${isUser ? 'bg-purple-800 text-purple-100' : 'bg-gray-100 text-gray-600'
+                  }`}>
                   {getRagTypeLabel(message.metadata.rag_type)}
                 </span>
               )}
             </div>
-            <span className={`text-xs ${
-              isUser ? 'text-purple-100' : 'text-gray-500'
-            }`}>
+            <span className={`text-xs ${isUser ? 'text-purple-100' : 'text-gray-500'
+              }`}>
               {formatTime(message.timestamp)}
             </span>
           </div>
@@ -202,7 +206,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-600">اطمینان:</span>
                 <div className="flex-1 bg-gray-200 rounded-full h-2">
-                  <div 
+                  <div
                     className="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full transition-all duration-300"
                     style={{ width: `${Math.min(message.confidence * 100, 100)}%` }}
                   ></div>
@@ -232,20 +236,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 )}
               </Button>
             )}
-            
-            {isUser && onRetry && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleRetry}
-                disabled={isLoading}
-                className="text-xs p-1 h-6 w-6"
-                title="تلاش مجدد"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </Button>
-            )}
-            
+
             {!isUser && onRegenerate && (
               <Button
                 variant="ghost"
@@ -253,7 +244,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 onClick={handleRegenerate}
                 disabled={isLoading}
                 className="text-xs p-1 h-6 w-6"
-                title="بازسازی"
+                title="بازسازی پاسخ"
               >
                 <RotateCcw className="w-3 h-3" />
               </Button>
@@ -278,14 +269,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         {!isTyping && message.content.length > 1000 && (
           <button
             onClick={() => setShowFullContent(!showFullContent)}
-            className={`text-xs mt-1 ${
-              isUser ? 'text-purple-200 hover:text-purple-100' : 'text-gray-500 hover:text-gray-700'
-            } transition-colors`}
+            className={`text-xs mt-1 ${isUser ? 'text-purple-200 hover:text-purple-100' : 'text-gray-500 hover:text-gray-700'
+              } transition-colors`}
           >
             {showFullContent ? 'نمایش کمتر' : 'نمایش بیشتر'}
           </button>
         )}
       </div>
+
     </div>
   )
 }

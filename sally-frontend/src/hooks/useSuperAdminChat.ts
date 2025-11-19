@@ -108,7 +108,6 @@ export const useSuperAdminChat = ({
     const saved = localStorage.getItem('superAdmin_ragType')
     return (saved as AdminRAGType) || 'simple'
   })
-  const [selectedArticle, setSelectedArticle] = useState<{id: string, title: string, content: string} | null>(null)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     const saved = localStorage.getItem('superAdmin_selectedModel')
@@ -120,14 +119,14 @@ export const useSuperAdminChat = ({
     return saved ? parseFloat(saved) : 0.7
   })
   const [isThinking, setIsThinking] = useState(false)
-  const [typewriterMessages, setTypewriterMessages] = useState<{[key: string]: string}>({})
+  const [typewriterMessages, setTypewriterMessages] = useState<{ [key: string]: string }>({})
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)
   const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
-  
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -137,7 +136,7 @@ export const useSuperAdminChat = ({
   const conversationIdRef = useRef<string | undefined>(undefined)
   const refreshInProgressRef = useRef<Set<string>>(new Set())
   const assistantTempIdRef = useRef<string>('')
-  const streamingTimeoutsRef = useRef<{[key: string]: NodeJS.Timeout}>({})
+  const streamingTimeoutsRef = useRef<{ [key: string]: NodeJS.Timeout }>({})
 
   // Smart scroll state
   const userHasScrolledUp = useRef(false)
@@ -170,7 +169,7 @@ export const useSuperAdminChat = ({
     try {
       setIsInitialLoading(true)
       const data = await chatService.getConversations()
-      
+
       const formattedConversations: Conversation[] = data.map((conv: any) => ({
         id: conv.id,
         title: conv.title || 'گفتگوی جدید',
@@ -198,10 +197,10 @@ export const useSuperAdminChat = ({
   const loadAvailableModels = useCallback(async () => {
     try {
       const modelData = await chatService.getAvailableModels()
-      
+
       const formattedModels: ModelInfo[] = modelData.models.map((model: any) => {
         const configModel = getModelById(model.id)
-        
+
         let provider = model.provider
         if (model.id.startsWith('ollama:')) {
           provider = 'Ollama'
@@ -218,7 +217,7 @@ export const useSuperAdminChat = ({
         } else if (model.id.startsWith('gpt-') || model.id.includes('gpt')) {
           provider = 'OpenAI'
         }
-        
+
         return {
           id: model.id,
           name: model.name,
@@ -230,9 +229,9 @@ export const useSuperAdminChat = ({
           empty_chunks: model.empty_chunks || configModel?.empty_chunks
         }
       })
-      
+
       setAvailableModels(formattedModels)
-      
+
       const defaultModel = modelData.default_model || getDefaultModel('chat')
       if (!formattedModels.find(m => m.id === selectedModel)) {
         setSelectedModel(defaultModel)
@@ -250,13 +249,56 @@ export const useSuperAdminChat = ({
         empty_chunks: model.empty_chunks
       }))
       setAvailableModels(configModels)
-      
+
       const defaultModel = getDefaultModel('chat')
       if (!configModels.find(m => m.id === selectedModel)) {
         setSelectedModel(defaultModel)
       }
     }
   }, [selectedModel, chatService, getModelById, getDefaultModel, MODELS_CONFIG])
+
+  // Select conversation and load messages
+  const handleSelectConversation = async (conversation: Conversation) => {
+    if (selectedConversation?.id === conversation.id) return
+
+    setSelectedConversation(conversation)
+    setIsLoading(true)
+
+    try {
+      const messages = await chatService.getConversationMessages(conversation.id)
+
+      const formattedMessages: Message[] = messages.map((msg: any) => ({
+        id: msg.id,
+        content: msg.content,
+        role: msg.sender_type === 'AI' ? 'assistant' : 'user',
+        timestamp: new Date(msg.created_at),
+        sender_type: msg.sender_type,
+        is_failed: msg.is_failed,
+        failure_reason: msg.failure_reason,
+        rating: msg.rating,
+        metadata: msg.metadata,
+        // Map other fields if necessary, e.g. sources from metadata if available
+        sources: msg.metadata?.sources,
+        confidence: msg.metadata?.confidence,
+        model: msg.metadata?.model_name
+      }))
+
+      setSelectedConversation(prev => {
+        if (prev?.id === conversation.id) {
+          return {
+            ...prev,
+            messages: formattedMessages
+          }
+        }
+        return prev
+      })
+    } catch (error) {
+      console.error('Failed to load messages:', error)
+      toast.error('خطا در بارگذاری پیام‌ها')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Send message handler
   const handleSendMessage = async () => {
@@ -321,7 +363,7 @@ export const useSuperAdminChat = ({
       const currentConvId = currentConversation.id.startsWith('new-') ? undefined : currentConversation.id
       const currentConvTempId = currentConversation.id
       conversationIdRef.current = undefined
-      
+
       setTypewriterMessages(prev => ({
         ...prev,
         [assistantTempId]: ''
@@ -366,19 +408,19 @@ export const useSuperAdminChat = ({
 
           if (evt.type === 'chunk') {
             setIsThinking(false)
-            
+
             setSelectedConversation(prev => {
               if (!prev) return prev
               const updated = { ...prev }
               const currentMessage = updated.messages.find(m => m.id === assistantTempId)
-              
+
               if (currentMessage) {
                 const newContent = (currentMessage.content || '') + (evt.content || '')
-                
+
                 if (evt.content) {
                   streamContentGradually(assistantTempId, newContent)
                 }
-                
+
                 updated.messages = updated.messages.map(m =>
                   m.id === assistantTempId
                     ? { ...m, content: newContent }
@@ -387,7 +429,7 @@ export const useSuperAdminChat = ({
               }
               return updated
             })
-            
+
             setTimeout(() => scrollToBottom(), 50)
           }
 
@@ -396,7 +438,7 @@ export const useSuperAdminChat = ({
               if (!prev) return prev
               const updated = { ...prev }
               const finalContent = evt.full_response || updated.messages.find(m => m.id === assistantTempId)?.content || ''
-              
+
               setTypewriterMessages(prev => {
                 const currentContent = prev[assistantTempId] || ''
                 if (currentContent.length < finalContent.length) {
@@ -407,52 +449,52 @@ export const useSuperAdminChat = ({
                 }
                 return prev
               })
-              
+
               updated.messages = updated.messages.map(m =>
                 m.id === assistantTempId
                   ? {
-                      ...m,
-                      id: evt.message_id || assistantTempId,
-                      content: finalContent,
-                      complexity_fa: evt.complexity_fa,
-                      model: evt.model,
-                      metadata: {
-                        ...(m.metadata || {}),
-                        rag_type: evt.rag_type,
-                        can_get_more_details: evt.can_get_more_details || false
-                      }
+                    ...m,
+                    id: evt.message_id || assistantTempId,
+                    content: finalContent,
+                    complexity_fa: evt.complexity_fa,
+                    model: evt.model,
+                    metadata: {
+                      ...(m.metadata || {}),
+                      rag_type: evt.rag_type,
+                      can_get_more_details: evt.can_get_more_details || false
                     }
+                  }
                   : m
               )
               return updated
             })
             setIsLoading(false)
-            
+
             const finalConvId = evt.conversation_id || conversationIdRef.current || currentConvId
-            
+
             if (finalConvId) {
               if (refreshInProgressRef.current.has(finalConvId)) {
                 return
               }
-              
+
               refreshInProgressRef.current.add(finalConvId)
-              
+
               setTimeout(async () => {
                 try {
                   const updatedConv = await chatService.getConversation(finalConvId)
-                  
+
                   setConversations((prev: Conversation[]) => {
                     const exists = prev.some(c => c.id === finalConvId)
-                    
+
                     if (exists) {
                       const updated = prev.map(c =>
                         c.id === finalConvId
                           ? {
-                              ...c,
-                              title: updatedConv.title || c.title,
-                              rag_type: updatedConv.rag_type || evt.rag_type,
-                              updated_at: updatedConv.updated_at
-                            }
+                            ...c,
+                            title: updatedConv.title || c.title,
+                            rag_type: updatedConv.rag_type || evt.rag_type,
+                            updated_at: updatedConv.updated_at
+                          }
                           : c
                       )
                       return updated
@@ -468,7 +510,7 @@ export const useSuperAdminChat = ({
                       }]
                     }
                   })
-                  
+
                   setSelectedConversation(prev => {
                     if (!prev) return prev
                     if (prev.id === finalConvId || prev.id === currentConvTempId) {
@@ -482,7 +524,7 @@ export const useSuperAdminChat = ({
                     }
                     return prev
                   })
-                  
+
                   refreshInProgressRef.current.delete(finalConvId)
                 } catch (error) {
                   console.error('❌ Failed to refresh conversation:', error)
@@ -558,7 +600,7 @@ export const useSuperAdminChat = ({
           throw apiError
         }
       }
-      
+
       setConversations(prev => prev.filter(c => c.id !== convId))
       if (selectedConversation?.id === convId) {
         setSelectedConversation(null)
@@ -584,8 +626,157 @@ export const useSuperAdminChat = ({
   }
 
   const regenerateMessage = async (messageId: string) => {
-    // Implementation for regenerate message
-    toast.success('در حال بازسازی پیام...')
+    if (!selectedConversation) return
+
+    const messageIndex = selectedConversation.messages.findIndex(m => m.id === messageId)
+    if (messageIndex === -1) return
+
+    // Find the preceding user message
+    // We look backwards from the current message
+    let userMessageContent = ''
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      if (selectedConversation.messages[i].role === 'user') {
+        userMessageContent = selectedConversation.messages[i].content
+        break
+      }
+    }
+
+    if (!userMessageContent) {
+      toast.error('پیام کاربر یافت نشد')
+      return
+    }
+
+    // Set regenerating state
+    setRegeneratingMessageId(messageId)
+    setIsLoading(true)
+    setIsThinking(true)
+
+    // Clear the current message content
+    setSelectedConversation(prev => {
+      if (!prev) return prev
+      const updated = { ...prev }
+      updated.messages = updated.messages.map(m =>
+        m.id === messageId
+          ? { ...m, content: '', is_failed: false, failure_reason: undefined }
+          : m
+      )
+      return updated
+    })
+
+    setTypewriterMessages(prev => ({
+      ...prev,
+      [messageId]: ''
+    }))
+
+    try {
+      const currentConvId = selectedConversation.id
+      assistantTempIdRef.current = messageId
+
+      await chatService.sendAdminMessageStream(
+        currentConvId,
+        userMessageContent,
+        ragType,
+        (evt: any) => {
+          if (!evt) return
+
+          if (evt.type === 'sources') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev
+              const updated = { ...prev }
+              updated.messages = updated.messages.map(m =>
+                m.id === messageId
+                  ? { ...m, sources: evt.sources, confidence: evt.confidence }
+                  : m
+              )
+              return updated
+            })
+          }
+
+          if (evt.type === 'chunk') {
+            setIsThinking(false)
+
+            setSelectedConversation(prev => {
+              if (!prev) return prev
+              const updated = { ...prev }
+              const currentMessage = updated.messages.find(m => m.id === messageId)
+
+              if (currentMessage) {
+                const newContent = (currentMessage.content || '') + (evt.content || '')
+
+                if (evt.content) {
+                  streamContentGradually(messageId, newContent)
+                }
+
+                updated.messages = updated.messages.map(m =>
+                  m.id === messageId
+                    ? { ...m, content: newContent }
+                    : m
+                )
+              }
+              return updated
+            })
+          }
+
+          if (evt.type === 'complete') {
+            setSelectedConversation(prev => {
+              if (!prev) return prev
+              const updated = { ...prev }
+              const finalContent = evt.full_response || updated.messages.find(m => m.id === messageId)?.content || ''
+
+              setTypewriterMessages(prev => {
+                return {
+                  ...prev,
+                  [messageId]: finalContent
+                }
+              })
+
+              updated.messages = updated.messages.map(m =>
+                m.id === messageId
+                  ? {
+                    ...m,
+                    content: finalContent,
+                    complexity_fa: evt.complexity_fa,
+                    model: evt.model,
+                    metadata: {
+                      ...(m.metadata || {}),
+                      rag_type: evt.rag_type,
+                      can_get_more_details: evt.can_get_more_details || false
+                    }
+                  }
+                  : m
+              )
+              return updated
+            })
+            setIsLoading(false)
+            setRegeneratingMessageId(null)
+          }
+
+          if (evt.type === 'error') {
+            toast.error(`خطا: ${evt.message}`)
+            setSelectedConversation(prev => {
+              if (!prev) return prev
+              const updated = { ...prev }
+              updated.messages = updated.messages.map(m =>
+                m.id === messageId
+                  ? { ...m, is_failed: true, failure_reason: evt.message }
+                  : m
+              )
+              return updated
+            })
+            setIsLoading(false)
+            setRegeneratingMessageId(null)
+          }
+        },
+        selectedModel,
+        temperature
+      )
+    } catch (error: any) {
+      console.error('Failed to regenerate message:', error)
+      toast.error('خطا در بازسازی پیام')
+      setIsLoading(false)
+      setIsThinking(false)
+      setRegeneratingMessageId(null)
+    }
   }
 
   const createNewConversation = useCallback(() => {
@@ -641,8 +832,33 @@ export const useSuperAdminChat = ({
   }
 
   const handleSourceClick = (sourceId: string, messageId: string) => {
-    // Implementation for source click
-    console.log('Source clicked:', sourceId)
+    console.log('Source clicked:', sourceId, messageId)
+
+    if (!selectedConversation) return
+
+    // Find the message to get context
+    const messageIndex = selectedConversation.messages.findIndex(m => m.id === messageId)
+    let userQuery = ''
+
+    if (messageIndex !== -1) {
+      // Search backwards for the last user message
+      for (let i = messageIndex - 1; i >= 0; i--) {
+        if (selectedConversation.messages[i].role === 'user') {
+          userQuery = selectedConversation.messages[i].content
+          break
+        }
+      }
+    }
+
+    setHighlightModal({
+      isOpen: true,
+      articleId: sourceId,
+      userQuery: userQuery
+    })
+  }
+
+  const closeHighlightModal = () => {
+    setHighlightModal(prev => ({ ...prev, isOpen: false }))
   }
 
   const streamContentGradually = useCallback((messageId: string, content: string, delay: number = 30) => {
@@ -658,14 +874,14 @@ export const useSuperAdminChat = ({
           [messageId]: content.substring(0, currentIndex + 1)
         }))
         currentIndex++
-        
+
         const nextDelay = Math.random() * 20 + 20
         streamingTimeoutsRef.current[messageId] = setTimeout(streamNext, nextDelay)
       } else {
         delete streamingTimeoutsRef.current[messageId]
       }
     }
-    
+
     streamNext()
   }, [])
 
@@ -718,7 +934,6 @@ export const useSuperAdminChat = ({
     searchQuery,
     modelSearchQuery,
     ragType,
-    selectedArticle,
     showSettingsModal,
     selectedModel,
     availableModels,
@@ -735,11 +950,13 @@ export const useSuperAdminChat = ({
     messagesContainerRef,
     textareaRef,
     highlightModal,
+    closeHighlightModal,
     showGoToBottomBtn,
     userHasScrolledUp,
-    
+
     // Actions
     handleSendMessage,
+    handleSelectConversation,
     handleKeyPress,
     deleteConversation,
     copyMessage,
@@ -762,7 +979,6 @@ export const useSuperAdminChat = ({
     setSelectedConversation,
     setDeleteConfirmId,
     setShowSettingsModal,
-    setSelectedArticle,
     setIsSidebarOpen,
     setSelectedModel,
     setTemperature,
