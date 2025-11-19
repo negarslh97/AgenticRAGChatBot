@@ -177,7 +177,7 @@ class PromptInjectionDetector:
         risk_score = min(risk_score, 1.0)
         
         detection_result = {
-            "detected": risk_score > 0.3,
+            "detected": risk_score > 0.35,
             "risk_score": risk_score,
             "matches": matches,
             "text_length": len(text),
@@ -194,24 +194,24 @@ class PromptInjectionDetector:
         high_risk_patterns = [
             r'ignore\s+previous\s+instructions',
             r'disregard\s+everything\s+above',
-            r'you\s+are\s+now',
-            r'act\s+as',
             r'dan\s+mode',
             r'evil\s+mode',
             r'exec\s*\(',
             r'eval\s*\(',
             r'__import__'
         ]
-        
+
         if any(high_risk in pattern.lower() for high_risk in high_risk_patterns):
             return 0.3
-        
+
         medium_risk_patterns = [
             r'system\s+prompt',
             r'pretend\s+to\s+be',
             r'become',
             r'output\s+format',
             r'response\s+format',
+            r'you\s+are\s+now',  # Moved from high risk
+            r'act\s+as',         # Moved from high risk
             r'open\s*\(',
             r'file\s+',
             r'http',

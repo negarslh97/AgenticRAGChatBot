@@ -13,7 +13,8 @@ import json
 from datetime import datetime
 import logging
 import asyncio
-
+import traceback
+import sys
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -187,6 +188,10 @@ async def send_admin_message_stream(
         async def generate_stream():
             """Generator for admin streaming"""
             try:
+                # --- DEBUG LOG START ---
+                print(f"🔍 DEBUG: Starting stream generator loop for {message.rag_type}", file=sys.stderr)
+                # -----------------------
+
                 async for event_data in ChatUseCases.send_admin_message_stream(
                     content=message.content,
                     admin=current_admin,
@@ -195,12 +200,24 @@ async def send_admin_message_stream(
                     model=message.model,
                     temperature=message.temperature
                 ):
+                    # --- DEBUG LOG CHUNK ---
+                    # print(f"📦 DEBUG: Got chunk type: {event_data.get('type')}", file=sys.stderr)
+                    # -----------------------
+                    
                     yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
                     await asyncio.sleep(0.01)
                 
+                print("✅ DEBUG: Stream finished successfully", file=sys.stderr)
                 yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                 
             except Exception as e:
+                # --- CRITICAL ERROR LOGGING ---
+                print("\n" + "="*50, file=sys.stderr)
+                print(f"❌ STREAM CRASHED: {str(e)}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr) # چاپ کامل مسیر خطا
+                print("="*50 + "\n", file=sys.stderr)
+                # ------------------------------
+                
                 logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
         
@@ -215,6 +232,8 @@ async def send_admin_message_stream(
         )
         
     except Exception as e:
+        print(f"❌ Outer Handler Error: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         logger.error(f"❌ Admin streaming error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -599,7 +618,7 @@ async def advanced_agentic_rag_stream(
             try:
                 # Import services
                 from app.infrastructure.langchain_orchestrator import orchestrator
-                from app.infrastructure.rag_service import get_rag_service
+                from app.services.rag_service import get_rag_service
                 from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
                 from app.domain.entities import Conversation, Message, SenderType
                 from bson import ObjectId
@@ -796,7 +815,7 @@ async def advanced_agentic_rag(
         
         # Import services
         from app.infrastructure.langchain_orchestrator import orchestrator
-        from app.infrastructure.rag_service import get_rag_service
+        from app.services.rag_service import get_rag_service
         from app.infrastructure.agentic_rag_advanced import get_advanced_agentic_rag
         from app.domain.entities import Conversation, Message
         from bson import ObjectId

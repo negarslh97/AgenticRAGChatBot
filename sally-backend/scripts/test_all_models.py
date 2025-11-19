@@ -206,7 +206,7 @@ class ModelTester:
 """
         
         for provider, stats in provider_stats.items():
-            success_rate = stats["successful"] / stats["total"] * 100
+            success_rate = (stats["successful"] / stats["total"] * 100) if stats["total"] > 0 else 0
             report += f"- **{provider}**: {stats['successful']}/{stats['total']} موفق ({success_rate:.1f}%)\n"
         
         report += "\n## 🏆 بهترین مدل‌ها (بر اساس کیفیت و سرعت)\n"

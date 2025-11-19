@@ -726,7 +726,9 @@ class ModelFactory:
             
             # Prefer models with lower cost
             if hasattr(capabilities, "cost_per_1k_tokens") and "input" in capabilities.cost_per_1k_tokens:
-                score += (1 / capabilities.cost_per_1k_tokens["input"])
+                input_cost = capabilities.cost_per_1k_tokens["input"]
+                if input_cost > 0:
+                    score += (1 / input_cost)
             
             if score > best_score:
                 best_score = score

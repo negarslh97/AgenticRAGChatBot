@@ -304,7 +304,6 @@ class ResponseGenerator:
         
         if cached_model and hasattr(cached_model, '_last_used'):
             # Use cached model if it's still valid (within 5 minutes)
-            import time
             if time.time() - cached_model['_last_used'] < 300:
                 return cached_model['name']
         
@@ -983,7 +982,8 @@ class LangChainOrchestrator:
             logger.info(f"   🔢 Total tokens: {input_tokens + output_tokens:,}")
             logger.info(f"   🤖 Model: {model_name}")
             logger.info(f"   ⚡ Model call time: {model_call_time:.3f}s")
-            logger.info(f"   📝 Tokens per second: {(input_tokens + output_tokens) / model_call_time:.1f}")
+            tokens_per_second = (input_tokens + output_tokens) / model_call_time if model_call_time > 0 else 0
+            logger.info(f"   📝 Tokens per second: {tokens_per_second:.1f}")
             logger.info(f"   🎯 Response length: {len(result_content)} characters")
 
             return result

@@ -321,6 +321,53 @@ class ChatUseCases:
         ):
             yield event
 
+    # @staticmethod
+    # async def send_admin_message(
+    #     content: str,
+    #     admin: Admin,
+    #     conversation_id: Optional[str] = None,
+    #     rag_type: str = "simple",
+    #     model: Optional[str] = None,
+    #     temperature: Optional[float] = 0.7
+    # ) -> Dict[str, Any]:
+    #     """
+    #     پردازش پیام ادمین بدون استریمینگ (non-streaming).
+    #     این متد از send_admin_message_stream استفاده می‌کند و نتیجه را جمع‌آوری می‌کند.
+    #     """
+    #     full_response = ""
+    #     sources = []
+    #     confidence = 0.5
+    #     message_id = ""
+    #     conversation_id_final = conversation_id
+        
+    #     async for event in ChatUseCases.send_admin_message_stream(
+    #         content=content,
+    #         admin=admin,
+    #         conversation_id=conversation_id,
+    #         rag_type=rag_type,
+    #         model=model,
+    #         temperature=temperature
+    #     ):
+    #         if event.get("type") == "init":
+    #             conversation_id_final = event.get("conversation_id", conversation_id)
+    #         elif event.get("type") == "sources":
+    #             sources = event.get("sources", [])
+    #             confidence = event.get("confidence", 0.5)
+    #         elif event.get("type") == "chunk":
+    #             full_response += event.get("content", "")
+    #         elif event.get("type") == "complete":
+    #             message_id = event.get("message_id", "")
+    #             full_response = event.get("full_response", full_response)
+    #             confidence = event.get("confidence", confidence)
+        
+    #     return {
+    #         "conversation_id": conversation_id_final or "",
+    #         "message": full_response,
+    #         "sources": sources,
+    #         "confidence": confidence,
+    #         "suggested_actions": [],
+    #         "message_id": message_id
+    #     }
     @staticmethod
     async def send_admin_message(
         content: str,
@@ -331,8 +378,8 @@ class ChatUseCases:
         temperature: Optional[float] = 0.7
     ) -> Dict[str, Any]:
         """
-        پردازش پیام ادمین بدون استریمینگ (non-streaming).
-        این متد از send_admin_message_stream استفاده می‌کند و نتیجه را جمع‌آوری می‌کند.
+        نسخه بدون استریم برای استفاده‌های API معمولی.
+        از همان منطق استریم استفاده می‌کند و نتیجه را جمع می‌کند.
         """
         full_response = ""
         sources = []
@@ -340,6 +387,7 @@ class ChatUseCases:
         message_id = ""
         conversation_id_final = conversation_id
         
+        # استفاده از تابع استریم برای جلوگیری از تکرار کد
         async for event in ChatUseCases.send_admin_message_stream(
             content=content,
             admin=admin,
@@ -349,7 +397,7 @@ class ChatUseCases:
             temperature=temperature
         ):
             if event.get("type") == "init":
-                conversation_id_final = event.get("conversation_id", conversation_id)
+                conversation_id_final = event.get("conversation_id")
             elif event.get("type") == "sources":
                 sources = event.get("sources", [])
                 confidence = event.get("confidence", 0.5)
@@ -357,8 +405,9 @@ class ChatUseCases:
                 full_response += event.get("content", "")
             elif event.get("type") == "complete":
                 message_id = event.get("message_id", "")
-                full_response = event.get("full_response", full_response)
-                confidence = event.get("confidence", confidence)
+                # اگر پاسخ کامل در رویداد بود، از آن استفاده کن
+                if "full_response" in event:
+                    full_response = event["full_response"]
         
         return {
             "conversation_id": conversation_id_final or "",
@@ -367,6 +416,152 @@ class ChatUseCases:
             "confidence": confidence,
             "suggested_actions": [],
             "message_id": message_id
+        }
+
+    @staticmethod
+    async def send_admin_message_stream(
+        content: str,
+        admin: Admin,
+        conversation_id: Optional[str] = None,
+        rag_type: str = "simple",
+        model: Optional[str] = None,
+        temperature: Optional[float] = 0.7
+    ):
+        """
+        نسخه استریمینگ با حل مشکل Circular Import و First Message
+        """
+        from app.domain.entities import Conversation, Message, SenderType
+        from bson import ObjectId
+        from datetime import datetime, timezone
+        import asyncio
+        import inspect
+        import importlib  # <--- راه حل مشکل ModuleNotFoundError
+
+        # 1. مدیریت یا ایجاد Conversation
+        if not conversation_id:
+            new_conversation = Conversation(
+                admin_id=str(admin.id),
+                title=content[:50],
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                rag_type=rag_type,
+                model_name=model
+            )
+            await new_conversation.insert()
+            conversation_id = str(new_conversation.id)
+        else:
+            try:
+                conv = await Conversation.get(ObjectId(conversation_id))
+                if conv:
+                    conv.updated_at = datetime.now(timezone.utc)
+                    await conv.save()
+            except Exception:
+                pass
+
+        # ارسال رویداد شروع
+        yield {"type": "init", "conversation_id": conversation_id}
+
+        # 2. ذخیره پیام کاربر
+        user_message = Message(
+            conversation_id=conversation_id,
+            user_id=str(admin.id),
+            content=content,
+            sender_type=SenderType.ADMIN.value,
+            created_at=datetime.now(timezone.utc),
+            metadata={"rag_type": rag_type, "model": model}
+        )
+        await user_message.insert()
+
+        # 3. آماده‌سازی سرویس RAG (با استفاده از importlib برای جلوگیری از خطا)
+        full_response_text = ""
+        sources_list = []
+
+        try:
+            # 🔥 استفاده از importlib برای دور زدن خطای Circular Import
+            rag_module = importlib.import_module("app.services.rag_service")
+            rag_service = rag_module.get_rag_service(admin)
+            
+            # فراخوانی متد تولید پاسخ
+            result = rag_service.generate_response(
+                query=content,
+                context={
+                    "user_id": str(admin.id),
+                    "conversation_id": conversation_id,
+                    "rag_type": rag_type,
+                    "model": model,
+                    "temperature": temperature
+                }
+            )
+
+            # الف) اگر نتیجه Awaitable باشد، منتظرش می‌مانیم
+            if inspect.isawaitable(result):
+                result = await result
+
+            # ب) چک می‌کنیم آیا نتیجه Generator است؟
+            if hasattr(result, '__aiter__'):
+                async for chunk in result:
+                    if isinstance(chunk, str):
+                        full_response_text += chunk
+                        yield {"type": "chunk", "content": chunk}
+                    elif isinstance(chunk, dict):
+                        if "sources" in chunk:
+                            sources_list = chunk["sources"]
+                            yield {"type": "sources", "sources": sources_list}
+                        
+                        content_part = chunk.get("response", "") or chunk.get("content", "") or chunk.get("answer", "")
+                        if content_part:
+                            full_response_text += content_part
+                            yield {"type": "chunk", "content": content_part}
+            
+            else:
+                # ج) اگر Generator نبود (باگ First Message) -> تبدیل به استریم مصنوعی
+                static_response = result
+                text_to_stream = ""
+                
+                if isinstance(static_response, dict):
+                    text_to_stream = static_response.get("response", "") or static_response.get("answer", "")
+                    if "sources" in static_response:
+                        sources_list = static_response["sources"]
+                        yield {"type": "sources", "sources": sources_list}
+                else:
+                    text_to_stream = str(static_response)
+
+                full_response_text = text_to_stream
+                
+                # شبیه‌سازی تایپ شدن
+                words = text_to_stream.split(" ")
+                for word in words:
+                    yield {"type": "chunk", "content": word + " "}
+                    await asyncio.sleep(0.02)
+
+        except Exception as e:
+            print(f"❌ Error inside send_admin_message_stream logic: {e}")
+            import traceback
+            traceback.print_exc()
+            yield {"type": "error", "message": str(e)}
+            full_response_text += f"\n[Error: {str(e)}]"
+
+        # 4. ذخیره پیام هوش مصنوعی
+        ai_message = Message(
+            conversation_id=conversation_id,
+            user_id=None,
+            content=full_response_text,
+            sender_type=SenderType.AI.value,
+            created_at=datetime.now(timezone.utc),
+            metadata={
+                "sources": sources_list,
+                "model": model,
+                "rag_type": rag_type
+            }
+        )
+        await ai_message.insert()
+
+        # 5. پایان
+        yield {
+            "type": "complete", 
+            "message_id": str(ai_message.id), 
+            "full_response": full_response_text,
+            "confidence": 1.0 
         }
 
     # ======================================================================================
