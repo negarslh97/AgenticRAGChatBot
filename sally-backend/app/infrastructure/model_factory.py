@@ -558,7 +558,13 @@ class ModelFactory:
         self._configs: Dict[str, ModelConfig] = {}
         self._security_manager = SecurityManager(security_config)
         
-        cache_config = CacheConfig(max_size=100, ttl=300)
+        cache_config = CacheConfig(
+            max_size=100,
+            ttl=300,
+            memory_pressure_enabled=True,  # فعال نگه داشتن monitoring
+            memory_threshold_percent=90.0,  # افزایش threshold از 80 به 90%
+            memory_cleanup_ratio=0.5  # افزایش cleanup ratio برای پاکسازی بهتر
+        )
         self._cache = CacheManager(cache_config)
         
         self._model_strategies: Dict[ModelProvider, Type[BaseModelInterface]] = {
