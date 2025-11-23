@@ -1,9 +1,8 @@
-import React, { useRef, useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useMemo, memo } from 'react'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { VoiceInput } from '../ui/voice-input'
-import { toast } from 'react-hot-toast'
-import { Send, HelpCircle, Settings } from 'lucide-react'
+import { Send, Settings } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import { WelcomeMessage } from './WelcomeMessage'
 import { Conversation as BaseConversation } from '../../types/chat'
@@ -41,8 +40,6 @@ interface ChatContainerProps {
   getRagTypeLabel: (type: 'simple' | 'agentic') => string
   SkeletonLoader: () => JSX.Element
   TypewriterCursor: () => JSX.Element
-  streamContentGradually: (messageId: string, content: string, delay?: number) => void
-  typewriterMessages: { [key: string]: string }
   copiedMessageId: string | null
   copyMessage: (messageId: string, content: string) => void
   retryMessage: (messageId: string) => void
@@ -54,7 +51,7 @@ interface ChatContainerProps {
   }
 }
 
-const ChatContainer: React.FC<ChatContainerProps> = ({
+const ChatContainer = memo<ChatContainerProps>(({
   selectedConversation,
   newMessage,
   setNewMessage,
@@ -79,8 +76,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   getRagTypeLabel,
   SkeletonLoader,
   TypewriterCursor,
-  streamContentGradually,
-  typewriterMessages,
   copiedMessageId,
   copyMessage,
   retryMessage,
@@ -122,26 +117,51 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
     }
   }, [newMessage, textareaRef])
 
-  const renderMessage = (message: any) => {
-    const isTyping = isThinking && message.role === 'assistant' && !message.content
-    const displayContent = isTyping ? '' : (typewriterMessages[message.id] || message.content || '')
 
-    return (
+  // بهینه‌سازی لیست پیام‌ها با useMemo و حفظ فاصله بین کلمات
+  const optimizedMessages = useMemo(() => {
+    if (!selectedConversation?.messages) return null
+
+    const messagesLength = selectedConversation.messages.length;
+
+    return selectedConversation.messages.map((message: any, index: number) => {
+      // ✅ اصلاح: فقط اگر لودینگ است، پیام از سمت ربات است، و "آخرین پیام" لیست است
+      // (اگر قابلیت Regenerate برای پیام‌های وسط لیست دارید، باید ID پیام در حال ساخت را چک کنید، اما برای حالت عادی این کافیست)
+      const isLastMessage = index === messagesLength - 1;
+      const isTyping = isLoading && message.role === 'assistant' && isLastMessage;
+
+      const displayContent = isTyping && !message.content ? '' : (message.content || '')
+
+      // اطمینان از حفظ فاصله بین کلمات فارسی و انگلیسی (Presentation Layer Logic - OK)
+      const processedContent = displayContent
+        .replace(/([a-zA-Z0-9])([آ-ی])/g, '$1 $2')
+        .replace(/([آ-ی])([a-zA-Z0-9])/g, '$1 $2');
+
+      return {
+        ...message,
+        content: processedContent,
+        isTyping,
+        displayContent: processedContent
+      }
+    })
+  }, [selectedConversation?.messages, isLoading]) // isThinking دیگر اینجا لازم نیست چون از isLoading استفاده کردیم
+
+  const renderedMessages = useMemo(() => {
+    if (!optimizedMessages) return null
+
+    return optimizedMessages.map((message: any) => (
       <MessageBubble
         key={message.id}
-        message={{
-          ...message,
-          content: displayContent
-        }}
-        isTyping={isTyping}
+        message={message}
+        isTyping={message.isTyping}
         onCopy={copyMessage}
         onRegenerate={regenerateMessage}
         onSourceClick={handleSourceClick}
         copiedMessageId={copiedMessageId}
         isLoading={isLoading}
       />
-    )
-  }
+    ))
+  }, [optimizedMessages, copyMessage, regenerateMessage, handleSourceClick, copiedMessageId, isLoading])
 
   const renderThinkingMessage = () => {
     // Create a temporary message for thinking state
@@ -215,9 +235,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       >
         {selectedConversation ? (
           <>
-            {console.log('🔍 Rendering conversation:', selectedConversation.id, 'with', selectedConversation.messages?.length, 'messages')}
             {selectedConversation.messages && selectedConversation.messages.length > 0 ? (
-              selectedConversation.messages.map(renderMessage)
+              renderedMessages
             ) : (
               <div className="text-center text-gray-500 py-8">
                 <p className="text-sm">این گفتگو هنوز پیامی ندارد</p>
@@ -326,6 +345,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       </div>
     </div>
   )
-}
+})
+
+// تنظیم displayName برای دیباگ کردن بهتر
+ChatContainer.displayName = 'ChatContainer'
 
 export default ChatContainer

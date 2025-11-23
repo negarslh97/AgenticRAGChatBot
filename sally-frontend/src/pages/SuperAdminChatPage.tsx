@@ -76,7 +76,6 @@ const SuperAdminChatPage = () => {
     availableModels,
     temperature,
     isThinking,
-    typewriterMessages,
     copiedMessageId,
     deleteConfirmId,
     showSettingsModal,
@@ -109,7 +108,6 @@ const SuperAdminChatPage = () => {
     getRagTypeIcon,
     getRagTypeLabel,
     handleSourceClick,
-    streamContentGradually,
     setSearchQuery,
     setSelectedConversation,
     setDeleteConfirmId,
@@ -127,6 +125,8 @@ const SuperAdminChatPage = () => {
     toast,
     chatService
   })
+
+  console.log('🎯 SuperAdminChatPage - selectedConversation:', selectedConversation)
 
   // Wrapper function for ConversationSidebar
   const handleSetSelectedConversation = async (conv: any) => {
@@ -259,8 +259,6 @@ const SuperAdminChatPage = () => {
           getRagTypeLabel={getRagTypeLabel}
           SkeletonLoader={SkeletonLoader}
           TypewriterCursor={TypewriterCursor}
-          streamContentGradually={streamContentGradually}
-          typewriterMessages={typewriterMessages}
           copiedMessageId={copiedMessageId}
           copyMessage={copyMessage}
           retryMessage={retryMessage}

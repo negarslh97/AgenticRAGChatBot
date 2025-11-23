@@ -292,12 +292,25 @@ class ResponseGenerator:
             clean_chunk = re.sub(r'^سلام من سالی.*$', '', clean_chunk, flags=re.MULTILINE)
             clean_chunk = re.sub(r'^⚠️.*$', '', clean_chunk, flags=re.MULTILINE)
 
-            clean_chunk = clean_chunk.strip()
+            # ❌ REMOVED: clean_chunk = clean_chunk.strip() - This was removing essential spaces from LLM tokens!
+            # LLM streaming tokens already include proper spacing (e.g., " world" starts with space)
+
             if clean_chunk:  # Only yield non-empty chunks
                 yield clean_chunk
 
     def _select_model(self, request_context: RequestContext) -> str:
         """Select optimal model based on request context."""
+        
+        # 1. Check if user requested a specific model (Priority 1)
+        # 👈 این بخش به ابتدای تابع منتقل شد تا هیچ مدلی پیش از آن انتخاب نشود
+        if request_context.custom_model:
+            # Validate model existence
+            if request_context.custom_model in self.model_factory._models:
+                logger.info(f"Using user-selected model: {request_context.custom_model}")
+                return request_context.custom_model  # 👈 بازگشت سریع
+            else:
+                logger.warning(f"Requested model {request_context.custom_model} not found. Falling back to auto-selection.")
+
         # Select model based on query type and complexity - optimized caching
         model_cache_key = f"{request_context.query_type.value}_{request_context.agentic_mode}"
         cached_model = getattr(self, f'_cached_model_{model_cache_key}', None)
@@ -307,11 +320,6 @@ class ResponseGenerator:
             if time.time() - cached_model['_last_used'] < 300:
                 return cached_model['name']
         
-        # Original model selection logic
-        if request_context.custom_model:
-            logger.info(f"Using custom model: {request_context.custom_model}")
-            return request_context.custom_model
-
         # Select model based on query type and complexity
         if request_context.agentic_mode:
             # 🔥 CHANGE: Using a faster, more reliable model for agentic mode
@@ -997,6 +1005,83 @@ class LangChainOrchestrator:
                 processing_time=error_time
             )
 
+    async def _process_streaming_with_custom_prompt(self, request_context: RequestContext) -> AsyncGenerator[str, None]:
+        """Process streaming request using custom prompt file."""
+        try:
+            # Load the custom prompt
+            custom_prompt_name = request_context.custom_prompt
+            custom_prompt_content = self.response_generator._load_prompt_from_file(custom_prompt_name)
+
+            if not custom_prompt_content:
+                logger.warning(f"Failed to load custom prompt: {custom_prompt_name}, falling back to standard processing")
+                # Fallback to standard streaming processing
+                async for chunk in self._generate_streaming_response(
+                    self.response_generator,
+                    request_context,
+                    self.memory_service
+                ):
+                    yield chunk
+                return
+
+            # Get model for streaming
+            model_name = self.response_generator._select_model(request_context)
+            model = self.model_factory.get_model(
+                model_name,
+                temperature=request_context.custom_temperature or self.response_generator._get_temperature(request_context),
+                max_tokens=request_context.max_tokens,
+                streaming=True
+            )
+
+            # Build the final prompt with context and history
+            history_text = self.memory_service.format_history_for_prompt(request_context.conversation_history)
+
+            # 🎯 Add introduction for first message (if no history exists)
+            is_first_message = not request_context.conversation_history or len(request_context.conversation_history) == 0
+            if is_first_message:
+                logger.info("👋 First message detected (Streaming Custom Prompt) - Bot will introduce itself")
+                if not history_text or history_text.strip() == "":
+                    history_text = "[هیچ تاریخچه‌ای وجود ندارد - این اولین پیام است]"
+
+            final_prompt = custom_prompt_content
+
+            # Replace common placeholders
+            if "{query}" in final_prompt:
+                final_prompt = final_prompt.replace("{query}", request_context.query)
+
+            if "{context}" in final_prompt and request_context.context:
+                final_prompt = final_prompt.replace("{context}", request_context.context)
+
+            if "{history}" in final_prompt:
+                # Always replace history, even if empty (for first message detection)
+                final_prompt = final_prompt.replace("{history}", history_text or "[هیچ تاریخچه‌ای وجود ندارد]")
+
+            # Log streaming details
+            logger.info(f"🤖 Starting streaming LLM call to {model_name} with custom prompt: {custom_prompt_name}")
+
+            # Stream response using the model
+            async for chunk in model.generate_stream(final_prompt):
+                # Clean up thinking blocks and leaked system instructions from each chunk
+                clean_chunk = re.sub(r'<thinking>.*?</thinking>', '', chunk, flags=re.DOTALL)
+                clean_chunk = re.sub(r'```thinking.*?```', '', clean_chunk, flags=re.DOTALL)
+
+                # Remove common leaked system instructions and prompts from chunks
+                clean_chunk = re.sub(r'^- بررسی.*$', '', clean_chunk, flags=re.MULTILINE)
+                clean_chunk = re.sub(r'^- .*بررسی.*$', '', clean_chunk, flags=re.MULTILINE)
+                clean_chunk = re.sub(r'^سلام من سالی.*$', '', clean_chunk, flags=re.MULTILINE)
+                clean_chunk = re.sub(r'^⚠️.*$', '', clean_chunk, flags=re.MULTILINE)
+
+                # ❌ REMOVED: clean_chunk = clean_chunk.strip() - This was removing essential spaces from LLM tokens!
+                # LLM streaming tokens already include proper spacing (e.g., " world" starts with space)
+
+                if clean_chunk:  # Only yield non-empty chunks
+                    # 🔥 اصلاح: حذف sanitize_output در استریمینگ برای حفظ فاصله‌ها
+                    # امنیت در سمت کلاینت و MarkdownRenderer تامین می‌شود
+                    yield clean_chunk
+
+        except Exception as e:
+            logger.error(f"❌ Custom prompt streaming failed: {e}")
+            yield "متأسفانه در حال حاضر نمی‌توانم به سوال شما پاسخ دهم."
+
     def _count_tokens(self, text: str) -> int:
         """Count tokens in text using optimized hybrid strategy with caching."""
         return self._token_counter.count_tokens(text)
@@ -1019,6 +1104,14 @@ class LangChainOrchestrator:
                 **kwargs
             )
 
+            # If custom_prompt is provided, use the direct streaming approach
+            if request_context.custom_prompt:
+                logger.info(f"Using custom prompt for streaming: {request_context.custom_prompt}")
+                async for chunk in self._process_streaming_with_custom_prompt(request_context):
+                    yield chunk
+                return
+
+            # Standard processing for non-custom prompts
             # Analyze query
             analysis = self.query_analyzer.analyze_query(
                 query,
@@ -1045,8 +1138,8 @@ class LangChainOrchestrator:
 
             # Stream response
             async for chunk in model.generate_stream(prompt):
-                sanitized_chunk = self.security_manager.sanitize_output(chunk)
-                yield sanitized_chunk
+                # 🔥 اصلاح: حذف sanitize_output چون فاصله‌های ابتدای چانک را می‌خورد
+                yield chunk
 
         except Exception as e:
             logger.error(f"Streaming request processing failed: {e}")

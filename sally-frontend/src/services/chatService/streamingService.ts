@@ -1,6 +1,8 @@
 import { StreamEvent } from './types'
 
 export class ChatStreamingService {
+  // rate limiting variables removed because they caused data loss for non-chunk events
+
   async sendMessageStream(
     content: string,
     conversationId: string | undefined,
@@ -19,60 +21,7 @@ export class ChatStreamingService {
       ...(temperature !== undefined && { temperature }),
     }
 
-    const token = localStorage.getItem("token")
-
-    const response = await fetch("/api/message/stream", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-
-    if (!response.ok || !response.body) {
-      onEvent({ type: "error", message: `HTTP ${response.status}` })
-      return { abort: () => controller.abort() }
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder("utf-8")
-    let buffer = ""
-
-    ;(async () => {
-      try {
-        while (true) {
-          const { value, done } = await reader.read()
-          if (done) break
-          
-          console.log("📦 Received chunk:", value?.length, "bytes")
-          
-          buffer += decoder.decode(value, { stream: true })
-
-          const parts = buffer.split("\n\n")
-          buffer = parts.pop() || ""
-
-          for (const part of parts) {
-            const line = part.trim()
-            if (!line.startsWith("data:")) continue
-            const json = line.replace(/^data:\s*/, "")
-            if (!json) continue
-            try {
-              const evt = JSON.parse(json)
-              console.log("🎯 Parsed event:", evt.type, evt.content?.length || 0)
-              onEvent(evt)
-            } catch {
-              // ignore parse errors for keep-alives
-            }
-          }
-        }
-      } catch (e: any) {
-        onEvent({ type: "error", message: e?.message || String(e) })
-      }
-    })()
-
-    return { abort: () => controller.abort() }
+    return this._handleStreamRequest("/api/message/stream", payload, controller, onEvent)
   }
 
   async sendAdminMessageStream(
@@ -93,67 +42,9 @@ export class ChatStreamingService {
       ...(temperature !== undefined && { temperature }),
     }
 
-    console.log('🚀 Sending admin message:', { 
-      conversationId, 
-      content: content.substring(0, 50), 
-      ragType, 
-      model, 
-      temperature 
-    })
+    console.log('🚀 Sending admin message stream:', { conversationId, ragType, model })
 
-    const token = localStorage.getItem("token")
-
-    const response = await fetch("/api/admin/message/stream", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-
-    if (!response.ok || !response.body) {
-      onEvent({ type: "error", message: `HTTP ${response.status}` })
-      return { abort: () => controller.abort() }
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder("utf-8")
-    let buffer = ""
-
-    ;(async () => {
-      try {
-        while (true) {
-          const { value, done } = await reader.read()
-          if (done) break
-          
-          console.log("📦 Admin received chunk:", value?.length, "bytes")
-          buffer += decoder.decode(value, { stream: true })
-
-          const parts = buffer.split("\n\n")
-          buffer = parts.pop() || ""
-
-          for (const part of parts) {
-            const line = part.trim()
-            if (!line.startsWith("data:")) continue
-            const json = line.replace(/^data:\s*/, "")
-            if (!json) continue
-            try {
-              const evt = JSON.parse(json)
-              console.log("🎯 Admin parsed event:", evt.type, evt.content?.length || 0)
-              onEvent(evt)
-            } catch {
-              // ignore parse errors
-            }
-          }
-        }
-      } catch (e: any) {
-        onEvent({ type: "error", message: e?.message || String(e) })
-      }
-    })()
-
-    return { abort: () => controller.abort() }
+    return this._handleStreamRequest("/api/admin/message/stream", payload, controller, onEvent)
   }
 
   async sendAdvancedAgenticMessageStream(
@@ -168,60 +59,75 @@ export class ChatStreamingService {
       conversation_id: conversationId,
     }
 
+    return this._handleStreamRequest("/api/advanced-agentic/stream", payload, controller, onEvent)
+  }
+
+  // 🔥 Shared helper method to handle SSE logic correctly without code duplication
+  private async _handleStreamRequest(
+    url: string,
+    payload: any,
+    controller: AbortController,
+    onEvent: (evt: StreamEvent) => void
+  ): Promise<{ abort: () => void }> {
     const token = localStorage.getItem("token")
 
-    ;(async () => {
-      try {
-        const response = await fetch("/api/advanced-agentic/stream", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        })
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      })
 
-        if (!response.ok || !response.body) {
-          onEvent({ type: "error", message: `HTTP ${response.status}` })
-          return
-        }
+      if (!response.ok || !response.body) {
+        onEvent({ type: "error", message: `HTTP ${response.status}` })
+        return { abort: () => controller.abort() }
+      }
 
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder("utf-8")
-        let buffer = ""
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder("utf-8")
+      let buffer = ""
 
-        while (true) {
-          const { value, done } = await reader.read()
-          if (done) break
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        
+        buffer += decoder.decode(value, { stream: true })
+
+        // Split by double newline (standard SSE delimiter)
+        const parts = buffer.split("\n\n")
+        // Keep the last part in buffer as it might be incomplete
+        buffer = parts.pop() || ""
+
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith("data:")) continue
           
-          buffer += decoder.decode(value, { stream: true })
+          // Safe regex replacement to handle "data:" or "data: "
+          const jsonStr = line.replace(/^data:\s*/, "")
+          
+          if (!jsonStr || jsonStr === "[DONE]") continue // Skip empty or DONE signals if sent raw
 
-          const parts = buffer.split("\n\n")
-          buffer = parts.pop() || ""
-
-          for (const part of parts) {
-            if (part.trim() === "") continue
-            if (!part.startsWith("data: ")) continue
-
-            const jsonStr = part.substring(6) // Remove 'data: ' prefix
-            try {
-              const parsed = JSON.parse(jsonStr)
-              onEvent(parsed)
-            } catch (err) {
-              console.error("Failed to parse SSE chunk:", jsonStr, err)
-            }
+          try {
+            const evt = JSON.parse(jsonStr)
+            // 🔥 No throttling here to ensure init/sources/metadata are never lost
+            onEvent(evt)
+          } catch (e) {
+            console.error("Error parsing SSE JSON:", e, jsonStr)
           }
         }
-      } catch (error: any) {
-        if (error.name === "AbortError") {
-          console.log("Stream aborted")
-        } else {
-          console.error("Stream error:", error)
-          onEvent({ type: "error", message: error.message })
-        }
       }
-    })()
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        console.log('Stream aborted by user')
+      } else {
+        console.error('Stream error:', e)
+        onEvent({ type: "error", message: e?.message || String(e) })
+      }
+    }
 
     return { abort: () => controller.abort() }
   }

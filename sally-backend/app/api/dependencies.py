@@ -91,3 +91,25 @@ def get_current_admin_with_permission(required_permission: Permission) -> Callab
         return current_admin
     
     return permission_checker
+
+
+async def get_optional_customer(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Optional[Customer]:
+    """
+    اگر توکن معتبر مشتری در هدر وجود داشته باشد، مشتری را برمی‌گرداند.
+    در غیر این صورت، به جای ایجاد خطا، None برمی‌گرداند.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+
+    return await get_current_customer_from_token(credentials.credentials)
+
+
+async def get_optional_admin(credentials: Optional[HTTPAuthorizationCredentials] = Depends(get_optional_auth_header)) -> Optional[Admin]:
+    """
+    اگر توکن معتبر ادمین در هدر وجود داشته باشد، ادمین را برمی‌گرداند.
+    در غیر این صورت، به جای ایجاد خطا، None برمی‌گرداند.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+
+    return await get_admin_from_token(credentials.credentials)

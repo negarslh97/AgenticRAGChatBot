@@ -145,8 +145,6 @@ const CustomerChatPage = () => {
       default: return 'پیش‌فرض'
     }
   }
-  const streamContentGradually = () => {}
-  const typewriterMessages = {}
   const copiedMessageId = null
   const handleSourceClick = () => {}
   const handleScroll = () => {}
@@ -258,8 +256,6 @@ const CustomerChatPage = () => {
           getRagTypeLabel={getRagTypeLabel}
           SkeletonLoader={SkeletonLoader}
           TypewriterCursor={TypewriterCursor}
-          streamContentGradually={streamContentGradually}
-          typewriterMessages={typewriterMessages}
           copiedMessageId={copiedMessageId}
           copyMessage={copyMessage}
           retryMessage={retryMessage}

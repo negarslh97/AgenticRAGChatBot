@@ -2120,13 +2120,17 @@ class AdvancedAgenticRAG:
                 
                 return {
                     "response": final_state["final_response"],
-                    "sources": final_state["sources"],
                     "confidence": final_state["confidence_score"],
-                    "complexity": final_state["query_complexity"].value if final_state["query_complexity"] else "unknown",
-                    "actions_taken": [a.value for a in final_state["action_history"]],
-                    "reflection_notes": final_state["reflection_notes"],
-                    "errors": final_state["errors"],
-                    "session_id": final_state["session_id"]
+                    "metadata": {
+                        "sources": final_state["sources"],
+                        "complexity": final_state["query_complexity"].value if final_state["query_complexity"] else "unknown",
+                        "actions_taken": [a.value for a in final_state["action_history"]],
+                        "reflection_notes": final_state["reflection_notes"],
+                        "errors": final_state["errors"],
+                        "session_id": final_state["session_id"],
+                        "model": self._get_power_model(),  # اضافه کردن مدل استفاده شده
+                        "rag_type": "agentic"
+                    }
                 }
                 
             except Exception as e:
@@ -2145,25 +2149,33 @@ class AdvancedAgenticRAG:
             
             return {
                 "response": result.get("response", "متأسفانه نمی‌توانم پاسخی ارائه دهم."),
-                "sources": result.get("sources", []),
                 "confidence": result.get("confidence", 0.5),
-                "complexity": "unknown",
-                "actions_taken": ["fallback"],
-                "reflection_notes": [],
-                "errors": ["Using fallback mode"],
-                "session_id": str(uuid.uuid4())
+                "metadata": {
+                    "sources": result.get("sources", []),
+                    "complexity": "unknown",
+                    "actions_taken": ["fallback"],
+                    "reflection_notes": [],
+                    "errors": ["Using fallback mode"],
+                    "session_id": str(uuid.uuid4()),
+                    "model": settings.rag_model_loaded,
+                    "rag_type": "fallback"
+                }
             }
         except Exception as e:
             logger.error(f"❌ Fallback RAG also failed: {e}")
             return {
                 "response": "متأسفانه خطایی رخ داده است.",
-                "sources": [],
                 "confidence": 0.0,
-                "complexity": "unknown",
-                "actions_taken": [],
-                "reflection_notes": [],
-                "errors": [str(e)],
-                "session_id": str(uuid.uuid4())
+                "metadata": {
+                    "sources": [],
+                    "complexity": "unknown",
+                    "actions_taken": [],
+                    "reflection_notes": [],
+                    "errors": [str(e)],
+                    "session_id": str(uuid.uuid4()),
+                    "model": "error",
+                    "rag_type": "error"
+                }
             }
 
 

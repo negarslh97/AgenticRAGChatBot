@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Bot, User, Copy, Check, RotateCcw, AlertCircle, ExternalLink, Sparkles } from 'lucide-react'
+import React from 'react'
+import { User, Copy, Check, RotateCcw, AlertCircle, Sparkles } from 'lucide-react'
 import { Button } from '../ui/button'
 import { MarkdownRenderer } from '../ui/markdown-renderer'
 import { Message } from '../../types/chat'
@@ -18,7 +18,7 @@ interface MessageBubbleProps {
   isLoading?: boolean
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({
+const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   message,
   isTyping = false,
   onRegenerate,
@@ -29,8 +29,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   isLoading = false
 }) => {
   const { play } = useAudio(meowSound)
-  const [isExpanded, setIsExpanded] = useState(false)
-  const [showFullContent, setShowFullContent] = useState(false)
+
+  // متغیرهای state مربوط به نمایش بیشتر حذف شدند
 
   const handleAvatarClick = () => {
     if (!isUser) {
@@ -62,23 +62,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
   }
 
-
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('fa-IR', {
       hour: '2-digit',
       minute: '2-digit'
     }).format(date)
-  }
-
-  const getRagTypeIcon = (type?: string) => {
-    switch (type) {
-      case 'simple':
-        return 'BookOpen'
-      case 'agentic':
-        return 'Brain'
-      default:
-        return 'BookOpen'
-    }
   }
 
   const getRagTypeLabel = (type?: string) => {
@@ -95,12 +83,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isUser = message.role === 'user'
   const isFailed = message.is_failed
 
-  const displayContent = isTyping ? message.content : (showFullContent ? message.content : message.content.slice(0, 1000) + (message.content.length > 1000 ? '...' : ''))
+  // تغییر مهم: همیشه کل محتوا نمایش داده می‌شود و برشی (slice) وجود ندارد
+  const displayContent = message.content
 
   return (
-      <div className={`flex items-start space-x-2 space-x-reverse ${isUser ? 'justify-end' : 'justify-start'}`}>
-        {/* Avatar */}
-        <div className={`flex-shrink-0 ${isUser ? 'order-2' : 'order-1'}`}>
+    <div className={`flex items-start space-x-2 space-x-reverse ${isUser ? 'justify-end' : 'justify-start'}`}>
+      {/* Avatar */}
+      <div className={`flex-shrink-0 ${isUser ? 'order-2' : 'order-1'}`}>
         {isUser ? (
           <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 flex items-center justify-center text-white">
             <User className="w-4 h-4" />
@@ -144,24 +133,21 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
 
           {/* Message Body */}
-          <div className="text-sm">
-            {isTyping ? (
+          <div className="text-sm leading-relaxed">
+            {/* Show thinking animation when isThinking flag is set or when typing with no content */}
+            {(message.isThinking || (isTyping && !displayContent)) ? (
+              <div className="flex items-center gap-2 text-gray-500 py-2">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+                <span className="text-sm">در حال فکر کردن...</span>
+              </div>
+            ) : isTyping && displayContent ? (
               <div className="flex items-center gap-2">
-                {!displayContent ? (
-                  <div className="flex items-center gap-2 text-gray-500">
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                    </div>
-                    <span className="text-xs">در حال فکر کردن...</span>
-                  </div>
-                ) : (
-                  <>
-                    <span>{displayContent}</span>
-                    <div className="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></div>
-                  </>
-                )}
+                <MarkdownRenderer content={displayContent} variant={isUser ? 'chat' : 'default'} />
+                <div className="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></div>
               </div>
             ) : (
               <MarkdownRenderer content={displayContent} variant={isUser ? 'chat' : 'default'} />
@@ -265,20 +251,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         </div>
 
-        {/* Long content indicator */}
-        {!isTyping && message.content.length > 1000 && (
-          <button
-            onClick={() => setShowFullContent(!showFullContent)}
-            className={`text-xs mt-1 ${isUser ? 'text-purple-200 hover:text-purple-100' : 'text-gray-500 hover:text-gray-700'
-              } transition-colors`}
-          >
-            {showFullContent ? 'نمایش کمتر' : 'نمایش بیشتر'}
-          </button>
-        )}
+        {/* دکمه نمایش بیشتر از اینجا حذف شد */}
+        
       </div>
-
     </div>
   )
-}
+})
+
+MessageBubble.displayName = 'MessageBubble'
 
 export default MessageBubble
