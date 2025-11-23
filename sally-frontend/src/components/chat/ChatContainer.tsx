@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useMemo, memo } from 'react'
+import React, { useEffect, useCallback, useMemo, memo, useRef } from 'react'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { VoiceInput } from '../ui/voice-input'
@@ -7,7 +7,6 @@ import MessageBubble from './MessageBubble'
 import { WelcomeMessage } from './WelcomeMessage'
 import { Conversation as BaseConversation } from '../../types/chat'
 
-// Extended conversation type that includes API properties
 interface ExtendedConversation extends BaseConversation {
   rag_type?: 'simple' | 'agentic'
   model_name?: string
@@ -83,18 +82,50 @@ const ChatContainer = memo<ChatContainerProps>(({
   handleSourceClick,
   FEATURE_FLAGS
 }) => {
-  const scrollToBottom = useCallback(() => {
-    if (messagesEndRef.current && messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({
-        top: messagesContainerRef.current.scrollHeight,
-        behavior: 'smooth'
-      })
-    }
-  }, [messagesEndRef, messagesContainerRef])
 
+  // --- تغییر جدید: Smart Auto-Scroll Logic ---
+  // این رفرنس نگه می‌دارد که آیا کاربر قبل از آپدیت پیام در پایین صفحه بوده یا خیر
+  const isAtBottomRef = useRef(true);
+
+  // تابع چک کردن موقعیت اسکرول
+  const checkScrollPosition = useCallback(() => {
+    if (messagesContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+      // اگر فاصله از پایین کمتر از 50 پیکسل باشد، یعنی کاربر پایین است
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      isAtBottomRef.current = isAtBottom;
+      
+      // فراخوانی هندلر اسکرول اصلی برای دکمه GoToBottom
+      handleScroll();
+    }
+  }, [messagesContainerRef, handleScroll]);
+
+  const scrollToBottom = useCallback((force = false) => {
+    // فقط اگر فورس باشد (مثلاً ارسال پیام جدید توسط کاربر) 
+    // یا اگر کاربر قبلاً پایین صفحه بوده است، اسکرول کن.
+    if (messagesEndRef.current && messagesContainerRef.current) {
+      if (force || isAtBottomRef.current) {
+        messagesContainerRef.current.scrollTo({
+          top: messagesContainerRef.current.scrollHeight,
+          behavior: 'smooth'
+        })
+      }
+    }
+  }, [messagesEndRef, messagesContainerRef]);
+
+  // وقتی پیامی ارسال می‌شود، فورس اسکرول کن
   useEffect(() => {
-    scrollToBottom()
-  }, [selectedConversation?.messages, scrollToBottom])
+    if(isLoading) {
+        // وقتی لودینگ شروع می‌شود یعنی پیام کاربر ارسال شده، پس برو پایین
+        scrollToBottom(true); 
+    }
+  }, [isLoading, scrollToBottom]);
+
+  // وقتی محتوا آپدیت می‌شود (استریم)، اسمارت اسکرول کن
+  useEffect(() => {
+    scrollToBottom(false);
+  }, [selectedConversation?.messages, scrollToBottom]);
+
 
   useEffect(() => {
     const handleResize = () => {
@@ -118,21 +149,17 @@ const ChatContainer = memo<ChatContainerProps>(({
   }, [newMessage, textareaRef])
 
 
-  // بهینه‌سازی لیست پیام‌ها با useMemo و حفظ فاصله بین کلمات
   const optimizedMessages = useMemo(() => {
     if (!selectedConversation?.messages) return null
 
     const messagesLength = selectedConversation.messages.length;
 
     return selectedConversation.messages.map((message: any, index: number) => {
-      // ✅ اصلاح: فقط اگر لودینگ است، پیام از سمت ربات است، و "آخرین پیام" لیست است
-      // (اگر قابلیت Regenerate برای پیام‌های وسط لیست دارید، باید ID پیام در حال ساخت را چک کنید، اما برای حالت عادی این کافیست)
       const isLastMessage = index === messagesLength - 1;
       const isTyping = isLoading && message.role === 'assistant' && isLastMessage;
 
       const displayContent = isTyping && !message.content ? '' : (message.content || '')
 
-      // اطمینان از حفظ فاصله بین کلمات فارسی و انگلیسی (Presentation Layer Logic - OK)
       const processedContent = displayContent
         .replace(/([a-zA-Z0-9])([آ-ی])/g, '$1 $2')
         .replace(/([آ-ی])([a-zA-Z0-9])/g, '$1 $2');
@@ -144,7 +171,7 @@ const ChatContainer = memo<ChatContainerProps>(({
         displayContent: processedContent
       }
     })
-  }, [selectedConversation?.messages, isLoading]) // isThinking دیگر اینجا لازم نیست چون از isLoading استفاده کردیم
+  }, [selectedConversation?.messages, isLoading])
 
   const renderedMessages = useMemo(() => {
     if (!optimizedMessages) return null
@@ -164,7 +191,6 @@ const ChatContainer = memo<ChatContainerProps>(({
   }, [optimizedMessages, copyMessage, regenerateMessage, handleSourceClick, copiedMessageId, isLoading])
 
   const renderThinkingMessage = () => {
-    // Create a temporary message for thinking state
     const thinkingMessage = {
       id: 'thinking-temp',
       content: '',
@@ -188,8 +214,13 @@ const ChatContainer = memo<ChatContainerProps>(({
     )
   }
 
+  // --- تغییر جدید: Global Typography (Vazir + 1rem) ---
+  // اضافه کردن استایل مستقیم یا کلاس به دیو اصلی
   return (
-    <div className="flex-1 flex flex-col bg-gray-50">
+    <div 
+        className="flex-1 flex flex-col bg-gray-50"
+        style={{ fontFamily: '"Vazir", sans-serif', fontSize: '1rem' }}
+    >
       {/* Chat Header */}
       <div className="bg-gradient-to-r from-white to-purple-50/20 border-b border-purple-100 p-4 backdrop-blur-sm">
         <div className="flex items-center justify-between">
@@ -230,8 +261,8 @@ const ChatContainer = memo<ChatContainerProps>(({
       {/* Messages Area */}
       <div
         ref={messagesContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        onScroll={checkScrollPosition} 
+        className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
       >
         {selectedConversation ? (
           <>
@@ -244,7 +275,6 @@ const ChatContainer = memo<ChatContainerProps>(({
               </div>
             )}
             
-            {/* Thinking Indicator - Show inside message bubble */}
             {isThinking && !selectedConversation.messages?.some((m: any) => m.role === 'assistant' && !m.content) && renderThinkingMessage()}
             
             <div ref={messagesEndRef} />
@@ -253,7 +283,6 @@ const ChatContainer = memo<ChatContainerProps>(({
           <WelcomeMessage
             onExampleClick={(message) => {
               setNewMessage(message)
-              // Focus on input after setting message
               setTimeout(() => {
                 if (textareaRef.current) {
                   textareaRef.current.focus()
@@ -315,7 +344,7 @@ const ChatContainer = memo<ChatContainerProps>(({
               }}
               onKeyPress={handleKeyPress}
               placeholder={selectedConversation ? "پیام خود را بنویسید..." : "برای شروع گفتگو، پیام خود را بنویسید..."}
-              className="resize-none min-h-[40px] max-h-[200px] overflow-y-hidden text-sm md:text-base leading-relaxed"
+              className="resize-none min-h-[40px] max-h-[200px] overflow-y-hidden text-sm md:text-base leading-relaxed text-gray-900"
               rows={1}
               disabled={isLoading}
               aria-label="ورودی پیام"
@@ -347,7 +376,6 @@ const ChatContainer = memo<ChatContainerProps>(({
   )
 })
 
-// تنظیم displayName برای دیباگ کردن بهتر
 ChatContainer.displayName = 'ChatContainer'
 
 export default ChatContainer
