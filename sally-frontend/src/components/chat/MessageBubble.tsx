@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { User, Copy, Check, RotateCcw, Sparkles, ChevronDown, ChevronUp, Brain } from 'lucide-react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { User, Copy, Check, RotateCcw, Sparkles, ChevronDown, ChevronUp, Brain, CheckCircle } from 'lucide-react'
 import { Button } from '../ui/button'
 import { MarkdownRenderer } from '../ui/markdown-renderer'
 import { Message } from '../../types/chat'
@@ -30,25 +30,53 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 }) => {
   const { play } = useAudio(meowSound)
 
+  // Refs for tracking processed messages to reduce console logging
+  const processedMessagesRef = useRef<Set<string>>(new Set())
+  const thinkingStateLoggedRef = useRef<Set<string>>(new Set())
+
   // --- 1. پردازش متن و جدا کردن تفکر ---
   const { thinkContent, mainContent } = useMemo(() => {
     const content = message.content || '';
-    
-    // الگوی استاندارد برای پیدا کردن تگ think
-    const thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+
+    // دیباگ: چک کردن محتوای پیام (فقط یک بار برای هر پیام)
+    if (!processedMessagesRef.current.has(message.id)) {
+      console.log('🧠 MessageBubble - Processing content for message:', message.id);
+      console.log('🧠 Raw content preview:', JSON.stringify(content.substring(0, 200)) + (content.length > 200 ? '...' : ''));
+      console.log('🧠 Content includes <think>:', content.includes('<think>'));
+      console.log('🧠 Content includes ```thinking:', content.includes('```thinking'));
+
+      processedMessagesRef.current.add(message.id);
+    }
+
+    // الگوی استاندارد برای پیدا کردن تگ think یا کد بلاک thinking
+    let thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+
+    // اگر تگ think پیدا نشد، کد بلاک thinking رو چک کن
+    if (!thinkMatch) {
+      thinkMatch = content.match(/```thinking\s*([\s\S]*?)```/i);
+    }
 
     if (thinkMatch) {
       const rawThink = thinkMatch[1].trim();
       const cleanedThink = rawThink
-          .replace(/```[a-z]*\n?/gi, '') 
+          .replace(/```[a-z]*\n?/gi, '')
           .replace(/```/g, '')
           .trim();
 
-      const main = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
+      // حذف بخش تفکر از محتوای اصلی (چه تگ think باشد چه کد بلاک)
+      const main = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').replace(/```thinking[\s\S]*?```/i, '').trim();
+
+      if (!processedMessagesRef.current.has(message.id + '_extracted')) {
+        console.log('🧠 Think content extracted:', JSON.stringify(cleanedThink.substring(0, 100)) + (cleanedThink.length > 100 ? '...' : ''));
+        console.log('🧠 Main content after removal:', JSON.stringify(main.substring(0, 100)) + (main.length > 100 ? '...' : ''));
+        processedMessagesRef.current.add(message.id + '_extracted');
+      }
+
       return { thinkContent: cleanedThink, mainContent: main };
     }
+
     return { thinkContent: null, mainContent: content };
-  }, [message.content]);
+  }, [message.content, message.id]);
 
   // --- 2. مدیریت وضعیت ---
   const [isThinkingOpen, setIsThinkingOpen] = useState(false);
@@ -56,22 +84,42 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   // ریست وضعیت با تغییر پیام
   useEffect(() => {
+    console.log('🧠 Reset thinking state for new message:', {
+      messageId: message.id,
+      prevMessageId: message.id
+    });
     setIsThinkingOpen(false);
     setUserHasToggled(false);
   }, [message.id]);
 
-  // منطق هوشمند باز/بسته شدن
+  // منطق هوشمند باز/بسته شدن - وقتی مدل تفکر تمام کرد، thinking بسته شود
   useEffect(() => {
     if (thinkContent && !userHasToggled) {
+      // اگر هنوز در حال تایپ هستیم و محتوای اصلی وجود ندارد: تفکر را باز نشان بده
       if (isTyping && !mainContent) {
+        if (!thinkingStateLoggedRef.current.has(message.id + '_opening')) {
+          console.log('🧠 Opening thinking (typing, no main content) for message:', message.id);
+          thinkingStateLoggedRef.current.add(message.id + '_opening');
+        }
         setIsThinkingOpen(true);
-      } else if (mainContent) {
+      }
+      // اگر محتوای اصلی وجود دارد (یعنی مدل تفکر را تمام کرده): تفکر را ببند
+      else if (mainContent) {
+        if (!thinkingStateLoggedRef.current.has(message.id + '_closing')) {
+          console.log('🧠 Closing thinking (main content exists) for message:', message.id);
+          thinkingStateLoggedRef.current.add(message.id + '_closing');
+        }
+        setIsThinkingOpen(false);
+      }
+      // اگر تایپ تمام شده اما محتوای اصلی وجود ندارد: تفکر را بسته نگه دار
+      else if (!isTyping && !mainContent) {
         setIsThinkingOpen(false);
       }
     }
-  }, [isTyping, mainContent, thinkContent, userHasToggled]);
+  }, [isTyping, mainContent, thinkContent, userHasToggled, message.id]);
 
   const toggleThinking = () => {
+    console.log('🧠 User toggled thinking for message:', message.id, '->', !isThinkingOpen);
     setIsThinkingOpen(!isThinkingOpen);
     setUserHasToggled(true);
   };
@@ -143,49 +191,40 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
             {/* 2. بخش تفکر (آبی آسمانی) */}
             {thinkContent && (
-              <div className="mt-1 mb-4 rounded-lg border border-sky-200 bg-sky-50 overflow-hidden w-full min-w-0">
-                <button
+              <div className="mt-2 mb-4 border border-sky-200 rounded-lg bg-sky-50 overflow-hidden transition-all duration-300">
+                {/* هدر باز/بستن */}
+                <div
                   onClick={toggleThinking}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-sky-100 hover:bg-sky-200 transition-colors cursor-pointer select-none border-b border-sky-200/50 min-w-0"
-                  title={isThinkingOpen ? "بستن جزئیات تفکر" : "مشاهده جزئیات تفکر"}
+                  className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer bg-sky-100 hover:bg-sky-200 transition-colors select-none"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Brain className="w-4 h-4 text-sky-700 flex-shrink-0" />
-                    <span className="text-xs font-bold text-sky-800 whitespace-nowrap">فرآیند تفکر</span>
+                  <div className="flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-sky-700" />
+                    <span className="text-xs font-semibold text-sky-800">فرآیند تفکر</span>
                     {isTyping && !mainContent && (
-                      <span className="flex h-2 w-2 relative mr-1 flex-shrink-0">
+                      <span className="flex h-2 w-2 relative mr-1">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
                       </span>
                     )}
+                    {!isTyping && mainContent && <CheckCircle className="w-4 h-4 text-green-500" />}
                   </div>
                   {isThinkingOpen ? (
-                    <ChevronUp className="w-4 h-4 text-sky-600 flex-shrink-0" />
+                    <ChevronUp className="w-4 h-4 text-sky-700" />
                   ) : (
-                    <ChevronDown className="w-4 h-4 text-sky-600 flex-shrink-0" />
+                    <ChevronDown className="w-4 h-4 text-sky-700" />
                   )}
-                </button>
+                </div>
 
+                {/* محتوای جمع‌شونده */}
                 <div
-                  className={`transition-all duration-500 ease-in-out overflow-hidden bg-sky-50 ${
-                    isThinkingOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'
-                  }`}
+                  className={`transition-all duration-500 ease-in-out ${
+                    isThinkingOpen ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
+                  } overflow-hidden`}
                 >
-                  <div className="p-3 text-xs text-sky-900 leading-7 font-sans border-t border-sky-100 w-full overflow-hidden min-w-0">
-                    <div className="whitespace-normal break-words thinking-content" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                      {thinkContent}
-                    </div>
+                  <div className="p-3 text-xs text-sky-900 leading-6 border-t border-sky-200">
+                    <div className="whitespace-pre-wrap break-words">{thinkContent}</div>
                   </div>
                 </div>
-                
-                {!isThinkingOpen && (
-                  <div
-                    onClick={toggleThinking}
-                    className="px-3 py-1.5 text-[10px] text-sky-500 truncate cursor-pointer hover:text-sky-700 hover:bg-sky-100 transition-colors select-none w-full min-w-0"
-                  >
-                    {thinkContent.slice(0, 60)}...
-                  </div>
-                )}
               </div>
             )}
 

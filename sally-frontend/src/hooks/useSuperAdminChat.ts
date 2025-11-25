@@ -374,7 +374,12 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
         case 'chunk':
           if (!state.selectedConversation) return { ...state, isThinking: true }
 
-          console.log('🎯 Chunk event - content:', event.content, 'existing:', state.selectedConversation.messages.find(m => m.id === streamInfo.tempMessageId)?.content)
+          // Log only first chunk to reduce spam
+          if (!streamInfo.tempMessageId.includes('_logged')) {
+            console.log('🎯 First chunk for message:', streamInfo.tempMessageId, 'includes <think>:', event.content?.includes('<think>'))
+            // Mark as logged by modifying the ID temporarily
+            streamInfo.tempMessageId = streamInfo.tempMessageId + '_logged'
+          }
 
           const chunkMessage = state.selectedConversation.messages.find(m => m.id === streamInfo.tempMessageId)
           const existingContent = chunkMessage?.content || ''
@@ -386,11 +391,15 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
             isThinking: true,
             selectedConversation: {
               ...state.selectedConversation,
-              messages: state.selectedConversation.messages.map(msg =>
-                msg.id === streamInfo.tempMessageId
-                  ? { ...msg, content: (msg.content || '') + chunkContent }
+              messages: state.selectedConversation.messages.map(msg => {
+                const newContent = (msg.content || '') + chunkContent
+                if (msg.id === streamInfo.tempMessageId) {
+                  console.log('🎯 New accumulated content:', JSON.stringify(newContent))
+                }
+                return msg.id === streamInfo.tempMessageId
+                  ? { ...msg, content: newContent }
                   : msg
-              )
+              })
             }
           }
 
@@ -401,8 +410,7 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
           const existingMessage = state.selectedConversation.messages.find(m => m.id === streamInfo.tempMessageId)
           const finalContent = existingMessage?.content || event.content || ''
 
-          console.log('🎯 Complete event - final content:', finalContent, 'existing content:', existingMessage?.content, 'event response:', event.content)
-          console.log('🎯 Selected conversation messages:', state.selectedConversation.messages)
+          console.log('🎯 Complete event for message:', streamInfo.tempMessageId, 'includes <think>:', finalContent.includes('<think>'), 'length:', finalContent.length)
 
           const updatedState = {
             ...state,
@@ -1082,7 +1090,6 @@ export const useSuperAdminChat = ({
   const setTemperature = (temp: number) => dispatch({ type: 'SET_TEMPERATURE', payload: temp })
   const setRagType = (type: AdminRAGType) => dispatch({ type: 'SET_RAG_TYPE', payload: type })
 
-  console.log('🎯 Hook return - selectedConversation:', state.selectedConversation)
 
   return {
     // State

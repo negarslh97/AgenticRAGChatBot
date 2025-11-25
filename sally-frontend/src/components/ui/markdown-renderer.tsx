@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils'
 interface MarkdownRendererProps {
   content: string
   className?: string
-  variant?: 'default' | 'compact' | 'chat'
+  variant?: 'default' | 'compact' | 'chat' | 'thinking'
 }
 
 /**
@@ -24,7 +24,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   const variantStyles = {
     default: "prose-lg prose-headings:text-gray-900 prose-p:text-gray-700 prose-a:text-blue-600 prose-strong:font-bold prose-strong:text-gray-900 prose-em:italic prose-code:text-sm prose-code:bg-gray-100 prose-code:text-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-gray-100 prose-pre:text-gray-800 prose-ul:list-disc prose-ol:list-decimal prose-li:text-gray-700 prose-blockquote:border-r-4 prose-blockquote:border-blue-500 prose-blockquote:pr-4 prose-blockquote:italic prose-blockquote:text-gray-600 prose-table:border-collapse prose-th:border prose-th:border-gray-300 prose-th:bg-gray-100 prose-th:p-2 prose-td:border prose-td:border-gray-300 prose-td:p-2 prose-td:text-gray-700",
     compact: "prose-sm prose-headings:text-gray-900 prose-p:text-gray-800 prose-a:text-blue-600 prose-strong:text-gray-900 prose-code:text-xs prose-code:bg-gray-100 prose-code:text-gray-800 prose-code:px-1 prose-code:rounded prose-li:text-gray-800 prose-blockquote:text-gray-700",
-    chat: "prose-sm prose-headings:text-inherit prose-p:text-inherit prose-a:text-blue-300 prose-a:underline prose-strong:font-bold prose-strong:text-inherit prose-em:italic prose-code:bg-white/10 prose-code:text-inherit prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-white/10 prose-pre:text-inherit prose-ul:list-disc prose-ol:list-decimal prose-li:text-inherit"
+    chat: "prose-sm prose-headings:text-inherit prose-p:text-inherit prose-a:text-blue-300 prose-a:underline prose-strong:font-bold prose-strong:text-inherit prose-em:italic prose-code:bg-white/10 prose-code:text-inherit prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-white/10 prose-pre:text-inherit prose-ul:list-disc prose-ol:list-decimal prose-li:text-inherit",
+    thinking: "prose-sm prose-headings:text-sky-900 prose-p:text-sky-800 prose-a:text-sky-600 prose-strong:font-bold prose-strong:text-sky-900 prose-em:italic prose-code:bg-sky-100 prose-code:text-sky-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-sky-100 prose-pre:text-sky-800 prose-ul:list-disc prose-ol:list-decimal prose-li:text-sky-800 prose-blockquote:border-r-4 prose-blockquote:border-sky-500 prose-blockquote:pr-4 prose-blockquote:italic prose-blockquote:text-sky-600"
   }
 
   return (
@@ -67,11 +68,11 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           ),
           code: ({ inline, children, ...props }: any) => {
             return inline ? (
-              <code className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+              <code className="px-1.5 py-0.5 rounded text-sm font-mono" style={{ backgroundColor: '#dbeafe !important', color: '#1e40af !important' }} {...props}>
                 {children}
               </code>
             ) : (
-              <code className="block bg-gray-100 text-gray-800 p-4 rounded text-sm font-mono overflow-x-auto" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }} {...props}>
+              <code className="block p-4 rounded text-sm font-mono overflow-x-auto" style={{ backgroundColor: '#eff6ff !important', color: '#1e40af !important', wordBreak: 'break-word', overflowWrap: 'anywhere' }} {...props}>
                 {children}
               </code>
             )

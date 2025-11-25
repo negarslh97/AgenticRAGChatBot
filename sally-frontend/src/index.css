@@ -146,4 +146,121 @@
     word-break: break-word !important;
     max-width: 100% !important;
   }
+
+  /* Change thinking section background to light blue - more specific selectors */
+  div[class*="sky-50"],
+  .bg-sky-50,
+  [class*="bg-sky-50"] {
+    background-color: #dbeafe !important;
+  }
+
+  div[class*="sky-100"],
+  .bg-sky-100,
+  [class*="bg-sky-100"] {
+    background-color: #bfdbfe !important;
+  }
+
+  div[class*="border-sky-200"],
+  .border-sky-200,
+  [class*="border-sky-200"] {
+    border-color: #93c5fd !important;
+  }
+
+  div[class*="border-sky-200\/50"],
+  .border-sky-200\/50,
+  [class*="border-sky-200\/50"] {
+    border-color: rgba(147, 197, 253, 0.5) !important;
+  }
+
+  /* Target any element with sky classes inside thinking section */
+  .thinking-content *,
+  .thinking-content [class*="sky-"] {
+    background-color: #dbeafe !important;
+  }
+
+  /* Light blue color for code tags in thinking section - higher specificity */
+  div.thinking-content code,
+  .thinking-content > code,
+  .thinking-content p code,
+  .thinking-content div code {
+    background-color: #dbeafe !important;
+    color: #1e40af !important;
+    padding: 2px 6px !important;
+    border-radius: 4px !important;
+    font-size: 0.85em !important;
+    border: 1px solid #93c5fd !important;
+  }
+
+  .thinking-content pre {
+    background-color: #eff6ff !important;
+    border: 1px solid #93c5fd !important;
+    border-radius: 6px !important;
+    padding: 12px !important;
+  }
+
+  .thinking-content pre code {
+    background-color: transparent !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+
+  /* Override any prose styles that might be affecting the thinking section */
+  .prose .thinking-content code {
+    background-color: #dbeafe !important;
+    color: #1e40af !important;
+  }
+
+  /* Even more specific selectors to override everything */
+  .bg-sky-50 .thinking-content code,
+  .border-sky-200 .thinking-content code,
+  [class*="sky-"] .thinking-content code {
+    background-color: #dbeafe !important;
+    color: #1e40af !important;
+    border-color: #93c5fd !important;
+  }
+
+  /* Force light blue for all code elements in thinking section */
+  .thinking-content * code {
+    background-color: #dbeafe !important;
+    color: #1e40af !important;
+  }
+
+  /* ULTIMATE OVERRIDE - Force any element with inline style to be light blue */
+  [style*="backgroundColor"] {
+    background-color: #dbeafe !important;
+  }
+
+  /* Force any div that might be thinking section */
+  div[style*="backgroundColor"] {
+    background-color: #dbeafe !important;
+  }
+
+  /* Force any element inside thinking section */
+  .thinking-content,
+  .thinking-content *,
+  .thinking-content * *,
+  .thinking-content * * * {
+    background-color: #dbeafe !important;
+  }
+
+  /* Target the specific thinking section structure */
+  div > div > div > div.mt-1.mb-4.rounded-lg.border.overflow-hidden.w-full.min-w-0 {
+    background-color: #dbeafe !important;
+  }
+
+  div > div > div > div.mt-1.mb-4.rounded-lg.border.overflow-hidden.w-full.min-w-0 > div.transition-all.duration-500.ease-in-out.overflow-hidden {
+    background-color: #dbeafe !important;
+  }
+
+  /* Target ANY div that contains thinking content */
+  div[class*="thinking"],
+  div[id*="thinking"],
+  div:has(.thinking-content) {
+    background-color: #dbeafe !important;
+  }
+
+  /* Target: exact structure from MessageBubble */
+  div[class*="flex"] > div[class*="flex"] > div[class*="rounded"] > div[class*="overflow"] > div[class*="mt-1"] {
+    background-color: #dbeafe !important;
+  }
 }
