@@ -18,7 +18,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   variant = 'default'
 }) => {
   // استایل‌های پایه برای prose
-  const baseStyles = "prose max-w-none text-right"
+  const baseStyles = "prose max-w-full text-right"
 
   // استایل‌های مختلف بر اساس variant
   const variantStyles = {
@@ -71,7 +71,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 {children}
               </code>
             ) : (
-              <code className="block bg-gray-100 text-gray-800 p-4 rounded text-sm font-mono overflow-x-auto" {...props}>
+              <code className="block bg-gray-100 text-gray-800 p-4 rounded text-sm font-mono overflow-x-auto" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }} {...props}>
                 {children}
               </code>
             )
@@ -87,7 +87,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
             </a>
           ),
           table: ({ children }) => (
-            <div className="overflow-x-auto my-4">
+            <div className="overflow-x-auto my-4 max-w-full">
               <table className="min-w-full border-collapse border border-gray-300">
                 {children}
               </table>

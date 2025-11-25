@@ -218,28 +218,28 @@ const ChatContainer = memo<ChatContainerProps>(({
   // اضافه کردن استایل مستقیم یا کلاس به دیو اصلی
   return (
     <div 
-        className="flex-1 flex flex-col bg-gray-50"
+        className="flex-1 flex flex-col bg-gray-50 overflow-x-hidden"
         style={{ fontFamily: '"Vazir", sans-serif', fontSize: '1rem' }}
     >
       {/* Chat Header */}
       <div className="bg-gradient-to-r from-white to-purple-50/20 border-b border-purple-100 p-4 backdrop-blur-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200">
-              <span className="text-xs text-gray-500 font-medium">مدل:</span>
-              <span className="text-sm font-semibold text-purple-700">
+        <div className="flex items-center justify-between min-w-0">
+          <div className="flex items-center gap-2 md:gap-4 flex-wrap min-w-0">
+            <div className="flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200 min-w-0">
+              <span className="text-xs text-gray-500 font-medium whitespace-nowrap">مدل:</span>
+              <span className="text-xs md:text-sm font-semibold text-purple-700 truncate">
                 {selectedModel || 'پیش‌فرض'}
               </span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200">
-              <span className="text-xs text-gray-500 font-medium">حالت:</span>
-              <span className="text-sm font-semibold text-purple-700">
+            <div className="flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200 min-w-0">
+              <span className="text-xs text-gray-500 font-medium whitespace-nowrap">حالت:</span>
+              <span className="text-xs md:text-sm font-semibold text-purple-700 truncate">
                 {getRagTypeLabel(ragType)}
               </span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200">
-              <span className="text-xs text-gray-500 font-medium">دما:</span>
-              <span className="text-sm font-semibold text-purple-700">
+            <div className="flex items-center gap-1 md:gap-2 px-2 md:px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200 min-w-0">
+              <span className="text-xs text-gray-500 font-medium whitespace-nowrap">دما:</span>
+              <span className="text-xs md:text-sm font-semibold text-purple-700 truncate">
                 {temperature}
               </span>
             </div>
@@ -248,11 +248,11 @@ const ChatContainer = memo<ChatContainerProps>(({
           {FEATURE_FLAGS.SHOW_SETTINGS && (
             <button
               onClick={() => setShowSettingsModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105 group"
+              className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105 group flex-shrink-0"
               title="تنظیمات پیشرفته"
             >
               <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
-              <span className="text-sm font-medium hidden sm:inline">تنظیمات</span>
+              <span className="text-xs md:text-sm font-medium hidden sm:inline">تنظیمات</span>
             </button>
           )}
         </div>
@@ -312,7 +312,7 @@ const ChatContainer = memo<ChatContainerProps>(({
 
       {/* Input Area */}
       <div className="bg-white border-t border-gray-200 p-3 md:p-4">
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 min-w-0">
           <Button
             onClick={handleSendMessage}
             disabled={!newMessage.trim() || isLoading}
@@ -335,7 +335,7 @@ const ChatContainer = memo<ChatContainerProps>(({
             />
           )}
           
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <Textarea
               ref={textareaRef}
               value={newMessage}
@@ -344,7 +344,7 @@ const ChatContainer = memo<ChatContainerProps>(({
               }}
               onKeyPress={handleKeyPress}
               placeholder={selectedConversation ? "پیام خود را بنویسید..." : "برای شروع گفتگو، پیام خود را بنویسید..."}
-              className="resize-none min-h-[40px] max-h-[200px] overflow-y-hidden text-sm md:text-base leading-relaxed text-gray-900"
+              className="resize-none min-h-[40px] max-h-[200px] overflow-y-hidden text-sm md:text-base leading-relaxed text-gray-900 w-full"
               rows={1}
               disabled={isLoading}
               aria-label="ورودی پیام"
@@ -352,13 +352,13 @@ const ChatContainer = memo<ChatContainerProps>(({
           </div>
         </div>
         
-        <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-          <div className="flex items-center gap-2">
-            <span className="hidden md:inline">Enter برای ارسال، Shift+Enter برای خط جدید</span>
+        <div className="flex items-center justify-between mt-2 text-xs text-gray-500 min-w-0">
+          <div className="flex items-center gap-1 md:gap-2 min-w-0">
+            <span className="hidden md:inline whitespace-nowrap">Enter برای ارسال، Shift+Enter برای خط جدید</span>
             {FEATURE_FLAGS.SHOW_SETTINGS && (
               <button
                 onClick={() => setShowSettingsModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 text-purple-600 hover:text-purple-700 rounded-lg transition-all duration-200 border border-purple-200 hover:border-purple-300"
+                className="flex items-center gap-1 px-2 md:px-3 py-1.5 bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 text-purple-600 hover:text-purple-700 rounded-lg transition-all duration-200 border border-purple-200 hover:border-purple-300 flex-shrink-0"
                 aria-label="تنظیمات پیشرفته"
                 title="تنظیمات پیشرفته"
               >
@@ -367,8 +367,8 @@ const ChatContainer = memo<ChatContainerProps>(({
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            <span className="mr-1">حالت فعال: {getRagTypeLabel(ragType)}</span>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <span className="whitespace-nowrap">حالت فعال: {getRagTypeLabel(ragType)}</span>
           </div>
         </div>
       </div>

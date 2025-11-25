@@ -984,7 +984,7 @@ export const useSuperAdminChat = ({
       userHasScrolledUp.current = true
       setShowGoToBottomBtn(true)
     }
-  }, [])
+  }, [messagesContainerRef])
 
   const handleGoToBottom = () => {
     userHasScrolledUp.current = false
