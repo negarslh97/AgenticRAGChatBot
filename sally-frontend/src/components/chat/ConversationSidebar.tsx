@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Search, Plus, Trash2, ChevronLeft, ChevronRight, Menu, BookOpen, Brain, Zap, X } from 'lucide-react'
+import { Search, Plus, Trash2, ChevronLeft, ChevronRight, BookOpen, Brain, X } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
-import { Conversation as BaseConversation, Message } from '../../types/chat'
+import { Conversation as BaseConversation } from '../../types/chat'
 
 // Extended conversation type that includes API properties
 interface ExtendedConversation extends BaseConversation {

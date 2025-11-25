@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { X, Settings, Thermometer, Sparkles, Brain, BookOpen, FileText } from 'lucide-react'
+import { X, Settings, Thermometer, Sparkles, Brain, BookOpen } from 'lucide-react'
 import { Button } from '../ui/button'
 import ModelSelector from '../ModelSelector'
 

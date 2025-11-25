@@ -11,13 +11,8 @@
  * - Testing interface for RAG services
  */
 
-import React, { useState, useRef, useEffect, KeyboardEvent, useCallback } from 'react'
+import React, { useEffect } from 'react'
 import { useAudio } from '../hooks/useAudio'
-import { X } from 'lucide-react'
-import { Button } from '../components/ui/button'
-import { Textarea } from '../components/ui/textarea'
-import { MarkdownRenderer } from '../components/ui/markdown-renderer'
-import { VoiceInput } from '../components/ui/voice-input'
 import { chatService } from '../services/chatService'
 import { useAuth } from '../context/AuthContext'
 import { toast } from 'react-hot-toast'
@@ -26,7 +21,6 @@ import BlackCatImage from '../assets/Black-Cat.png'
 import meowSound from '../assets/meow.mp3'
 import { MODELS_CONFIG, getDefaultModel, getModelById } from '../config/models'
 import { useSuperAdminChat } from '../hooks/useSuperAdminChat'
-import MessageBubble from '../components/chat/MessageBubble'
 import ConversationSidebar from '../components/chat/ConversationSidebar'
 import ChatContainer from '../components/chat/ChatContainer'
 import SettingsModal from '../components/chat/SettingsModal'
@@ -70,7 +64,6 @@ const SuperAdminChatPage = () => {
     isLoading,
     isInitialLoading,
     searchQuery,
-    modelSearchQuery,
     ragType,
     selectedModel,
     availableModels,
@@ -109,7 +102,6 @@ const SuperAdminChatPage = () => {
     getRagTypeLabel,
     handleSourceClick,
     setSearchQuery,
-    setSelectedConversation,
     setDeleteConfirmId,
     setNewMessage,
     setShowSettingsModal,
@@ -172,7 +164,7 @@ const SuperAdminChatPage = () => {
     handleResize()
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [])
+  }, [setIsSidebarOpen])
 
   // Focus management for settings modal
   useEffect(() => {

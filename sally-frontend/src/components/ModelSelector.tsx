@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { chatService } from '../services/chatService'
 import { Bot, Zap, Cpu, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { MODELS_CONFIG, getGroupedModels, getModelById } from '../config/models'
+import { MODELS_CONFIG, getModelById } from '../config/models'
 
 interface Model {
   id: string

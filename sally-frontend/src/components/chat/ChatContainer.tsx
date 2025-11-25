@@ -7,9 +7,6 @@ import MessageBubble from './MessageBubble'
 import { WelcomeMessage } from './WelcomeMessage'
 import { Conversation as BaseConversation } from '../../types/chat'
 
-// Environment-based logging
-const isDevelopment = process.env.NODE_ENV === 'development'
-
 interface ExtendedConversation extends BaseConversation {
   rag_type?: 'simple' | 'agentic'
   model_name?: string

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { User, Copy, Check, RotateCcw, Sparkles, ChevronDown, ChevronUp, Brain, CheckCircle } from 'lucide-react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { User, Copy, Check, RotateCcw, ChevronDown, ChevronUp, Brain, CheckCircle } from 'lucide-react'
 import { Button } from '../ui/button'
 import { MarkdownRenderer } from '../ui/markdown-renderer'
 import { Message } from '../../types/chat'
@@ -81,7 +81,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
 
     return { thinkContent: null, mainContent: content.trim() }; // تغییر: trim() کامل برای حالتی که تفکر وجود ندارد
-  }, [message.content, message.id]);
+  }, [message.content, message.id, isDevelopment]);
 
   // --- 2. مدیریت وضعیت ---
   const [isThinkingOpen, setIsThinkingOpen] = useState(false);
@@ -137,7 +137,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const handleAvatarClick = () => { if (!isUser) play() }
   const handleCopy = () => { if (onCopy) onCopy(message.id, message.content) }
   const handleRegenerate = () => { if (onRegenerate) onRegenerate(message.id) }
-  const handleGetMoreDetails = () => { if (onGetMoreDetails) onGetMoreDetails(message.id) }
 
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit' }).format(date)

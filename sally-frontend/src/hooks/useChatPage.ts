@@ -342,7 +342,7 @@ export const useChatPage = ({ isDevelopment = false }: UseChatPageProps = {}): C
       setNewMessage(msg.content);
       setTimeout(() => handleSendMessage(), 100);
     },
-    [selectedConversation]
+    [selectedConversation] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // ----- Regenerate assistant response -----
@@ -362,7 +362,7 @@ export const useChatPage = ({ isDevelopment = false }: UseChatPageProps = {}): C
       setNewMessage(userMsg.content);
       setTimeout(() => handleSendMessage(), 100);
     },
-    [selectedConversation]
+    [selectedConversation] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // ----- Initialization effect -----
@@ -387,7 +387,7 @@ export const useChatPage = ({ isDevelopment = false }: UseChatPageProps = {}): C
       });
     };
     init();
-  }, []);
+  }, [initializeGuestSession, isDevelopment, loadConversations]);
 
   // ----- Scroll on new messages -----
   useEffect(() => {

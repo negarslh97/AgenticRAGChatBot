@@ -9,7 +9,6 @@ import ConversationSidebar from '../components/chat/ConversationSidebar'
 import SettingsModal from '../components/chat/SettingsModal'
 import { chatService } from '../services/chatService'
 import { getDefaultModel } from '../config/models'
-import { toast } from 'react-hot-toast'
 import blackCatImage from '../assets/Black-Cat.png'
 import meowSound from '../assets/meow.mp3'
 
@@ -51,25 +50,15 @@ const CustomerChatPage = () => {
     isLoading,
     isInitialLoading,
     searchQuery,
-    editingTitle,
-    newTitle,
-    guestSessionId,
     handleSendMessage,
     handleNewChat,
     handleSelectConversation,
-    handleTitleEdit,
-    handleTitleSave,
-    handleTitleCancel,
     handleDeleteConversation,
     handleKeyPress,
     setNewMessage,
     setSearchQuery,
-    setEditingTitle,
-    setNewTitle,
     loadConversations,
-    loadConversationMessages,
     formatTime,
-    scrollToBottom,
     copyMessage,
     retryMessage,
     regenerateMessage

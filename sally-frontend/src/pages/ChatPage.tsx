@@ -29,7 +29,6 @@ import { ChatSidebar } from '../components/chat/ChatSidebar'
 import { ChatInput } from '../components/chat/ChatInput'
 import { WelcomeMessage } from '../components/chat/WelcomeMessage'
 import { MarkdownRenderer } from '../components/ui/markdown-renderer'
-import { Bot, User } from 'lucide-react'
 import { useChatPage } from '../hooks/useChatPage'
 import { useAudio } from '../hooks/useAudio'
 import blackCatImage from '../assets/Black-Cat.png'
@@ -63,7 +62,6 @@ const ChatPage = () => {
     handleKeyPress,
     setNewMessage,
     setSearchQuery,
-    setEditingTitle,
     setNewTitle,
     formatTime
   } = useChatPage({ isDevelopment: process.env.NODE_ENV === 'development' })

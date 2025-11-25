@@ -381,8 +381,6 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
         case 'chunk':
           if (!state.selectedConversation) return { ...state, isThinking: true }
 
-          const chunkMessage = state.selectedConversation.messages.find(m => m.id === streamInfo.tempMessageId)
-          const existingContent = chunkMessage?.content || ''
           let chunkContent = event.content || ''
 
           // ✅ FIXED: LLM streaming tokens include proper spacing (e.g., " world" starts with space) - no strip() in backend
@@ -472,7 +470,7 @@ export const useSuperAdminChat = ({
   toast,
   chatService
 }: UseSuperAdminChatProps) => {
-  const { play } = useAudio(meowSound)
+  useAudio(meowSound)
 
   // Initialize state with persisted values
   const initialState: ChatState = {
@@ -508,11 +506,8 @@ export const useSuperAdminChat = ({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const initializationRef = useRef(false)
-  const settingsModalRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const conversationIdRef = useRef<string | undefined>(undefined)
   const refreshInProgressRef = useRef<Set<string>>(new Set())
-  const assistantTempIdRef = useRef<string>('')
 
   // Smart scroll state
   const userHasScrolledUp = useRef(false)
