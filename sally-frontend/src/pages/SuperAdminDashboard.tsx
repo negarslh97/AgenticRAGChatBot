@@ -83,8 +83,6 @@ const SuperAdminDashboard: React.FC = () => {
 
       // Get token from localStorage
       const token = localStorage.getItem('token')
-      console.log('Token from localStorage:', token ? 'Present' : 'Missing')
-      console.log('Current user:', user)
 
       if (!token) {
         throw new Error('No authentication token found. Please log in again.')
@@ -98,8 +96,6 @@ const SuperAdminDashboard: React.FC = () => {
         }
       })
 
-      console.log('API Response status:', response.status)
-
       if (!response.ok) {
         const errorText = await response.text()
         console.error('API Error response:', errorText)
@@ -107,7 +103,6 @@ const SuperAdminDashboard: React.FC = () => {
       }
 
       const data = await response.json()
-      console.log('API Response data:', data)
       setStats(data)
 
     } catch (error) {

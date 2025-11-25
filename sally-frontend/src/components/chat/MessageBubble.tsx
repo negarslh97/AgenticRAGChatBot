@@ -34,18 +34,18 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const processedMessagesRef = useRef<Set<string>>(new Set())
   const thinkingStateLoggedRef = useRef<Set<string>>(new Set())
 
+  // Environment-based logging
+  const isDevelopment = process.env.NODE_ENV === 'development'
+
   // --- 1. پردازش متن و جدا کردن تفکر ---
   const { thinkContent, mainContent } = useMemo(() => {
     const content = message.content || '';
 
     // دیباگ: چک کردن محتوای پیام (فقط یک بار برای هر پیام)
-    if (!processedMessagesRef.current.has(message.id)) {
-      console.log('🧠 MessageBubble - Processing content for message:', message.id);
-      console.log('🧠 Raw content preview:', JSON.stringify(content.substring(0, 200)) + (content.length > 200 ? '...' : ''));
-      console.log('🧠 Content includes <think>:', content.includes('<think>'));
-      console.log('🧠 Content includes ```thinking:', content.includes('```thinking'));
-
-      processedMessagesRef.current.add(message.id);
+    const contentKey = `content_${message.id}_${content.length}`;
+    if (isDevelopment && !processedMessagesRef.current.has(contentKey)) {
+      console.log('🧠 Processing message:', message.id, '| has <think>:', content.includes('<think>'), '| has ```thinking:', content.includes('```thinking'));
+      processedMessagesRef.current.add(contentKey);
     }
 
     // الگوی استاندارد برای پیدا کردن تگ think یا کد بلاک thinking
@@ -63,19 +63,22 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           .replace(/```/g, '')
           .trim();
 
-      // حذف بخش تفکر از محتوای اصلی (چه تگ think باشد چه کد بلاک)
-      const main = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').replace(/```thinking[\s\S]*?```/i, '').trim();
+      // حذف بخش تفکر از محتوای اصلی و حذف فاصله‌های خالی ابتدای متن
+      const main = content
+        .replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '')
+        .replace(/```thinking[\s\S]*?```/i, '')
+        .trimEnd(); // تغییر: استفاده از trimEnd() برای اطمینان از نچسبیدن اینتر اضافه به ته متن
 
-      if (!processedMessagesRef.current.has(message.id + '_extracted')) {
-        console.log('🧠 Think content extracted:', JSON.stringify(cleanedThink.substring(0, 100)) + (cleanedThink.length > 100 ? '...' : ''));
-        console.log('🧠 Main content after removal:', JSON.stringify(main.substring(0, 100)) + (main.length > 100 ? '...' : ''));
-        processedMessagesRef.current.add(message.id + '_extracted');
+      const extractedKey = `extracted_${message.id}_${cleanedThink.length}`;
+      if (isDevelopment && !processedMessagesRef.current.has(extractedKey)) {
+        console.log('🧠 Extracted thinking content for message:', message.id, '| length:', cleanedThink.length);
+        processedMessagesRef.current.add(extractedKey);
       }
 
       return { thinkContent: cleanedThink, mainContent: main };
     }
 
-    return { thinkContent: null, mainContent: content };
+    return { thinkContent: null, mainContent: content.trim() }; // تغییر: trim() کامل برای حالتی که تفکر وجود ندارد
   }, [message.content, message.id]);
 
   // --- 2. مدیریت وضعیت ---
@@ -84,30 +87,33 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   // ریست وضعیت با تغییر پیام
   useEffect(() => {
-    console.log('🧠 Reset thinking state for new message:', {
-      messageId: message.id,
-      prevMessageId: message.id
-    });
+    const resetKey = `reset_${message.id}`;
+    if (isDevelopment && !processedMessagesRef.current.has(resetKey)) {
+      console.log('🧠 Reset thinking state for new message:', message.id);
+      processedMessagesRef.current.add(resetKey);
+    }
     setIsThinkingOpen(false);
     setUserHasToggled(false);
-  }, [message.id]);
+  }, [message.id, isDevelopment]);
 
   // منطق هوشمند باز/بسته شدن - وقتی مدل تفکر تمام کرد، thinking بسته شود
   useEffect(() => {
     if (thinkContent && !userHasToggled) {
       // اگر هنوز در حال تایپ هستیم و محتوای اصلی وجود ندارد: تفکر را باز نشان بده
       if (isTyping && !mainContent) {
-        if (!thinkingStateLoggedRef.current.has(message.id + '_opening')) {
+        const openingKey = `opening_${message.id}`;
+        if (isDevelopment && !thinkingStateLoggedRef.current.has(openingKey)) {
           console.log('🧠 Opening thinking (typing, no main content) for message:', message.id);
-          thinkingStateLoggedRef.current.add(message.id + '_opening');
+          thinkingStateLoggedRef.current.add(openingKey);
         }
         setIsThinkingOpen(true);
       }
       // اگر محتوای اصلی وجود دارد (یعنی مدل تفکر را تمام کرده): تفکر را ببند
       else if (mainContent) {
-        if (!thinkingStateLoggedRef.current.has(message.id + '_closing')) {
+        const closingKey = `closing_${message.id}`;
+        if (isDevelopment && !thinkingStateLoggedRef.current.has(closingKey)) {
           console.log('🧠 Closing thinking (main content exists) for message:', message.id);
-          thinkingStateLoggedRef.current.add(message.id + '_closing');
+          thinkingStateLoggedRef.current.add(closingKey);
         }
         setIsThinkingOpen(false);
       }
@@ -116,10 +122,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         setIsThinkingOpen(false);
       }
     }
-  }, [isTyping, mainContent, thinkContent, userHasToggled, message.id]);
+  }, [isTyping, mainContent, thinkContent, userHasToggled, message.id, isDevelopment]);
 
   const toggleThinking = () => {
-    console.log('🧠 User toggled thinking for message:', message.id, '->', !isThinkingOpen);
+    if (isDevelopment) {
+      console.log('🧠 User toggled thinking for message:', message.id, '->', !isThinkingOpen);
+    }
     setIsThinkingOpen(!isThinkingOpen);
     setUserHasToggled(true);
   };
@@ -136,8 +144,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isUser = message.role === 'user'
   const isFailed = message.is_failed
 
-  // نمایش سه نقطه فقط وقتی هیچ دیتایی نیست
-  const showLoadingDots = isTyping && !thinkContent && !mainContent;
+  // تغییر: اضافه کردن .trim() برای اینکه فاصله‌های خالی باعث حذف زودهنگام سه نقطه نشوند
+  const showLoadingDots = isTyping && !thinkContent && (!mainContent || mainContent.trim().length === 0);
+  
 
   return (
     <div className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'} w-full p-1 mb-2`}>
@@ -181,13 +190,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           <div className="w-full px-4 pb-4">
             
             {/* 1. لودینگ */}
-            {showLoadingDots && (
+            {/* {showLoadingDots && (
                <div className="flex items-center gap-1 h-8 py-2 px-2">
                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
                </div>
-            )}
+            )} */}
 
             {/* 2. بخش تفکر (آبی آسمانی) */}
             {thinkContent && (
@@ -229,10 +238,47 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
             {/* 3. متن پاسخ اصلی */}
-            {mainContent && (
+            {/* {mainContent && (
               <div className={`prose prose-sm max-w-full break-words whitespace-normal leading-7 ${isUser ? 'prose-invert text-white [&_*]:text-white' : ''}`} style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                 <MarkdownRenderer content={mainContent} variant={isUser ? 'chat' : 'default'} />
                 {isTyping && <span className="inline-block w-1.5 h-4 bg-purple-600 animate-pulse align-middle mr-1" />}
+              </div>
+            )} */}
+
+            {/* 3. متن پاسخ اصلی */}
+            {/* تغییر: اگر تفکر داریم، پایینش رو نشون نده مگر اینکه متن واقعی اومده باشه */}
+            {((mainContent && mainContent.trim().length > 0) || (showLoadingDots && !thinkContent)) && (
+              <div
+                className={`prose prose-sm max-w-full break-words whitespace-normal leading-7 min-h-[1.75rem]
+                  ${isUser ? 'prose-invert text-white [&_*]:text-white' : 'text-gray-900'}
+                  
+                  [&_*:first-child]:mt-0 
+                  [&_p:first-of-type]:mt-0
+                  [&_p]:mb-0
+                  [&_p:empty]:hidden
+
+                  ${isTyping ? `
+                    [&>*:last-child]:after:content-['▋'] 
+                    [&>*:last-child]:after:ml-1 
+                    [&>*:last-child]:after:animate-pulse 
+                    [&>*:last-child]:after:text-purple-600 
+                    [&>*:last-child]:after:align-middle
+                    [&>*:last-child]:after:inline-block` : ''}
+                `}
+                dir="rtl"
+              >
+                {showLoadingDots ? (
+                  <div className="flex items-center gap-1 h-7">
+                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                  </div>
+                ) : (
+                  <MarkdownRenderer
+                    content={mainContent}
+                    variant={isUser ? 'chat' : 'default'}
+                  />
+                )}
               </div>
             )}
 

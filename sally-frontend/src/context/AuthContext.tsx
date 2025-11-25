@@ -125,16 +125,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const isAdmin = userType === "Admin" || userType === "SuperAdmin"
   const isSuperAdmin = userType === "SuperAdmin"
 
-  // Debug logging
-  console.log("AuthContext computed values:", {
-    user: user?.email,
-    userType,
-    isAuthenticated,
-    isAdmin,
-    isSuperAdmin,
-    hasUser: !!user,
-    userTypeType: typeof userType
-  })
 
   const getDashboardByRole = (role: string): string => {
     switch (role) {

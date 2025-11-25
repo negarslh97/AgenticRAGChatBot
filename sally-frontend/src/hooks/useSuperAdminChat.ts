@@ -195,6 +195,9 @@ interface UseSuperAdminChatProps {
   chatService: typeof chatService
 }
 
+// Environment-based logging
+const isDevelopment = process.env.NODE_ENV === 'development'
+
 // Reducer function
 const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
   switch (action.type) {
@@ -318,7 +321,9 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
       switch (event.type) {
         case 'init':
           if (event.conversation_id) {
-            console.log('🎯 Init event - conversation_id:', event.conversation_id, 'streamInfo:', streamInfo)
+            if (isDevelopment) {
+              console.log('🎯 Stream init - conversation:', event.conversation_id)
+            }
 
             if (streamInfo.conversationId) {
               // Update existing conversation ID
@@ -340,7 +345,9 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
               }
             } else {
               // This is a new conversation, update the selected conversation ID
-              console.log('🎯 New conversation init - updating selectedConversation ID to:', event.conversation_id)
+              if (isDevelopment) {
+                console.log('🎯 New conversation init - updating selectedConversation ID to:', event.conversation_id)
+              }
               const updatedConversations = state.conversations.map(conv =>
                 conv.id.startsWith('new-') ? { ...conv, id: event.conversation_id! } : conv
               )
@@ -374,13 +381,6 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
         case 'chunk':
           if (!state.selectedConversation) return { ...state, isThinking: true }
 
-          // Log only first chunk to reduce spam
-          if (!streamInfo.tempMessageId.includes('_logged')) {
-            console.log('🎯 First chunk for message:', streamInfo.tempMessageId, 'includes <think>:', event.content?.includes('<think>'))
-            // Mark as logged by modifying the ID temporarily
-            streamInfo.tempMessageId = streamInfo.tempMessageId + '_logged'
-          }
-
           const chunkMessage = state.selectedConversation.messages.find(m => m.id === streamInfo.tempMessageId)
           const existingContent = chunkMessage?.content || ''
           let chunkContent = event.content || ''
@@ -393,9 +393,6 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
               ...state.selectedConversation,
               messages: state.selectedConversation.messages.map(msg => {
                 const newContent = (msg.content || '') + chunkContent
-                if (msg.id === streamInfo.tempMessageId) {
-                  console.log('🎯 New accumulated content:', JSON.stringify(newContent))
-                }
                 return msg.id === streamInfo.tempMessageId
                   ? { ...msg, content: newContent }
                   : msg
@@ -410,7 +407,9 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
           const existingMessage = state.selectedConversation.messages.find(m => m.id === streamInfo.tempMessageId)
           const finalContent = existingMessage?.content || event.content || ''
 
-          console.log('🎯 Complete event for message:', streamInfo.tempMessageId, 'includes <think>:', finalContent.includes('<think>'), 'length:', finalContent.length)
+          if (isDevelopment) {
+            console.log('🎯 Stream complete - message:', streamInfo.tempMessageId, 'has thinking:', finalContent.includes('<think>') || finalContent.includes('```thinking'))
+          }
 
           const updatedState = {
             ...state,
@@ -437,8 +436,6 @@ const chatReducer = (state: ChatState, action: ChatAction): ChatState => {
             regeneratingMessageId: null
           }
 
-          console.log('🎯 Updated messages:', updatedState.selectedConversation.messages)
-          console.log('🎯 Final state:', updatedState)
           return updatedState
 
         case 'error':
@@ -669,8 +666,7 @@ export const useSuperAdminChat = ({
             can_get_more_details: event.metadata?.can_get_more_details,
             message: event.message
           }
-          console.log('🎯 Raw event:', JSON.stringify(event, null, 2))
-          console.log('🎯 Content found:', streamingEvent.content)
+          // Removed verbose streaming logs for cleaner console
 
           // Handle 'done' event as complete
           if (event.type === 'done') {

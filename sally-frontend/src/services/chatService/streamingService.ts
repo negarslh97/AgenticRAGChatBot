@@ -42,7 +42,6 @@ export class ChatStreamingService {
       ...(temperature !== undefined && { temperature }),
     }
 
-    console.log('🚀 Sending admin message stream:', { conversationId, ragType, model })
 
     return this._handleStreamRequest("/api/admin/message/stream", payload, controller, onEvent)
   }

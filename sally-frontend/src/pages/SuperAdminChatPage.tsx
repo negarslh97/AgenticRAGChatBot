@@ -126,7 +126,6 @@ const SuperAdminChatPage = () => {
     chatService
   })
 
-  console.log('🎯 SuperAdminChatPage - selectedConversation:', selectedConversation)
 
   // Wrapper function for ConversationSidebar
   const handleSetSelectedConversation = async (conv: any) => {

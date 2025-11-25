@@ -7,6 +7,9 @@ import MessageBubble from './MessageBubble'
 import { WelcomeMessage } from './WelcomeMessage'
 import { Conversation as BaseConversation } from '../../types/chat'
 
+// Environment-based logging
+const isDevelopment = process.env.NODE_ENV === 'development'
+
 interface ExtendedConversation extends BaseConversation {
   rag_type?: 'simple' | 'agentic'
   model_name?: string
@@ -190,29 +193,6 @@ const ChatContainer = memo<ChatContainerProps>(({
     ))
   }, [optimizedMessages, copyMessage, regenerateMessage, handleSourceClick, copiedMessageId, isLoading])
 
-  const renderThinkingMessage = () => {
-    const thinkingMessage = {
-      id: 'thinking-temp',
-      content: '',
-      role: 'assistant' as const,
-      timestamp: new Date(),
-      sender_type: 'AI' as const,
-      metadata: {}
-    }
-
-    return (
-      <MessageBubble
-        key="thinking-temp"
-        message={thinkingMessage}
-        isTyping={true}
-        onCopy={copyMessage}
-        onRegenerate={regenerateMessage}
-        onSourceClick={handleSourceClick}
-        copiedMessageId={copiedMessageId}
-        isLoading={isLoading}
-      />
-    )
-  }
 
   // --- تغییر جدید: Global Typography (Vazir + 1rem) ---
   // اضافه کردن استایل مستقیم یا کلاس به دیو اصلی
@@ -275,7 +255,7 @@ const ChatContainer = memo<ChatContainerProps>(({
               </div>
             )}
             
-            {isThinking && !selectedConversation.messages?.some((m: any) => m.role === 'assistant' && !m.content) && renderThinkingMessage()}
+            {/* حذف شد: پیام thinking اضافی که باعث نمایش دو حباب میشد */}
             
             <div ref={messagesEndRef} />
           </>
