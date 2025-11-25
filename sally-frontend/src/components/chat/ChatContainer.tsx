@@ -179,18 +179,23 @@ const ChatContainer = memo<ChatContainerProps>(({
   const renderedMessages = useMemo(() => {
     if (!optimizedMessages) return null
 
-    return optimizedMessages.map((message: any) => (
-      <MessageBubble
-        key={message.id}
-        message={message}
-        isTyping={message.isTyping}
-        onCopy={copyMessage}
-        onRegenerate={regenerateMessage}
-        onSourceClick={handleSourceClick}
-        copiedMessageId={copiedMessageId}
-        isLoading={isLoading}
-      />
-    ))
+    return optimizedMessages.map((message: any, index: number) => {
+      const isLastMessage = index === optimizedMessages.length - 1;
+
+      return (
+        <MessageBubble
+          key={message.id}
+          message={message}
+          isTyping={message.isTyping}
+          isLastMessage={isLastMessage}
+          onCopy={copyMessage}
+          onRegenerate={regenerateMessage}
+          onSourceClick={handleSourceClick}
+          copiedMessageId={copiedMessageId}
+          isLoading={isLoading}
+        />
+      )
+    })
   }, [optimizedMessages, copyMessage, regenerateMessage, handleSourceClick, copiedMessageId, isLoading])
 
 
@@ -241,7 +246,8 @@ const ChatContainer = memo<ChatContainerProps>(({
       {/* Messages Area */}
       <div
         ref={messagesContainerRef}
-        onScroll={checkScrollPosition} 
+        onScroll={checkScrollPosition}
+        data-messages-container
         className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
       >
         {selectedConversation ? (
@@ -278,12 +284,11 @@ const ChatContainer = memo<ChatContainerProps>(({
           onClick={handleGoToBottom}
           title="برو به آخرین پیام"
           aria-label="برو به آخرین پیام"
-          className={`fixed left-20 bg-white border border-gray-300 rounded-full w-10 h-10 flex items-center justify-center cursor-pointer shadow-lg hover:shadow-xl transition-all duration-200 z-10 pointer-events-auto ${
-            showGoToBottomBtn ? 'block' : 'hidden'
+          className={`fixed left-4 bottom-36 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 border-2 border-purple-100 rounded-full w-12 h-12 flex items-center justify-center cursor-pointer shadow-xl hover:shadow-2xl transition-all duration-200 z-[9999] ring-2 ring-purple-50 ${
+            showGoToBottomBtn ? 'opacity-100 visible' : 'opacity-0 invisible'
           }`}
-          style={{ bottom: 'calc(130px + 1rem)' }}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="20" height="20">
             <path d="M12 15.586l-4.293-4.293-1.414 1.414L12 18.414l5.707-5.707-1.414-1.414L12 15.586z"/>
             <path d="M12 8.586l-4.293-4.293-1.414 1.414L12 11.414l5.707-5.707-1.414-1.414L12 8.586z"/>
           </svg>

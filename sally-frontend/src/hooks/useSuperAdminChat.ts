@@ -1113,7 +1113,7 @@ export const useSuperAdminChat = ({
     textareaRef,
     highlightModal: state.highlightModal,
     closeHighlightModal,
-    showGoToBottomBtn: state.showGoToBottomBtn,
+    showGoToBottomBtn,
     userHasScrolledUp,
 
     // Actions

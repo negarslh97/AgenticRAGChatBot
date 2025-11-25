@@ -135,7 +135,7 @@ const CustomerChatPage = () => {
 
   // Default values for missing props
   const isThinking = false
-  const showGoToBottomBtn = false
+  const [showGoToBottomBtn, setShowGoToBottomBtn] = useState(false)
   const getRagTypeIcon = () => '🤖'
   const getRagTypeLabel = (type: string) => {
     switch (type) {
@@ -147,8 +147,35 @@ const CustomerChatPage = () => {
   }
   const copiedMessageId = null
   const handleSourceClick = () => {}
-  const handleScroll = () => {}
-  const handleGoToBottom = () => {}
+
+  const handleScroll = useCallback(() => {
+    // Logic to show/hide go to bottom button based on scroll position
+    const container = document.querySelector('[data-messages-container]');
+    const hasMessages = !!(selectedConversation?.messages && selectedConversation.messages.length > 0);
+
+    if (container) {
+      const { scrollTop, scrollHeight, clientHeight } = container as HTMLElement;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100; // 100px threshold
+      const hasScrollableContent = scrollHeight > clientHeight;
+
+      // Show button if there are messages, content is scrollable, and user is not near bottom
+      const shouldShow = hasMessages && hasScrollableContent && !isNearBottom;
+      setShowGoToBottomBtn(shouldShow);
+    } else {
+      // Fallback: show button if there are messages but container not found
+      setShowGoToBottomBtn(!!hasMessages);
+    }
+  }, [selectedConversation?.messages]);
+
+  const handleGoToBottom = useCallback(() => {
+    const container = document.querySelector('[data-messages-container]');
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, []);
 
   // Initialize on mount
   useEffect(() => {
@@ -156,6 +183,32 @@ const CustomerChatPage = () => {
       loadConversations()
     }
   }, [user?.id, loadConversations])
+
+  // Handle scroll events for go to bottom button
+  useEffect(() => {
+    const container = document.querySelector('[data-messages-container]');
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      // Initial check
+      handleScroll();
+    }
+
+    return () => {
+      if (container) {
+        container.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, [handleScroll]);
+
+  // Update button visibility when messages change
+  useEffect(() => {
+    // Check scroll position after messages change to determine if button should be visible
+    const timeoutId = setTimeout(() => {
+      handleScroll();
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedConversation?.messages, handleScroll]);
 
   // Wrapper for async conversation selection
   const handleConversationSelect = useCallback(async (conv: any) => {

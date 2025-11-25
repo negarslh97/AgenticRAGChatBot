@@ -10,6 +10,7 @@ import meowSound from '../../assets/meow.mp3'
 interface MessageBubbleProps {
   message: Message
   isTyping?: boolean
+  isLastMessage?: boolean
   onRegenerate?: (messageId: string) => void
   onCopy?: (messageId: string, content: string) => void
   onSourceClick?: (sourceId: string, messageId: string) => void
@@ -21,6 +22,7 @@ interface MessageBubbleProps {
 const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   isTyping = false,
+  isLastMessage = false,
   onRegenerate,
   onCopy,
   onSourceClick,
@@ -178,9 +180,19 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           
           {/* هدر */}
           <div className={`flex items-center justify-between gap-4 px-4 pt-3 pb-2 ${isUser ? 'border-b border-white/20' : ''}`}>
-            <span className={`text-xs font-bold ${isUser ? 'text-white' : 'text-gray-700'}`}>
-              {isUser ? 'شما' : 'دستیار هوشمند'}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-bold ${isUser ? 'text-white' : 'text-gray-700'}`}>
+                {isUser ? 'شما' : 'دستیار هوشمند'}
+              </span>
+              {isLastMessage && (
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                  <span className={`text-[10px] ${isUser ? 'text-blue-200' : 'text-blue-600'} font-medium`}>
+                    آخرین پیام
+                  </span>
+                </div>
+              )}
+            </div>
             <span className={`text-[10px] ${isUser ? 'text-white/80' : 'text-gray-400'}`}>
               {formatTime(message.timestamp)}
             </span>
