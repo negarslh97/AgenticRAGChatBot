@@ -1,0 +1,136 @@
+[1mdiff --git a/sally-frontend/src/components/chat/ChatContainer.tsx b/sally-frontend/src/components/chat/ChatContainer.tsx[m
+[1mindex aa34549..7117cf8 100644[m
+[1m--- a/sally-frontend/src/components/chat/ChatContainer.tsx[m
+[1m+++ b/sally-frontend/src/components/chat/ChatContainer.tsx[m
+[36m@@ -22,6 +22,7 @@[m [minterface ChatContainerProps {[m
+   isLoading: boolean[m
+   isThinking: boolean[m
+   ragType: 'simple' | 'agentic'[m
+[32m+[m[32m  setRagType: (type: 'simple' | 'agentic') => void[m[41m[m
+   selectedModel: string[m
+   temperature: number[m
+   availableModels: any[][m
+[36m@@ -58,6 +59,7 @@[m [mconst ChatContainer = memo<ChatContainerProps>(({[m
+   isLoading,[m
+   isThinking,[m
+   ragType,[m
+[32m+[m[32m  setRagType,[m[41m[m
+   selectedModel,[m
+   temperature,[m
+   availableModels,[m
+[36m@@ -200,12 +202,30 @@[m [mconst ChatContainer = memo<ChatContainerProps>(({[m
+                 {selectedModel || 'پیش‌فرض'}[m
+               </span>[m
+             </div>[m
+[31m-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200">[m
+[31m-              <span className="text-xs text-gray-500 font-medium">حالت:</span>[m
+[31m-              <span className="text-sm font-semibold text-purple-700">[m
+[32m+[m[32m            <button[m[41m[m
+[32m+[m[32m              onClick={() => setRagType(ragType === 'simple' ? 'agentic' : 'simple')}[m[41m[m
+[32m+[m[32m              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shadow-sm hover:shadow-md transition-all duration-200 ${[m[41m[m
+[32m+[m[32m                ragType === 'agentic'[m[41m[m
+[32m+[m[32m                  ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700'[m[41m[m
+[32m+[m[32m                  : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'[m[41m[m
+[32m+[m[32m              }`}[m[41m[m
+[32m+[m[32m              title={`تغییر به حالت ${ragType === 'simple' ? 'هوشمند' : 'ساده'}`}[m[41m[m
+[32m+[m[32m            >[m[41m[m
+[32m+[m[32m              <span className="text-xs font-medium">حالت:</span>[m[41m[m
+[32m+[m[32m              <span className="text-sm font-semibold">[m[41m[m
+                 {getRagTypeLabel(ragType)}[m
+               </span>[m
+[31m-            </div>[m
+[32m+[m[32m              {isThinking && ([m[41m[m
+[32m+[m[32m                <div className="flex items-center gap-1 ml-2">[m[41m[m
+[32m+[m[32m                  <div className="flex gap-1">[m[41m[m
+[32m+[m[32m                    <div className="w-1.5 h-1.5 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>[m[41m[m
+[32m+[m[32m                    <div className="w-1.5 h-1.5 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>[m[41m[m
+[32m+[m[32m                    <div className="w-1.5 h-1.5 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>[m[41m[m
+[32m+[m[32m                  </div>[m[41m[m
+[32m+[m[32m                  <span className="text-xs">در حال فکر کردن...</span>[m[41m[m
+[32m+[m[32m                </div>[m[41m[m
+[32m+[m[32m              )}[m[41m[m
+[32m+[m[32m            </button>[m[41m[m
+             <div className="flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg border border-purple-100 shadow-sm hover:shadow-md transition-shadow duration-200">[m
+               <span className="text-xs text-gray-500 font-medium">دما:</span>[m
+               <span className="text-sm font-semibold text-purple-700">[m
+[1mdiff --git a/sally-frontend/src/components/chat/MessageBubble.tsx b/sally-frontend/src/components/chat/MessageBubble.tsx[m
+[1mindex 7ab71a6..15df25f 100644[m
+[1m--- a/sally-frontend/src/components/chat/MessageBubble.tsx[m
+[1m+++ b/sally-frontend/src/components/chat/MessageBubble.tsx[m
+[36m@@ -1,5 +1,5 @@[m
+[31m-import React from 'react'[m
+[31m-import { User, Copy, Check, RotateCcw, AlertCircle, Sparkles } from 'lucide-react'[m
+[32m+[m[32mimport React, { useState, useEffect } from 'react'[m[41m[m
+[32m+[m[32mimport { User, Copy, Check, RotateCcw, AlertCircle, Sparkles, Brain, ChevronDown, ChevronRight } from 'lucide-react'[m[41m[m
+ import { Button } from '../ui/button'[m
+ import { MarkdownRenderer } from '../ui/markdown-renderer'[m
+ import { Message } from '../../types/chat'[m
+[36m@@ -29,8 +29,7 @@[m [mconst MessageBubble: React.FC<MessageBubbleProps> = React.memo(({[m
+   isLoading = false[m
+ }) => {[m
+   const { play } = useAudio(meowSound)[m
+[31m-[m
+[31m-  // متغیرهای state مربوط به نمایش بیشتر حذف شدند[m
+[32m+[m[32m  const [isThinkingExpanded, setIsThinkingExpanded] = useState(false)[m[41m[m
+ [m
+   const handleAvatarClick = () => {[m
+     if (!isUser) {[m
+[36m@@ -63,28 +62,90 @@[m [mconst MessageBubble: React.FC<MessageBubbleProps> = React.memo(({[m
+   }[m
+ [m
+   const formatTime = (date: Date) => {[m
+[31m-    return new Intl.DateTimeFormat('fa-IR', {[m
+[31m-      hour: '2-digit',[m
+[31m-      minute: '2-digit'[m
+[31m-    }).format(date)[m
+[32m+[m[32m    try {[m[41m[m
+[32m+[m[32m      return new Intl.DateTimeFormat('fa-IR', {[m[41m[m
+[32m+[m[32m        hour: '2-digit',[m[41m[m
+[32m+[m[32m        minute: '2-digit'[m[41m[m
+[32m+[m[32m      }).format(date)[m[41m[m
+[32m+[m[32m    } catch (e) {[m[41m[m
+[32m+[m[32m      return ''[m[41m[m
+[32m+[m[32m    }[m[41m[m
+   }[m
+ [m
+   const getRagTypeLabel = (type?: string) => {[m
+[31m-    switch (type) {[m
+[32m+[m[32m    if (!type) return 'ساده'[m[41m[m
+[32m+[m[32m    const lowerType = type.toLowerCase()[m[41m[m
+[32m+[m[32m    switch (lowerType) {[m[41m[m
+       case 'simple':[m
+         return 'ساده'[m
+       case 'agentic':[m
+         return 'عامل'[m
+       default:[m
+[31m-        return type || 'ساده'[m
+[32m+[m[32m        return type[m[41m[m
+     }[m
+   }[m
+ [m
+   const isUser = message.role === 'user'[m
+   const isFailed = message.is_failed[m
+[32m+[m[32m  const displayContent = message.content || ''[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m  // --- اصلاح مهم: استخراج هوشمندتر بخش تفکر ---[m[41m[m
+[32m+[m[32m  const extractThinkingContent = (content: string) => {[m[41m[m
+[32m+[m[32m    if (!content) return { thinkingContent: null, cleanContent: '' }[m[41m[m
+ [m
+[31m-  // تغییر مهم: همیشه کل محتوا نمایش داده می‌شود و برشی (slice) وجود ندارد[m
+[31m-  const displayContent = message.content[m
+[32m+[m[32m    // 1. پشتیبانی از هر دو تگ <thinking> و <think> (چون برخی مدل‌ها دومی را می‌فرستند)[m[41m[m
+[32m+[m[32m    // 2. فلگ s باعث می‌شود نقطه شامل خط جدید هم بشود (dotAll) اما در JS قدیمی پشتیبانی نمی‌شود[m[41m[m
+[32m+[m[32m    // بنابراین از [\s\S] استفاده می‌کنیم که همه کاراکترها را می‌گیرد[m[41m[m
+[32m+[m[32m    const thinkingRegex = /<(?:thinking|think)>([\s\S]*?)<\/(?:thinking|think)>/gi[m[41m[m
+[32m+[m[41m    [m
+[32m+[m[32m    const thinkingMatches: string[] = [][m[41m[m
+[32m+[m[32m    let match[m[41m[m
+[32m+[m[41m    [m
+[32m+[m[32m    // کپی محتوا برای حذف تگ‌ها[m[41m[m
+[32m+[m[32m    let cleanContent = content[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m    while ((match = thinkingRegex.exec(content)) !== null) {[m[41m[m
+[32m+[m[32m      if (match[1] && match[1].trim()) {[m[41m[m
+[32m+[m[32m        thinkingMatches.push(match[1].trim())[m[41m[m
+[32m+[m[32m      }[m[41m[m
+[32m+[m[32m    }[m[41m
