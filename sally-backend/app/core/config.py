@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     kb_git_branch: str = "main"
     kb_sync_interval: int = 300
 
+    # 🌐 Browser Use Cloud Configuration
+    browser_use_api_key: Optional[str] = None  # API key برای Browser Use Cloud
+    browser_use_cloud_enabled: bool = False  # استفاده از Browser Use Cloud (توصیه می‌شود در Windows)
+    
+    # 🔗 Browser CDP Configuration (برای اتصال به مرورگر موجود)
+    browser_cdp_url: Optional[str] = None  # CDP endpoint (مثلاً: ws://127.0.0.1:9222)
+    browser_use_existing: bool = False  # استفاده از مرورگر موجود (اگر True باشد، از browser_cdp_url استفاده می‌کند)
+    
     # Legacy fields for backward compatibility
     api_key: Optional[str] = None
     model: Optional[str] = None
@@ -147,6 +155,16 @@ class Settings(BaseSettings):
     def embedder_model_loaded(self) -> str:
         import os
         return self.embedder_model or os.getenv("EMBEDDER_MODEL")
+    
+    @property
+    def browser_cdp_url_loaded(self) -> Optional[str]:
+        import os
+        return self.browser_cdp_url or os.getenv("BROWSER_CDP_URL")
+    
+    @property
+    def browser_use_api_key_loaded(self) -> Optional[str]:
+        import os
+        return self.browser_use_api_key or os.getenv("BROWSER_USE_API_KEY")
         
     @property
     def ollama_url_loaded(self) -> Optional[str]:

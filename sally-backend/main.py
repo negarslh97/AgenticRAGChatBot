@@ -114,6 +114,7 @@ from app.api.routes.upload import router as upload_router
 from app.api.routes.categories import router as categories_router
 from app.api.routes.system_routes import router as system_router
 from app.api.routes.super_admin_reindex import router as reindex_router
+from app.api.routes.browser_automation import router as browser_automation_router
 
 app = FastAPI(
     title="Sally Chat Bot API",
@@ -168,6 +169,9 @@ app.include_router(upload_router, prefix="/api/super-admin", tags=["👑 Super A
 app.include_router(categories_router, prefix="/api/super-admin/categories", tags=["👑 Super Admin Categories"])
 app.include_router(reindex_router, prefix="/api/super-admin", tags=["👑 Super Admin Re-indexing"])
 app.include_router(system_router, prefix="/api/system", tags=["🔧 System Monitoring"])
+
+# --- BROWSER AUTOMATION ROUTES (Available to all authenticated users) ---
+app.include_router(browser_automation_router, prefix="/api", tags=["🌐 Browser Automation"])
 
 # ============================================================================
 
