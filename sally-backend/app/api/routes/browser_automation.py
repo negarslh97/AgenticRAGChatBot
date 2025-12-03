@@ -64,6 +64,8 @@ class AgenticAdminRequest(BaseModel):
     login_email: str = Field(..., description="ایمیل برای لاگین")
     login_password: str = Field(..., description="رمز عبور برای لاگین")
     url: str = Field("http://localhost:3000/super-admin", description="URL پنل ادمین")
+    cdp_url: Optional[str] = Field(None, description="آدرس CDP برای اتصال به مرورگر موجود (مثلاً: http://127.0.0.1:9222)")
+    use_current_page: bool = Field(False, description="استفاده از صفحه فعلی بدون باز کردن browser جدید")
 
 
 class NaturalLanguageRequest(BaseModel):
@@ -72,6 +74,8 @@ class NaturalLanguageRequest(BaseModel):
     login_email: Optional[str] = Field(None, description="ایمیل برای لاگین (اختیاری)")
     login_password: Optional[str] = Field(None, description="رمز عبور برای لاگین (اختیاری)")
     url: str = Field("http://localhost:3000/super-admin", description="URL پنل ادمین")
+    cdp_url: Optional[str] = Field(None, description="آدرس CDP برای اتصال به مرورگر موجود (مثلاً: http://127.0.0.1:9222)")
+    use_current_page: bool = Field(False, description="استفاده از صفحه فعلی بدون باز کردن browser جدید")
 
 
 # =============== API ENDPOINTS ===============
@@ -280,7 +284,9 @@ async def agentic_create_admin(
             admin_role=request.admin_role,
             login_email=request.login_email,
             login_password=request.login_password,
-            url=request.url
+            url=request.url,
+            cdp_url=request.cdp_url,
+            use_current_page=request.use_current_page
         )
         
         if not result.success:
@@ -510,7 +516,9 @@ Return ONLY the JSON, no explanations.
                 admin_role=admin_data.get("admin_role", "Admin"),
                 login_email=login_email,
                 login_password=login_password,
-                url=admin_panel_url
+                url=admin_panel_url,
+                cdp_url=request.cdp_url,
+                use_current_page=request.use_current_page
             )
             
             # تبدیل AgenticPlaywrightResult به BrowserTaskResult

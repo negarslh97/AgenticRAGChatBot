@@ -70,13 +70,14 @@ const SallyFloatingAgent: React.FC<SallyFloatingAgentProps> = ({ className }) =>
     setShowResult(false);
 
     try {
-      // Agent یک browser جدید باز می‌کند و خودش لاگین می‌کند
-      // این روش پایدارتر از CDP connection است
+      // استفاده از CDP برای کار در همان صفحه فعلی (بدون باز کردن browser جدید)
+      // اگر CDP در دسترس نباشد، به روش قبلی (browser جدید) fallback می‌کند
       const response = await browserAutomationService.executeAgentCommand({
         task: command.trim(),
         max_steps: 30,
         url: "http://localhost:3000/super-admin", // URL پنل ادمین
-        // بدون CDP - agent خودش browser جدید باز می‌کند و لاگین می‌کند
+        cdp_url: "http://127.0.0.1:9222", // اتصال به Chrome موجود
+        use_current_page: true, // استفاده از صفحه فعلی
       });
 
       if (response.success) {

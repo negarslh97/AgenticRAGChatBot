@@ -1990,7 +1990,9 @@ CRITICAL REQUIREMENTS:
         login_password: str,
         admin_full_name: str = "test",
         admin_role: str = "Admin",
-        url: str = "http://localhost:3000/super-admin"
+        url: str = "http://localhost:3000/super-admin",
+        cdp_url: Optional[str] = None,  # 👈 جدید: آدرس CDP برای اتصال به browser موجود
+        use_current_page: bool = False   # �� جدید: استفاده از صفحه فعلی
     ) -> AgenticPlaywrightResult:
         """
         ساخت ادمین با استفاده از Agentic AI
@@ -2015,12 +2017,14 @@ CRITICAL REQUIREMENTS:
                 login_password,
                 admin_full_name,
                 admin_role,
-                url
+                url,
+                cdp_url,
+                use_current_page
             )
         else:
             return await self._create_admin_internal(
                 admin_email, admin_password, login_email, login_password,
-                admin_full_name, admin_role, url
+                admin_full_name, admin_role, url, cdp_url, use_current_page
             )
     
     async def _create_admin_internal(
@@ -2031,30 +2035,87 @@ CRITICAL REQUIREMENTS:
         login_password: str,
         admin_full_name: str = "test",
         admin_role: str = "Admin",
-        url: str = "http://localhost:3000/super-admin"
+        url: str = "http://localhost:3000/super-admin",
+        cdp_url: Optional[str] = None,  # 👈 جدید: آدرس CDP برای اتصال به browser موجود
+        use_current_page: bool = False   # �� جدید: استفاده از صفحه فعلی
     ) -> AgenticPlaywrightResult:
-        """
-        اجرای داخلی create_admin (بدون مدیریت Windows)
-        """
+        """ساخت ادمین - نسخه internal async"""
         steps_taken = []
         screenshots = []
         browser = None
         page = None
+        should_close_browser = True  # آیا باید browser را ببندیم؟
         
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=False)
-                page = await browser.new_page()
+                # ====== اتصال به browser موجود یا ایجاد browser جدید ======
+                if cdp_url or use_current_page:
+                    # اتصال به browser موجود از طریق CDP
+                    actual_cdp_url = cdp_url or "http://127.0.0.1:9222"
+                    logger.info(f"🔗 Connecting to existing browser at: {actual_cdp_url}")
+                    
+                    try:
+                        browser = await p.chromium.connect_over_cdp(actual_cdp_url)
+                        should_close_browser = False  # browser موجود را نبند
+                        logger.info("✅ Connected to existing browser")
+                        
+                        # گرفتن context و page موجود
+                        contexts = browser.contexts
+                        if contexts:
+                            context = contexts[0]
+                            pages = context.pages
+                            
+                            if use_current_page and pages:
+                                # استفاده از صفحه فعلی (آخرین صفحه یا صفحه‌ای که URL مورد نظر را دارد)
+                                page = None
+                                for p_candidate in pages:
+                                    if url in p_candidate.url or "localhost:3000" in p_candidate.url:
+                                        page = p_candidate
+                                        logger.info(f"✅ Found existing page with URL: {p_candidate.url}")
+                                        break
+                                
+                                if not page:
+                                    # اگر صفحه با URL مورد نظر پیدا نشد، از آخرین صفحه استفاده کن
+                                    page = pages[-1]
+                                    logger.info(f"📄 Using last open page: {page.url}")
+                            else:
+                                # اگر use_current_page=False، صفحه جدید باز کن
+                                page = await context.new_page()
+                                logger.info("📄 Created new page in existing browser")
+                        else:
+                            # اگر context نداشت، یک context و page جدید بساز
+                            context = await browser.new_context()
+                            page = await context.new_page()
+                            logger.info("📄 Created new context and page")
+                            
+                    except Exception as cdp_error:
+                        logger.warning(f"⚠️ Could not connect to existing browser: {cdp_error}")
+                        logger.info("🌐 Falling back to launching new browser...")
+                        browser = await p.chromium.launch(headless=False)
+                        page = await browser.new_page()
+                        should_close_browser = True
+                else:
+                    # ایجاد browser جدید (رفتار قبلی)
+                    browser = await p.chromium.launch(headless=False)
+                    page = await browser.new_page()
+                    should_close_browser = True
                 
-                # ابتدا navigate به URL (قبل از شروع loop)
-                logger.info(f"🌐 Navigating to {url} first...")
-                try:
-                    await page.goto(url)
+                # ====== ادامه کد قبلی ======
+                # اگر use_current_page نیست، به URL برو
+                if not use_current_page:
+                    logger.info(f"�� Navigating to {url} first...")
+                    try:
+                        await page.goto(url)
+                        await page.wait_for_load_state('networkidle')
+                        await asyncio.sleep(2)
+                        logger.info("✅ Initial navigation completed")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Initial navigation failed: {e}")
+                else:
+                    logger.info(f"�� Using current page at: {page.url}")
+                    # فقط صبر کن تا صفحه کامل لود شود
                     await page.wait_for_load_state('networkidle')
-                    await asyncio.sleep(2)
-                    logger.info("✅ Initial navigation completed")
-                except Exception as e:
-                    logger.warning(f"⚠️ Initial navigation failed: {e}")
+                    await asyncio.sleep(1)
                 
                 # Task description برای AI
                 task_description = f"""
