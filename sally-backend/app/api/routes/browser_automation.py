@@ -13,6 +13,7 @@ from app.services.browser_automation_service import (
     browser_automation_service,
     BrowserTaskResult
 )
+from app.services.playwright_service import playwright_service
 from app.core.permissions import get_current_admin, get_optional_admin, get_optional_customer
 from app.domain.entities import Admin, Customer
 from app.core.logging_config import get_logger
@@ -282,29 +283,59 @@ async def execute_agent_command(
         # اگر use_current_page=True باشد، لاگین انجام نمی‌شود (کاربر قبلاً لاگین کرده)
         should_login = not request.use_current_page
         
-        result = await browser_automation_service.execute_task(
-            task_description=enhanced_task,
-            url=admin_panel_url,
-            max_steps=request.max_steps or 30,
-            cdp_url=request.cdp_url,
-            use_current_page=request.use_current_page,
-            login_email=login_email if should_login else None,
-            login_password=login_password if should_login else None,
-        )
+        # استفاده از Playwright service برای ساخت ادمین
+        if "create admin" in request.task.lower() or "ساخت ادمین" in request.task:
+            logger.info("🎭 Using Playwright service for admin creation")
+            result = await playwright_service.create_admin(
+                admin_email="ad@sally.com",  # این مقادیر باید از درخواست استخراج شوند
+                admin_password="0147",
+                admin_full_name="New Admin",
+                admin_role="Admin",
+                login_email=login_email,
+                login_password=login_password,
+                url=admin_panel_url
+            )
+            
+            # تبدیل PlaywrightResult به BrowserTaskResult
+            if result.success:
+                browser_result = BrowserTaskResult(
+                    success=True,
+                    result=result.result,
+                    execution_time=0.0,
+                    metadata={"service": "playwright"}
+                )
+            else:
+                browser_result = BrowserTaskResult(
+                    success=False,
+                    error=result.error,
+                    execution_time=0.0
+                )
+        else:
+            # استفاده از browser-use برای وظایف دیگر
+            result = await browser_automation_service.execute_task(
+                task_description=enhanced_task,
+                url=admin_panel_url,
+                max_steps=request.max_steps or 30,
+                cdp_url=request.cdp_url,
+                use_current_page=request.use_current_page,
+                login_email=login_email if should_login else None,
+                login_password=login_password if should_login else None,
+            )
+            browser_result = result
         
-        if not result.success:
+        if not browser_result.success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Agent execution failed: {result.error}"
+                detail=f"Agent execution failed: {browser_result.error}"
             )
         
         return BrowserTaskResponse(
-            success=result.success,
-            result=result.result,
-            error=result.error,
-            execution_time=result.execution_time,
+            success=browser_result.success,
+            result=browser_result.result,
+            error=browser_result.error,
+            execution_time=browser_result.execution_time,
             metadata={
-                **result.metadata,
+                **(browser_result.metadata or {}),
                 "executed_by": current_admin.email,
                 "admin_role": current_admin.role_name or "Admin"
             }

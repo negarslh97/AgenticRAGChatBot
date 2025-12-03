@@ -103,7 +103,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     localStorage.setItem("token", response.access_token)
     setUser(response.user)
     setUserType(response.user_type)
-    console.log("AuthContext login: Setting userType to:", response.user_type)
     return { user: response.user }
   }
 
