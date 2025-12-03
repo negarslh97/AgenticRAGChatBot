@@ -121,10 +121,10 @@ async def test_with_custom_settings():
         result = await service.create_admin(
             admin_email="custom_test@example.com",
             admin_password="custom123",
-            login_email="xtra_admin@sally.com",
-            login_password="123456",
             admin_full_name="Custom Test",
             admin_role="Admin",
+            login_email="xtra_admin@sally.com",
+            login_password="123456",
             url="http://localhost:3000/super-admin"
         )
         

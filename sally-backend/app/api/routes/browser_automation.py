@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 import asyncio
+import json
+import re
 
 from app.services.browser_automation_service import (
     browser_automation_service,
@@ -15,6 +17,7 @@ from app.services.browser_automation_service import (
 )
 from app.services.playwright_service import playwright_service
 from app.services.agentic_playwright_service import agentic_playwright_service
+from app.services.model_service import ModelService
 from app.core.permissions import get_current_admin, get_optional_admin, get_optional_customer
 from app.domain.entities import Admin, Customer
 from app.core.logging_config import get_logger
@@ -60,6 +63,14 @@ class AgenticAdminRequest(BaseModel):
     admin_role: str = Field("Admin", description="نقش ادمین")
     login_email: str = Field(..., description="ایمیل برای لاگین")
     login_password: str = Field(..., description="رمز عبور برای لاگین")
+    url: str = Field("http://localhost:3000/super-admin", description="URL پنل ادمین")
+
+
+class NaturalLanguageRequest(BaseModel):
+    """درخواست اجرای دستور زبان طبیعی"""
+    command: str = Field(..., min_length=1, description="دستور زبان طبیعی (مثلاً: 'ایجاد ادمین جدید با ایمیل test@example.com')")
+    login_email: Optional[str] = Field(None, description="ایمیل برای لاگین (اختیاری)")
+    login_password: Optional[str] = Field(None, description="رمز عبور برای لاگین (اختیاری)")
     url: str = Field("http://localhost:3000/super-admin", description="URL پنل ادمین")
 
 
@@ -386,68 +397,142 @@ async def execute_agent_command(
         # اگر use_current_page=True باشد، لاگین انجام نمی‌شود (کاربر قبلاً لاگین کرده)
         should_login = not request.use_current_page
         
-        # استفاده از Playwright service برای ساخت ادمین
-        if "create admin" in request.task.lower() or "ساخت ادمین" in request.task:
-            # بررسی اینکه آیا از agentic mode استفاده کنیم
-            use_agentic = "agentic" in request.task.lower() or "ai" in request.task.lower()
+        # بررسی اینکه آیا task مربوط به ساخت ادمین است (فارسی یا انگلیسی)
+        task_lower = request.task.lower()
+        task_original = request.task  # برای چک کردن فارسی
+        
+        # چک کردن الگوهای مختلف فارسی و انگلیسی
+        is_create_admin = (
+            "create admin" in task_lower or 
+            "create new admin" in task_lower or
+            "add admin" in task_lower or
+            "add new admin" in task_lower or
+            "ساخت ادمین" in task_original or 
+            "ایجاد ادمین" in task_original or
+            "ایجاد یه ادمین" in task_original or
+            "ایجاد یک ادمین" in task_original or
+            "افزودن ادمین" in task_original or
+            "افزودن ادمین جدید" in task_original or
+            ("ایجاد" in task_original and "ادمین" in task_original) or
+            ("ساخت" in task_original and "ادمین" in task_original)
+        )
+        
+        # لاگ برای دیباگ
+        logger.info(f"🔍 Task analysis:")
+        logger.info(f"   Task (first 200 chars): {request.task[:200]}")
+        logger.info(f"   Task lower: {task_lower[:200]}")
+        logger.info(f"   Contains 'ایجاد': {'ایجاد' in task_original}")
+        logger.info(f"   Contains 'ادمین': {'ادمین' in task_original}")
+        logger.info(f"   Contains 'create admin': {'create admin' in task_lower}")
+        logger.info(f"   is_create_admin: {is_create_admin}")
+        
+        # اگر task مربوط به ساخت ادمین است، از agentic_playwright_service استفاده کن
+        if is_create_admin:
+            logger.info("🤖 Detected admin creation task, using Agentic Playwright service")
             
-            if use_agentic:
-                logger.info("🤖 Using Agentic Playwright service for admin creation")
-                result = await agentic_playwright_service.create_admin(
-                    admin_email="ad@sally.com",  # این مقادیر باید از درخواست استخراج شوند
-                    admin_password="0147",
-                    admin_full_name="New Admin",
-                    admin_role="Admin",
-                    login_email=login_email,
-                    login_password=login_password,
-                    url=admin_panel_url
+            # استخراج اطلاعات از دستور زبان طبیعی با LLM
+            try:
+                model_service = ModelService()
+                llm = model_service.get_model(
+                    model_name="google/gemini-2.5-flash",
+                    temperature=0.1,
+                    max_tokens=500
                 )
                 
-                # تبدیل AgenticPlaywrightResult به BrowserTaskResult
-                if result.success:
-                    browser_result = BrowserTaskResult(
-                        success=True,
-                        result=result.result,
-                        execution_time=0.0,
-                        metadata={
-                            "service": "agentic_playwright",
-                            "steps_taken": len(result.steps_taken) if result.steps_taken else 0,
-                            "screenshots": len(result.screenshots) if result.screenshots else 0
-                        }
-                    )
+                extraction_prompt = f"""
+Extract admin creation details from this command (Persian or English):
+{request.task}
+
+Extract and return ONLY a JSON object with these fields:
+- admin_email: email address
+- admin_password: password
+- admin_full_name: full name (default: "test" if not provided)
+- admin_role: role (default: "Admin" if not provided)
+
+Example response:
+{{"admin_email": "test@example.com", "admin_password": "123456", "admin_full_name": "Test User", "admin_role": "Admin"}}
+
+Return ONLY the JSON, no explanations.
+"""
+                
+                from langchain_core.messages import HumanMessage
+                human_message = HumanMessage(content=extraction_prompt)
+                
+                if hasattr(llm, 'ainvoke'):
+                    response = await llm.ainvoke([human_message])
+                elif hasattr(llm, 'invoke'):
+                    response = await asyncio.to_thread(llm.invoke, [human_message])
                 else:
-                    browser_result = BrowserTaskResult(
-                        success=False,
-                        error=result.error,
-                        execution_time=0.0,
-                        metadata={"service": "agentic_playwright"}
-                    )
+                    raise Exception("LLM model not supported")
+                
+                response_text = response.content if hasattr(response, 'content') else str(response)
+                response_text = response_text.strip()
+                
+                # استخراج JSON از پاسخ (با پشتیبانی از nested braces)
+                # روش 1: اگر پاسخ JSON خالص است
+                if response_text.strip().startswith('{'):
+                    try:
+                        admin_data = json.loads(response_text)
+                    except:
+                        # روش 2: پیدا کردن JSON با regex پیشرفته‌تر
+                        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+                        json_matches = re.findall(json_pattern, response_text, re.DOTALL)
+                        if json_matches:
+                            admin_data = json.loads(max(json_matches, key=len))
+                        else:
+                            raise ValueError("No JSON found in response")
+                else:
+                    # روش 3: پیدا کردن JSON در متن
+                    json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+                    json_matches = re.findall(json_pattern, response_text, re.DOTALL)
+                    if json_matches:
+                        admin_data = json.loads(max(json_matches, key=len))
+                    else:
+                        raise ValueError("No JSON found in response")
+                
+                logger.info(f"📝 Extracted admin data: {admin_data}")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to extract admin data from command: {e}, using defaults")
+                # Fallback: استفاده از مقادیر پیش‌فرض
+                admin_data = {
+                    "admin_email": "test@example.com",
+                    "admin_password": "123456",
+                    "admin_full_name": "Test Admin",
+                    "admin_role": "Admin"
+                }
+            
+            # استفاده از agentic_playwright_service (همیشه برای دقت بالاتر)
+            result = await agentic_playwright_service.create_admin(
+                admin_email=admin_data.get("admin_email", "test@example.com"),
+                admin_password=admin_data.get("admin_password", "123456"),
+                admin_full_name=admin_data.get("admin_full_name", "Test Admin"),
+                admin_role=admin_data.get("admin_role", "Admin"),
+                login_email=login_email,
+                login_password=login_password,
+                url=admin_panel_url
+            )
+            
+            # تبدیل AgenticPlaywrightResult به BrowserTaskResult
+            if result.success:
+                browser_result = BrowserTaskResult(
+                    success=True,
+                    result=result.result,
+                    execution_time=0.0,
+                    metadata={
+                        "service": "agentic_playwright",
+                        "steps_taken": len(result.steps_taken) if result.steps_taken else 0,
+                        "screenshots": len(result.screenshots) if result.screenshots else 0,
+                        "extracted_data": admin_data
+                    }
+                )
             else:
-                logger.info("🎭 Using standard Playwright service for admin creation")
-                result = await playwright_service.create_admin(
-                    admin_email="ad@sally.com",  # این مقادیر باید از درخواست استخراج شوند
-                    admin_password="0147",
-                    admin_full_name="New Admin",
-                    admin_role="Admin",
-                    login_email=login_email,
-                    login_password=login_password,
-                    url=admin_panel_url
+                browser_result = BrowserTaskResult(
+                    success=False,
+                    error=result.error,
+                    execution_time=0.0,
+                    metadata={"service": "agentic_playwright"}
                 )
-                
-                # تبدیل PlaywrightResult به BrowserTaskResult
-                if result.success:
-                    browser_result = BrowserTaskResult(
-                        success=True,
-                        result=result.result,
-                        execution_time=0.0,
-                        metadata={"service": "playwright"}
-                    )
-                else:
-                    browser_result = BrowserTaskResult(
-                        success=False,
-                        error=result.error,
-                        execution_time=0.0
-                    )
         else:
             # استفاده از browser-use برای وظایف دیگر
             result = await browser_automation_service.execute_task(
@@ -486,4 +571,154 @@ async def execute_agent_command(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"خطا در اجرای دستور agent: {str(e)}"
+        )
+
+
+@router.post("/natural-language", response_model=BrowserTaskResponse, status_code=status.HTTP_200_OK)
+async def execute_natural_language_command(
+    request: NaturalLanguageRequest,
+    current_admin: Optional[Admin] = Depends(get_optional_admin)
+):
+    """
+    🤖 اجرای دستور زبان طبیعی با استفاده از Agentic AI
+    
+    این endpoint دستورات زبان طبیعی را می‌گیرد و با استفاده از LLM آن‌ها را به task description تبدیل می‌کند.
+    سپس از Vision AI برای اجرای دقیق task استفاده می‌کند.
+    
+    **مثال دستورات:**
+    - "ایجاد ادمین جدید با ایمیل test@example.com و رمز 123456"
+    - "Create a new admin with email admin@test.com"
+    - "ساخت کاربر جدید"
+    
+    **دسترسی:** Admin و SuperAdmin
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        if not current_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="احراز هویت لازم است"
+            )
+        
+        logger.info(f"💬 Natural language command from {current_admin.email}: {request.command}")
+        
+        # استفاده از LLM برای تبدیل دستور زبان طبیعی به task description
+        model_service = ModelService()
+        
+        # ساخت prompt برای تبدیل دستور زبان طبیعی به task description
+        conversion_prompt = f"""
+You are a task translator. Convert the following natural language command into a detailed, step-by-step task description for browser automation.
+
+User's command (in Persian or English): {request.command}
+
+Context:
+- This is an admin panel at: {request.url}
+- The user needs to login first (if credentials provided)
+- After login, execute the command
+
+Convert this command into a detailed task description that includes:
+1. Login steps (if credentials provided)
+2. Navigation steps
+3. Form filling steps (if needed)
+4. Submission steps
+5. Verification steps
+
+Respond ONLY with the task description in English, no explanations, no markdown.
+
+Example:
+If command is "ایجاد ادمین جدید با ایمیل test@example.com و رمز 123456"
+Task description should be:
+"Create a new admin user with the following details:
+- Email: test@example.com
+- Password: 123456
+- Full Name: (use default or ask user)
+- Role: Admin
+
+You need to:
+1. Navigate to {request.url}
+2. Login with email: {request.login_email or 'provided credentials'} and password: {request.login_password or 'provided password'}
+3. Navigate to admin management section
+4. Click 'Add New Admin' button
+5. Fill in the form with the admin details above
+6. Select the role: Admin
+7. Submit the form
+8. Verify success"
+"""
+        
+        # استفاده از LLM برای تبدیل
+        try:
+            llm = model_service.get_model(
+                model_name="google/gemini-2.5-flash",  # استفاده از مدل سریع
+                temperature=0.1,
+                max_tokens=1000
+            )
+            
+            from langchain_core.messages import HumanMessage
+            human_message = HumanMessage(content=conversion_prompt)
+            
+            if hasattr(llm, 'ainvoke'):
+                response = await llm.ainvoke([human_message])
+            elif hasattr(llm, 'invoke'):
+                response = await asyncio.to_thread(llm.invoke, [human_message])
+            else:
+                raise Exception("LLM model not supported")
+            
+            task_description = response.content if hasattr(response, 'content') else str(response)
+            task_description = task_description.strip()
+            
+            logger.info(f"📝 Converted task description: {task_description[:200]}...")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ LLM conversion failed: {e}, using direct command")
+            # Fallback: استفاده مستقیم از command
+            task_description = f"""
+Execute the following command in the admin panel:
+{request.command}
+
+Steps:
+1. Navigate to {request.url}
+2. Login (if credentials provided)
+3. Execute the command: {request.command}
+4. Verify success
+"""
+        
+        # اجرای task با agentic_playwright_service
+        result = await agentic_playwright_service.execute_task(
+            task_description=task_description,
+            login_email=request.login_email,
+            login_password=request.login_password,
+            url=request.url
+        )
+        
+        execution_time = time.time() - start_time
+        
+        if not result.success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result.error or "Task execution failed"
+            )
+        
+        return BrowserTaskResponse(
+            success=result.success,
+            result=result.result,
+            error=result.error,
+            execution_time=execution_time,
+            metadata={
+                "service": "agentic_playwright_natural_language",
+                "steps_taken": len(result.steps_taken) if result.steps_taken else 0,
+                "screenshots": len(result.screenshots) if result.screenshots else 0,
+                "original_command": request.command,
+                "converted_task": task_description[:500]
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error in natural language command execution: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"خطا در اجرای دستور زبان طبیعی: {str(e)}"
         )
